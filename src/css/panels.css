@@ -42,14 +42,21 @@
 .thumb-hidden-badge .icon { width: 16px; height: 16px; }
 
 /* ---- Canvas (centre) ---- */
+/*
+ * The slide is centred with margin: auto rather than justify-content: center,
+ * because a zoomed slide larger than the area would otherwise be cut off on the
+ * left/top where it cannot be scrolled to.
+ */
 #canvas-area {
     flex: 1;
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
     min-height: 0;
-    overflow: hidden;
+    padding: 32px;
+    overflow: auto;
     background: var(--canvas-bg);
 }
-#canvas-stage-box { position: relative; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); background: #fff; }
+#canvas-area > #welcome { margin: auto; }
+#canvas-stage-box { position: relative; flex: none; margin: auto; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); background: #fff; }
 #canvas-stage {
     position: absolute; left: 0; top: 0;
     width: 1280px; height: 720px;          /* the real slide size; canvas.js scales it */
@@ -145,6 +152,15 @@
 .format-tip { margin: 10px 0 0; font-size: 12px; }
 
 /* ---- Status bar (bottom) ---- */
+#zoom-controls { display: flex; align-items: center; gap: 4px; }
+#zoom-slider { width: 110px; accent-color: var(--accent); }
+#zoom-percent { min-width: 40px; text-align: right; }
+.zoom-button {
+    min-width: 22px; padding: 1px 6px;
+    border: 1px solid transparent; border-radius: 3px; background: none; cursor: pointer;
+}
+.zoom-button:hover { border-color: var(--border); background: var(--surface); }
+.zoom-button.active { border-color: var(--accent); color: var(--accent); }
 #statusbar {
     flex: none;
     display: flex; align-items: center; gap: 18px;

@@ -91,7 +91,14 @@
 <footer id="statusbar">
     <span id="status-slide"></span>
     <span id="status-message"></span>
-    <span id="status-zoom"></span>
+    <!-- Zoom (canvas.js): hidden until a deck is open. -->
+    <div id="zoom-controls" hidden>
+        <button type="button" id="zoom-fit" class="zoom-button" title="Fit slide to window">Fit</button>
+        <button type="button" id="zoom-out" class="zoom-button" title="Zoom out (Ctrl+mouse wheel)" aria-label="Zoom out">−</button>
+        <input type="range" id="zoom-slider" min="50" max="400" step="1" value="100" aria-label="Zoom">
+        <button type="button" id="zoom-in" class="zoom-button" title="Zoom in (Ctrl+mouse wheel)" aria-label="Zoom in">+</button>
+        <span id="zoom-percent"></span>
+    </div>
 </footer>
 
 <input type="file" id="file-input" accept=".html,.htm,text/html" hidden>

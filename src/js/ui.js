@@ -4,8 +4,9 @@
  *
  * It mostly listens to events and updates text; it never changes the deck.
  *
- * Talks to: events (deck-loaded, slide-changed, history-changed, saved,
- *           zoom-changed), deck.js, fileio.js (window title), commands.js.
+ * Talks to: events (deck-loaded, slide-changed, history-changed, saved),
+ *           deck.js, fileio.js (window title), commands.js. (The zoom controls
+ *           in the status bar belong to canvas.js.)
  */
 
 (function () {
@@ -20,7 +21,7 @@
     }
 
     App.ui.init = function init() {
-        ['title-file', 'title-dirty', 'status-slide', 'status-message', 'status-zoom', 'notes-text',
+        ['title-file', 'title-dirty', 'status-slide', 'status-message', 'notes-text',
          'welcome', 'canvas-stage-box', 'drop-zone', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
@@ -40,9 +41,6 @@
             updateSlideInfo();
         });
         App.events.on('saved', App.ui.updateTitle);
-        App.events.on('zoom-changed', (info) => {
-            nodes['status-zoom'].textContent = App.state.hasDeck ? Math.round(info.zoom * 100) + '%' : '';
-        });
     };
 
     // Save / Undo / Redo in the title bar, like PowerPoint's Quick Access Toolbar.

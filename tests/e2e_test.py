@@ -633,6 +633,86 @@ def test_format_pane_and_context_menu(browser):
     editor.close()
 
 
+def test_zoom(browser):
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    editor.close_dialog_if_open()
+    page = editor.page
+    zoom = lambda: page.evaluate("App.canvas.getZoom()")  # noqa: E731 - tiny local helper
+    fit = zoom()
+    check(page.evaluate("App.canvas.isFit()"), "starts in fit mode")
+    check(page.inner_text("#zoom-percent") == f"{round(fit * 100)}%", "percent shown")
+
+    def slide_point_under(x, y):
+        return page.evaluate("""([x, y]) => {
+            const r = document.getElementById('overlay').getBoundingClientRect();
+            const z = App.canvas.getZoom();
+            return [(x - r.left) / z, (y - r.top) / z];
+        }""", [x, y])
+
+    def ctrl_wheel(notches):
+        page.keyboard.down("Control")
+        for _ in range(abs(notches)):
+            page.mouse.wheel(0, -100 if notches > 0 else 100)
+        page.keyboard.up("Control")
+
+    # Ctrl+wheel zooms in and leaves fit mode.
+    page.mouse.move(*slide_to_screen(page, 640, 360))
+    ctrl_wheel(2)
+    check(zoom() > fit * 1.15, f"zoomed in: {fit} -> {zoom()}")
+    check(not page.evaluate("App.canvas.isFit()"), "manual zoom after the wheel")
+
+    # Once the slide is larger than the window, Ctrl+wheel zooms around the mouse:
+    # the slide point under it stays put. (While the slide still fits in one
+    # direction, it stays centred in that direction, as in PowerPoint.)
+    page.evaluate("App.canvas.setZoom(1.5)")
+    mouse = slide_to_screen(page, 700, 400)
+    page.mouse.move(*mouse)
+    before = slide_point_under(*mouse)
+    ctrl_wheel(3)
+    check(zoom() == 2, f"three notches from 150%: {zoom()}")
+    after = slide_point_under(*mouse)
+    check(abs(after[0] - before[0]) < 3 and abs(after[1] - before[1]) < 3, f"anchored: {before} -> {after}")
+    check(page.evaluate("document.getElementById('canvas-area').scrollWidth > document.getElementById('canvas-area').clientWidth"),
+          "the zoomed slide scrolls")
+
+    # A plain wheel scrolls instead of zooming.
+    z = zoom()
+    page.mouse.wheel(0, 100)
+    check(zoom() == z, "wheel without Ctrl does not zoom")
+
+    # The slider sets an exact zoom; selection and handles work at any zoom.
+    page.evaluate("""() => { const s = document.getElementById('zoom-slider'); s.value = '200';
+        s.dispatchEvent(new Event('input', { bubbles: true })); }""")
+    check(zoom() == 2 and page.inner_text("#zoom-percent") == "200%", f"slider 200%: {zoom()}")
+    page.evaluate("App.canvas.scrollIntoView({ left: 64, top: 230, width: 1100, height: 120 })")
+    page.mouse.click(*slide_to_screen(page, 614, 290))   # the centre of e2, now in the middle of the view
+    check(page.evaluate("App.selection.selectedId()") == "e2", "click selects at 200%")
+    size = page.evaluate("document.querySelector('.selection-handle').getBoundingClientRect().width")
+    check(8 <= size <= 10, f"handles keep their size on screen: {size}")
+    page.screenshot(path=str(OUTPUT / "15-zoom-200.png"))
+
+    # Limits and buttons: never above 400% or below 50%; Fit goes back to fit mode.
+    for _ in range(30):
+        page.click("#zoom-in")
+    check(zoom() == 4, f"max 400%: {zoom()}")
+    for _ in range(40):
+        page.click("#zoom-out")
+    check(zoom() == 0.5, f"min 50%: {zoom()}")
+    page.click("#zoom-fit")
+    check(page.evaluate("App.canvas.isFit()") and abs(zoom() - fit) < 0.01, "Fit restores the fitted zoom")
+
+    # Fit mode follows the window size; manual zoom does not.
+    page.set_viewport_size({"width": 1100, "height": 700})
+    wait_until(page, f"App.canvas.getZoom() < {fit}")
+    page.evaluate("App.canvas.setZoom(1.5)")
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.wait_for_timeout(200)
+    check(zoom() == 1.5, "manual zoom survives a window resize")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_drag_and_drop_opens_a_deck(browser):
     editor = Editor(browser)
     text = CONTRACT.read_text(encoding="utf-8")
@@ -686,6 +766,7 @@ TESTS = [
     test_select_move_resize,
     test_nudge_delete_clipboard_and_order,
     test_format_pane_and_context_menu,
+    test_zoom,
 ]
 
 

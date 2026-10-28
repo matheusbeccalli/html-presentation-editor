@@ -34,7 +34,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `icons.js` | Inline SVG icons | ribbon, ui, dialogs |
 | `dialogs.js` | `<dialog>`-based alert/confirm and the import report | commands |
 | `deck.js` | Loads the deck into the canvas iframe; current slide; editor-only view CSS | shortcuts, fileio |
-| `canvas.js` | Fit-to-window zoom of the 1280×720 stage; overlay layer for handles | deck |
+| `canvas.js` | Zoom of the 1280×720 stage: fit mode (follows the window) or manual 50–400% (Ctrl+wheel around the mouse, status-bar slider, −/+, Fit); scrolls when zoomed | deck, selection (via `zoom-changed`) |
 | `transform.js` | Pure maths: move/resize a `{left, top, width, height}` box, hit-test, stacking order | — |
 | `selection.js` | The overlay catches mouse actions: click selects, drag moves, handles resize; draws the selection box | transform, history, deck, canvas |
 | `formatpane.js` | Format pane: "Size & position" X/Y/W/H fields for the selection, one undo step per applied value | selection, transform, history |

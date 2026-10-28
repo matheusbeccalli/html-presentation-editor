@@ -412,12 +412,15 @@ Autosave has two independent layers: writing changes back to the deck file itsel
 
 - Chromium gives every page opened from disk (`file://`) one shared storage area (verified 2026-10-28). Any other HTML file the user opens from disk in the same browser profile, such as an email attachment or a deck previewed on its own, can read the editor's drafts. Encryption cannot fix this, because the key would sit in the same shared storage. Hence the minimal exposure above: drafts only while there are unsaved changes, short retention, Recent files off by default.
 - Settings: "Keep recovery drafts in this browser" on/off (on by default), retention days (default 1), "Remember recent files" on/off (off by default; turning drafts off turns it off too), and a **"Delete all drafts now"** button that empties the editor's whole IndexedDB, Recent files included.
+- The settings themselves are kept in `localStorage` (they contain no deck content), so "Delete all drafts now" does not reset them. Settings are under File > Settings….
 - A short note in Settings explains, in plain words, that drafts stay only in this browser profile on this computer, are not uploaded or synced, are deleted on save or after the retention period, and can be read by other HTML files opened from disk in this browser.
 - If IndexedDB is unavailable (for example blocked by company policy for `file://` pages), detect it at startup, show "Crash recovery unavailable" in the status bar, and rely on Layer 1. The editor must never fail because storage is blocked; wrap every storage call in `try/catch`.
 
 **6.4 Status indicator**
 
 The status bar always shows one of: Saved · Saving… · Unsaved changes · AutoSave off · Draft saved 14:32 · Recovery unavailable.
+
+In practice it shows the file's state first (Saved, Saving…, Unsaved changes, or AutoSave off when AutoSave was on and was switched off or paused), followed by "Draft saved 14:32" while a draft protects the unsaved changes and by "Recovery unavailable" when storage is blocked, for example "Unsaved changes · Draft saved 14:32". A new deck that is in no file yet shows "Not saved yet".
 
 **6.5 Out of scope**
 

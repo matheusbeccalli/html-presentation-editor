@@ -860,7 +860,8 @@ def test_crash_recovery_drafts(browser):
         page.keyboard.press("ArrowRight")
     moved_left = element_rect(page, "e2")["left"]
     wait_until(page, f"{DRAFTS_JS}.then(d => d.length === 1)")
-    check(page.inner_text("#status-message").startswith("Draft saved "), "status shows the draft time")
+    status = page.inner_text("#status-save")
+    check(re.fullmatch(r"Unsaved changes · Draft saved \d\d:\d\d", status), f"status shows the draft time: {status}")
 
     # Undo back to the saved state: nothing left to protect, the draft goes.
     for _ in range(10):
@@ -949,12 +950,129 @@ def test_recovery_unavailable_when_storage_is_blocked(browser):
         get() { throw new DOMException('blocked', 'SecurityError'); } });""")
     editor = Editor(browser, context)
     page = editor.page
-    wait_until(page, "document.getElementById('status-message').textContent === 'Recovery unavailable'")
+    wait_until(page, "document.getElementById('status-save').textContent === 'Recovery unavailable'")
     editor.open(CONTRACT)
     editor.close_dialog_if_open()
     page.mouse.click(*slide_to_screen(page, 300, 290))
     page.keyboard.press("ArrowRight")
     check(element_rect(page, "e2")["left"] == 65, "editing still works")
+    check(page.inner_text("#status-save") == "Unsaved changes · Recovery unavailable", "status bar")
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='settings']")
+    check(page.is_disabled("#settings-keep-drafts") and page.is_disabled("#settings-delete-all"), "settings disabled")
+    check("Recovery is unavailable" in editor.report_dialog_text(), "the dialog says why")
+    editor.click_dialog_button("Cancel")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+COUNT_DB_JS = """async () => {
+    // Every record in every store of the editor's IndexedDB, as DevTools > Application would show them.
+    const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('deck-editor');
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+    const counts = {};
+    for (const name of Array.from(db.objectStoreNames)) {
+        counts[name] = await new Promise((resolve) => {
+            const request = db.transaction(name).objectStore(name).count();
+            request.onsuccess = () => resolve(request.result);
+        });
+    }
+    db.close();
+    return counts;
+}"""
+
+# A remembered file handle (plain, so IndexedDB can store it) and an Open window that
+# records where it was asked to start, then "picks" the contract deck.
+FAKE_PICKER_JS = """text => {
+    window.__picker = { calls: [] };
+    window.showOpenFilePicker = async (options) => {
+        __picker.calls.push(options.startIn ? options.startIn.name : null);
+        return [{ kind: 'file', name: 'contract-deck.html',
+                  getFile: async () => new File([text], 'contract-deck.html', { lastModified: 1000 }) }];
+    };
+}"""
+
+
+def test_settings_recent_files_and_status(browser):
+    editor = Editor(browser)
+    page = editor.page
+    wait_until(page, "App.drafts.ready.then(() => App.drafts.isAvailable())")
+    page.evaluate("App.drafts.setInterval(300)")
+    status = lambda: page.inner_text("#status-save")  # noqa: E731
+
+    # Status bar: Saved after opening, Unsaved changes after an edit, then the draft time.
+    editor.open(CONTRACT)
+    editor.close_dialog_if_open()
+    check(status() == "Saved", f"opened: {status()}")
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("ArrowRight")
+    check(status() == "Unsaved changes", f"after an edit: {status()}")
+    wait_until(page, "document.getElementById('status-save').textContent.includes('Draft saved')")
+
+    # Settings: the defaults (SPEC 6.3), and the honest note.
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='settings']")
+    check(page.is_checked("#settings-keep-drafts"), "drafts on by default")
+    check(page.input_value("#settings-retention") == "1", "1 day by default")
+    check(not page.is_checked("#settings-recent"), "recent files off by default")
+    check("can read them" in editor.report_dialog_text(), "the note about other HTML files")
+    page.screenshot(path=str(OUTPUT / "19-settings.png"))
+    # Turning drafts off also turns recent files off and disables it.
+    page.check("#settings-recent")
+    page.uncheck("#settings-keep-drafts")
+    check(not page.is_checked("#settings-recent") and page.is_disabled("#settings-recent"), "no drafts, no recent")
+    page.check("#settings-keep-drafts")
+    page.check("#settings-recent")
+    page.fill("#settings-retention", "45")
+    editor.click_dialog_button("OK")
+    saved = page.evaluate("JSON.parse(localStorage.getItem('deck-editor-settings'))")
+    check(saved == {"keepDrafts": True, "retentionDays": 30, "rememberRecent": True}, f"saved settings: {saved}")
+
+    # Recent files: an opened file is remembered; choosing it opens the Open window in its folder.
+    page.evaluate("""() => App.events.emit('file-opened',
+        { fileName: 'contract-deck.html', lastModified: 0, handle: { kind: 'file', name: 'contract-deck.html' } })""")
+    wait_until(page, "App.recent.hasEntries()")
+    page.evaluate(FAKE_PICKER_JS, CONTRACT.read_text(encoding="utf-8"))
+    page.keyboard.press("Control+z")   # back to the saved state, so opening asks nothing
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='openRecent']")
+    check("contract-deck.html" in editor.report_dialog_text(), "the recent list")
+    page.click("dialog[open] .recent-item")
+    wait_until(page, "__picker.calls.length === 1")
+    check(page.evaluate("__picker.calls[0]") == "contract-deck.html", "the Open window starts at the remembered file")
+    wait_until(page, "document.getElementById('status-message').textContent === 'Opened contract-deck.html'")
+    editor.close_dialog_if_open()
+
+    # Delete all drafts now: nothing left in IndexedDB (drafts, their HTML, recent files).
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("ArrowRight")
+    wait_until(page, "App.storage.listDrafts().then(d => d.length === 1)")
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='settings']")
+    page.click("#settings-delete-all")
+    wait_until(page, "document.querySelector('.settings-result').textContent.startsWith('All drafts')")
+    counts = page.evaluate(COUNT_DB_JS)
+    check(counts == {"draftHtml": 0, "drafts": 0, "recent": 0}, f"IndexedDB empty: {counts}")
+    check("Draft saved" not in status(), "no draft time after deleting")
+
+    # Drafts off: no draft is written any more.
+    page.uncheck("#settings-keep-drafts")
+    editor.click_dialog_button("OK")
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(1000)
+    check(page.evaluate(COUNT_DB_JS) == {"draftHtml": 0, "drafts": 0, "recent": 0}, "nothing stored with drafts off")
+    check(status() == "Unsaved changes", f"no draft time: {status()}")
+
+    # AutoSave off after it was on: the status says so.
+    page.evaluate(FAKE_FILE_JS, CONTRACT.name)
+    page.keyboard.press("Control+s")
+    wait_until(page, "document.getElementById('status-save').textContent === 'Saved'")
+    page.click("#autosave-toggle")
+    page.keyboard.press("ArrowRight")
+    check(status() == "AutoSave off", f"AutoSave switched off: {status()}")
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
 
@@ -1016,6 +1134,7 @@ TESTS = [
     test_autosave_to_file,
     test_crash_recovery_drafts,
     test_recovery_unavailable_when_storage_is_blocked,
+    test_settings_recent_files_and_status,
 ]
 
 

@@ -11,7 +11,8 @@
  *   - deleted when the deck is saved, or is back to its saved state (undo),
  *   - deleted when the tab is closed with nothing unsaved,
  *   - deleted when the user discards them,
- *   - and in any case deleted after 1 day (retention, a setting from step 7).
+ *   - and in any case deleted after 1 day (retention: File > Settings, 1-30 days),
+ *   - and never written at all when the user turns drafts off (settings.js).
  *
  * Recovery: when the editor starts, or when a deck with newer drafts than its
  * file is opened, a dialog offers Recover / Compare / Discard.
@@ -21,7 +22,7 @@
  * another tab that has the same deck open. A deck the editor never saved has
  * no id in its file yet, so its drafts are found by file name instead.
  *
- * Talks to: storage.js, autosave.js (reuses its timing scheduler), fileio.js
+ * Talks to: storage.js, settings.js, autosave.js (reuses its timing scheduler), fileio.js
  *           (current HTML, opening a recovered deck), importer.js, deck.js,
  *           history.js, dialogs.js, thumbnails.js (miniatures), ui.js (status).
  */
@@ -134,14 +135,13 @@
     // Drafts in the editor
     // ---------------------------------------------------------------
 
-    // Defaults from SPEC 6.3; the Settings dialog (step 7) changes them.
-    App.drafts.settings = { keep: true, retentionDays: 1 };
-
     let interval = 30000;
     let available = false;
+    let started = false;     // the attempt to open the database has finished
     let session = null;      // a random id for this tab
     let deckId = null;       // the deck on screen
     let scheduler = null;
+    let lastDraftAt = null;  // time of this tab's latest draft of the unsaved changes (status bar)
 
     // Storage calls run one after another, so "delete on save" can never
     // overtake a draft that was being written at that moment.
@@ -159,6 +159,7 @@
         App.events.on('deck-loaded', () => {
             const previous = deckId;
             scheduler.cancel();
+            setLastDraft(null);
             deckId = App.deck.getDeckId();
             if (previous) {
                 // The previous deck was saved, or the user agreed to discard its changes.
@@ -173,11 +174,22 @@
                 scheduler.notifyChange();
             } else {
                 scheduler.cancel();   // back to the saved version (e.g. by undo): nothing to protect
+                setLastDraft(null);
                 serial(() => deleteDeckDrafts(deckId, true));
             }
         });
         // A save makes every draft of this deck useless, whichever tab wrote it.
-        App.events.on('saved', () => serial(() => deleteDeckDrafts(deckId, false)));
+        App.events.on('saved', () => {
+            setLastDraft(null);
+            serial(() => deleteDeckDrafts(deckId, false));
+        });
+        App.events.on('settings-changed', (info) => {
+            if (info.before.keepDrafts && !info.after.keepDrafts) {
+                App.drafts.deleteAll();   // drafts off: none may stay behind
+            } else if (info.after.retentionDays !== info.before.retentionDays) {
+                serial(purgeExpired);
+            }
+        });
         App.events.on('file-opened', (info) => {
             offerForOpenedDeck(info.fileName, info.lastModified).catch(reportError);
         });
@@ -202,11 +214,11 @@
 
     async function start() {
         available = await App.storage.open();
-        if (!available) {
-            App.ui.setStatus('Recovery unavailable');
-            return;
+        started = true;
+        App.events.emit('drafts-changed');   // the status bar shows "Recovery unavailable" if it failed
+        if (available) {
+            await serial(purgeExpired);
         }
-        await serial(purgeExpired);
     }
 
     function reportError(error) {
@@ -235,8 +247,36 @@
         return available;
     };
 
+    /* True once we know the browser blocks storage ("Recovery unavailable"). */
+    App.drafts.isUnavailable = function isUnavailable() {
+        return started && !available;
+    };
+
+    /* When this tab last stored a draft of the unsaved changes, or null. */
+    App.drafts.lastDraftAt = function lastDraftAtTime() {
+        return lastDraftAt;
+    };
+
+    function setLastDraft(time) {
+        if (lastDraftAt !== time) {
+            lastDraftAt = time;
+            App.events.emit('drafts-changed');
+        }
+    }
+
+    /* File > Settings > "Delete all drafts now": empty the whole database, Recent files included. */
+    App.drafts.deleteAll = async function deleteAll() {
+        let ok = false;
+        await serial(async () => {
+            ok = await App.storage.clearAll();
+        });
+        setLastDraft(null);
+        App.events.emit('drafts-cleared');
+        return ok;
+    };
+
     async function writeDraft() {
-        if (!available || !App.drafts.settings.keep || !App.state.hasDeck || !App.history.isDirty()) {
+        if (!available || !App.settings.get().keepDrafts || !App.state.hasDeck || !App.history.isDirty()) {
             return;
         }
         const savedAt = Date.now();
@@ -249,10 +289,9 @@
         }
         const all = await App.storage.listDrafts();
         const old = App.drafts.idsToPrune(all, KEEP_PER_DECK)
-            .concat(App.drafts.expiredIds(all, savedAt, App.drafts.settings.retentionDays));
+            .concat(App.drafts.expiredIds(all, savedAt, App.settings.get().retentionDays));
         await App.storage.deleteDrafts(old);
-        App.ui.setStatus('Draft saved ' + App.drafts.formatClock(savedAt));
-        App.events.emit('draft-saved', { savedAt: savedAt });
+        setLastDraft(savedAt);
     }
 
     /* ownOnly: only the drafts this tab wrote. */
@@ -267,7 +306,7 @@
 
     async function purgeExpired() {
         const all = await App.storage.listDrafts();
-        await App.storage.deleteDrafts(App.drafts.expiredIds(all, Date.now(), App.drafts.settings.retentionDays));
+        await App.storage.deleteDrafts(App.drafts.expiredIds(all, Date.now(), App.settings.get().retentionDays));
     }
 
     // ---------------------------------------------------------------
@@ -391,7 +430,7 @@
     }
 
     function retentionText() {
-        const days = App.drafts.settings.retentionDays;
+        const days = App.settings.get().retentionDays;
         return days === 1 ? '1 day' : days + ' days';
     }
 

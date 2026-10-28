@@ -18,7 +18,11 @@
  *   'zoom-changed'      the canvas zoom changed                (canvas.js)
  *   'autosave-changed'  AutoSave was switched on or off        (autosave.js)
  *   'file-opened'       a deck was opened from a file, { lastModified } (fileio.js)
- *   'draft-saved'       a crash-recovery draft was stored      (drafts.js)
+ *   'drafts-changed'    a draft was stored, or drafts became (un)available (drafts.js)
+ *   'drafts-cleared'    "Delete all drafts now" emptied the database (drafts.js)
+ *   'settings-changed'  File > Settings changed, { before, after } (settings.js)
+ *   'recent-changed'    the Recent files list changed          (recent.js)
+ *   'saving'            a write to the file started or ended, { active } (fileio.js)
  *
  * Talks to: nothing (others call it). Created in app.js as App.events.
  */

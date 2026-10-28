@@ -4,9 +4,15 @@
  *
  * It mostly listens to events and updates text; it never changes the deck.
  *
- * Talks to: events (deck-loaded, slide-changed, history-changed, saved),
- *           deck.js, fileio.js (window title), commands.js. (The zoom controls
- *           in the status bar belong to canvas.js.)
+ * The status bar has two texts: the save state (always one of Saved ·
+ * Saving… · Unsaved changes · AutoSave off, plus "Draft saved 14:32" or
+ * "Recovery unavailable" when they apply, SPEC 6.4) and a message about the
+ * last action ("Opened deck.html").
+ *
+ * Talks to: events (deck-loaded, slide-changed, history-changed, saved, saving,
+ *           autosave-changed, drafts-changed), deck.js, fileio.js (window title),
+ *           autosave.js, drafts.js, commands.js. (The zoom controls in the
+ *           status bar belong to canvas.js.)
  */
 
 (function () {
@@ -16,12 +22,36 @@
 
     const nodes = {};
 
+    /*
+     * The save-state text (tested in tests/unit/settings.test.js).
+     * state = { hasDeck, saving, dirty, isNew, autosaveOff, draftAt, recoveryUnavailable }
+     */
+    App.ui.statusText = function statusText(state) {
+        const parts = [];
+        if (state.hasDeck) {
+            if (state.saving) {
+                parts.push('Saving…');
+            } else if (!state.dirty) {
+                parts.push(state.isNew ? 'Not saved yet' : 'Saved');
+            } else {
+                parts.push(state.autosaveOff ? 'AutoSave off' : 'Unsaved changes');
+            }
+            if (state.dirty && !state.saving && state.draftAt) {
+                parts.push('Draft saved ' + App.drafts.formatClock(state.draftAt));
+            }
+        }
+        if (state.recoveryUnavailable) {
+            parts.push('Recovery unavailable');
+        }
+        return parts.join(' · ');
+    };
+
     function byId(id) {
         return document.getElementById(id);
     }
 
     App.ui.init = function init() {
-        ['title-file', 'title-dirty', 'status-slide', 'status-message', 'notes-text',
+        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'notes-text',
          'welcome', 'canvas-stage-box', 'drop-zone', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
@@ -41,7 +71,21 @@
             updateSlideInfo();
         });
         App.events.on('saved', App.ui.updateTitle);
+        ['deck-loaded', 'history-changed', 'saved', 'saving', 'autosave-changed', 'drafts-changed']
+            .forEach((name) => App.events.on(name, updateSaveState));
     };
+
+    function updateSaveState() {
+        nodes['status-save'].textContent = App.ui.statusText({
+            hasDeck: App.state.hasDeck,
+            saving: App.fileio.isSaving(),
+            dirty: App.state.hasDeck && App.history.isDirty(),
+            isNew: App.state.isNew,
+            autosaveOff: App.autosave.isOff(),
+            draftAt: App.drafts.lastDraftAt(),
+            recoveryUnavailable: App.drafts.isUnavailable(),
+        });
+    }
 
     // Save / Undo / Redo in the title bar, like PowerPoint's Quick Access Toolbar.
     function buildQuickAccess() {
@@ -78,11 +122,6 @@
         document.title = App.fileio.windowTitle(App.state.hasDeck ? App.state.fileName : null, dirty);
         nodes['title-file'].textContent = App.state.hasDeck ? App.state.fileName : 'Deck Editor';
         nodes['title-dirty'].hidden = !dirty;
-        if (App.state.hasDeck && !dirty && nodes['status-message'].textContent === 'Unsaved changes') {
-            App.ui.setStatus('Saved');
-        } else if (dirty) {
-            App.ui.setStatus('Unsaved changes');
-        }
     };
 
     function updateSlideInfo() {

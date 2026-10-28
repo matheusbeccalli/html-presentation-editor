@@ -90,6 +90,8 @@
 
 <footer id="statusbar">
     <span id="status-slide"></span>
+    <!-- Save state (SPEC 6.4): Saved · Saving… · Unsaved changes · AutoSave off · Draft saved 14:32 · Recovery unavailable -->
+    <span id="status-save" aria-live="polite"></span>
     <span id="status-message"></span>
     <!-- Zoom (canvas.js): hidden until a deck is open. -->
     <div id="zoom-controls" hidden>
@@ -134,7 +136,9 @@
 <!-- INLINE-JS: js/fileio.js -->
 <!-- INLINE-JS: js/autosave.js -->
 <!-- INLINE-JS: js/storage.js -->
+<!-- INLINE-JS: js/settings.js -->
 <!-- INLINE-JS: js/drafts.js -->
+<!-- INLINE-JS: js/recent.js -->
 <!-- INLINE-JS: js/commands.js -->
 <!-- INLINE-JS: js/ribbon.js -->
 <!-- INLINE-JS: js/ui.js -->

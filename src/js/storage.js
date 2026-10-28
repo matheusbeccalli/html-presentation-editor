@@ -14,7 +14,7 @@
  *   drafts     one small record per draft: { id, deckId, session, fileName, savedAt }
  *   draftHtml  the draft's full deck HTML, under the same id (kept apart so
  *              listing the drafts does not read megabytes of pictures)
- *   recent     Recent files (Phase 2, step 7)
+ *   recent     Recent files, only when the user turned them on: { id, name, openedAt, handle }
  *
  * Talks to: drafts.js (the only user so far).
  */
@@ -148,6 +148,35 @@
                 transaction.objectStore('drafts').delete(id);
                 transaction.objectStore('draftHtml').delete(id);
             });
+            return true;
+        });
+    };
+
+    // Recent files (recent.js): { id, name, openedAt, handle }. Chromium can keep a
+    // file handle in IndexedDB; it remembers the file's place, not its content.
+
+    App.storage.addRecent = function addRecent(record) {
+        return attempt(['recent'], 'readwrite', null, (transaction) =>
+            done(transaction.objectStore('recent').add(Object.assign({}, record))));
+    };
+
+    App.storage.listRecent = function listRecent() {
+        return attempt(['recent'], 'readonly', [], (transaction) => done(transaction.objectStore('recent').getAll()));
+    };
+
+    App.storage.deleteRecent = function deleteRecent(ids) {
+        if (db && ids.length === 0) {
+            return Promise.resolve(true);
+        }
+        return attempt(['recent'], 'readwrite', false, (transaction) => {
+            ids.forEach((id) => transaction.objectStore('recent').delete(id));
+            return true;
+        });
+    };
+
+    App.storage.clearRecent = function clearRecent() {
+        return attempt(['recent'], 'readwrite', false, (transaction) => {
+            transaction.objectStore('recent').clear();
             return true;
         });
     };

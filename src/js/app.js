@@ -20,6 +20,7 @@ window.App = {
         hasDeck: false,      // false while the welcome screen is shown
         openedHtml: null,    // the deck as it was when opened, for "Revert to version opened"
         diskLastModified: null,  // the file's date at open / our last save (AutoSave conflict check)
+        isNew: false,        // a new or recovered deck that is not in any file yet
     },
 };
 
@@ -29,6 +30,7 @@ window.App = {
  */
 App.start = function start() {
     App.events = App.createEventBus();
+    App.settings.init();   // before anything reads a setting
     App.history = App.createHistory({
         getDoc: () => App.deck.getDocument(),
         onChange: (info) => App.events.emit('history-changed', info),
@@ -46,6 +48,7 @@ App.start = function start() {
     App.fileio.init();
     App.autosave.init();
     App.drafts.init();
+    App.recent.init();
     App.shortcuts.init();
 
     App.ui.showWelcome();

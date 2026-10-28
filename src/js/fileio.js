@@ -137,6 +137,23 @@
 
     let fileInput = null;
 
+    // While a write is in progress the status bar shows "Saving…" (ui.js).
+    let writesInProgress = 0;
+    async function writing(task) {
+        writesInProgress += 1;
+        App.events.emit('saving', { active: true });
+        try {
+            return await task();
+        } finally {
+            writesInProgress -= 1;
+            App.events.emit('saving', { active: writesInProgress > 0 });
+        }
+    }
+
+    App.fileio.isSaving = function isSaving() {
+        return writesInProgress > 0;
+    };
+
     // One write at a time: each task starts when the previous one has finished.
     let writeQueue = Promise.resolve();
     function exclusive(task) {
@@ -206,17 +223,44 @@
             fileInput.click();
             return;
         }
+        await pickAndOpen(null);
+    };
+
+    /*
+     * Recent files (recent.js): a page opened from disk may not ask to read a
+     * remembered file again, so show the Open window in that file's folder.
+     */
+    App.fileio.openRecent = async function openRecent(handle) {
+        if (!(await confirmDiscard())) {
+            return;
+        }
+        if (!window.showOpenFilePicker) {
+            fileInput.click();
+            return;
+        }
+        await pickAndOpen(handle);
+    };
+
+    /* The Open window (optionally starting in the folder of handle `startIn`), then open the choice. */
+    async function pickAndOpen(startIn) {
+        const options = { types: HTML_TYPES, multiple: false };
+        if (startIn) {
+            options.startIn = startIn;
+        }
         let handle;
         try {
-            [handle] = await window.showOpenFilePicker({ types: HTML_TYPES, multiple: false });
+            [handle] = await window.showOpenFilePicker(options);
         } catch (error) {
             if (error.name === 'AbortError') {
                 return;   // the user closed the dialog
             }
+            if (startIn && error.name === 'TypeError') {
+                return pickAndOpen(null);   // the remembered place is no longer usable: open anywhere
+            }
             throw error;
         }
         await App.fileio.openFile(await handle.getFile(), handle);
-    };
+    }
 
     /* Import a File (from any of the three ways) and show it. */
     App.fileio.openFile = async function openFile(file, handle) {
@@ -237,7 +281,7 @@
             await App.dialogs.showImportReport(result.report);
         }
         // drafts.js offers unsaved changes newer than this file (SPEC 6.2).
-        App.events.emit('file-opened', { fileName: file.name, lastModified: file.lastModified });
+        App.events.emit('file-opened', { fileName: file.name, lastModified: file.lastModified, handle: handle || null });
         return result.report;
     };
 
@@ -250,6 +294,7 @@
         try {
             const result = await App.importer.importDeck(html);
             await showDeck(result.html, fileName || NEW_DECK_NAME, null);
+            App.state.isNew = true;   // not in any file yet
             App.history.markDirty();
         } finally {
             App.ui.setBusy(null);
@@ -263,6 +308,7 @@
         App.state.fileHandle = handle || null;
         App.state.openedHtml = html;          // for "Revert to version opened" (SPEC 6.1)
         App.state.diskLastModified = null;
+        App.state.isNew = false;
         App.history.reset();
         App.ui.showDeck();
     }
@@ -274,6 +320,7 @@
         // Through the importer like any deck, so there is only one way in.
         const result = await App.importer.importDeck(App.template.newDeckHtml());
         await showDeck(result.html, NEW_DECK_NAME, null);
+        App.state.isNew = true;
         App.ui.setStatus('New deck');
     };
 
@@ -346,6 +393,7 @@
      */
     function afterSave(fileName, details) {
         App.state.fileName = fileName;
+        App.state.isNew = false;
         App.history.markSaved(details.stateId);
         App.ui.setStatus((details.auto ? 'AutoSaved ' : 'Saved ') + fileName);
         App.events.emit('saved', { fileName: fileName, toHandle: !!details.toHandle, auto: !!details.auto });
@@ -359,9 +407,9 @@
             return App.fileio.saveAs();
         }
         return exclusive(async () => {
-            App.ui.setStatus('Saving…');
             const stateId = App.history.stateId();
-            const used = await App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile);
+            const used = await writing(() =>
+                App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile));
             if (!used) {
                 App.ui.setStatus('Save cancelled');
                 return;
@@ -388,9 +436,8 @@
             if (!force && await App.fileio.changedOnDisk(handle, App.state.diskLastModified)) {
                 return 'conflict';
             }
-            App.ui.setStatus('Saving…');
             const stateId = App.history.stateId();
-            await App.fileio.writeToHandle(handle, App.fileio.currentHtml());
+            await writing(() => App.fileio.writeToHandle(handle, App.fileio.currentHtml()));
             await recordDiskVersion(handle);
             afterSave(handle.name, { stateId: stateId, toHandle: true, auto: true });
             return 'saved';
@@ -457,8 +504,7 @@
             if (!handle) {
                 return;
             }
-            App.ui.setStatus('Saving…');
-            await App.fileio.writeToHandle(handle, html);
+            await writing(() => App.fileio.writeToHandle(handle, html));
             App.state.fileHandle = handle;
             await recordDiskVersion(handle);
             afterSave(handle.name, { stateId: stateId, toHandle: true });

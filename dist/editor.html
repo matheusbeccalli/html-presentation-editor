@@ -464,6 +464,23 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .compare-side { margin: 0; }
 .compare-side figcaption { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
 
+/* File > Settings (settings.js) and File > Open recent (recent.js). */
+.settings h3 { margin: 4px 0 8px; font-size: 13px; font-weight: 600; }
+.settings-row { display: block; margin: 8px 0; }
+.settings-row input[type="number"] { width: 56px; }
+.settings-note, .recent-note { color: var(--text-muted); font-size: 12px; margin: 10px 0 !important; }
+.settings-warning { color: #a4262c; margin-bottom: 8px !important; }
+.settings-result { font-size: 12px; min-height: 1em; }
+.recent-list { list-style: none; margin: 0; padding: 0; }
+.recent-item {
+    display: flex; justify-content: space-between; gap: 16px; width: 100%;
+    padding: 6px 8px; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; border-radius: 3px;
+}
+.recent-item:hover, .recent-item:focus-visible { background: #f3f2f1; }
+.recent-when { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+#welcome-recent { margin-top: 18px; text-align: left; }
+#welcome-recent h2 { font-size: 13px; font-weight: 600; margin: 0 0 4px; }
+
 </style>
 </head>
 <body>
@@ -540,6 +557,8 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 
 <footer id="statusbar">
     <span id="status-slide"></span>
+    <!-- Save state (SPEC 6.4): Saved · Saving… · Unsaved changes · AutoSave off · Draft saved 14:32 · Recovery unavailable -->
+    <span id="status-save" aria-live="polite"></span>
     <span id="status-message"></span>
     <!-- Zoom (canvas.js): hidden until a deck is open. -->
     <div id="zoom-controls" hidden>
@@ -702,6 +721,7 @@ window.App = {
         hasDeck: false,      // false while the welcome screen is shown
         openedHtml: null,    // the deck as it was when opened, for "Revert to version opened"
         diskLastModified: null,  // the file's date at open / our last save (AutoSave conflict check)
+        isNew: false,        // a new or recovered deck that is not in any file yet
     },
 };
 
@@ -711,6 +731,7 @@ window.App = {
  */
 App.start = function start() {
     App.events = App.createEventBus();
+    App.settings.init();   // before anything reads a setting
     App.history = App.createHistory({
         getDoc: () => App.deck.getDocument(),
         onChange: (info) => App.events.emit('history-changed', info),
@@ -728,6 +749,7 @@ App.start = function start() {
     App.fileio.init();
     App.autosave.init();
     App.drafts.init();
+    App.recent.init();
     App.shortcuts.init();
 
     App.ui.showWelcome();
@@ -869,7 +891,11 @@ App.util.el = function el(tag, attributes, children) {
  *   'zoom-changed'      the canvas zoom changed                (canvas.js)
  *   'autosave-changed'  AutoSave was switched on or off        (autosave.js)
  *   'file-opened'       a deck was opened from a file, { lastModified } (fileio.js)
- *   'draft-saved'       a crash-recovery draft was stored      (drafts.js)
+ *   'drafts-changed'    a draft was stored, or drafts became (un)available (drafts.js)
+ *   'drafts-cleared'    "Delete all drafts now" emptied the database (drafts.js)
+ *   'settings-changed'  File > Settings changed, { before, after } (settings.js)
+ *   'recent-changed'    the Recent files list changed          (recent.js)
+ *   'saving'            a write to the file started or ended, { active } (fileio.js)
  *
  * Talks to: nothing (others call it). Created in app.js as App.events.
  */
@@ -3095,6 +3121,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         front: '<rect x="3" y="3" width="8" height="8" stroke-dasharray="2 1.5"/><rect x="8" y="8" width="9" height="9" fill="currentColor" fill-opacity="0.25"/>',
         forward: '<rect x="3" y="3" width="8" height="8"/><rect x="8" y="8" width="9" height="9" fill="currentColor" fill-opacity="0.25"/>',
         backward: '<rect x="8" y="8" width="9" height="9"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
+        recent: '<circle cx="10" cy="10" r="7.5"/><path d="M10 5.5V10l3 2"/>',
+        settings: '<circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2.5M10 15v2.5M2.5 10H5M15 10h2.5M4.7 4.7l1.8 1.8M13.5 13.5l1.8 1.8M4.7 15.3l1.8-1.8M13.5 6.5l1.8-1.8"/>',
         back: '<rect x="8" y="8" width="9" height="9" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
     };
 
@@ -4873,6 +4901,23 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     let fileInput = null;
 
+    // While a write is in progress the status bar shows "Saving…" (ui.js).
+    let writesInProgress = 0;
+    async function writing(task) {
+        writesInProgress += 1;
+        App.events.emit('saving', { active: true });
+        try {
+            return await task();
+        } finally {
+            writesInProgress -= 1;
+            App.events.emit('saving', { active: writesInProgress > 0 });
+        }
+    }
+
+    App.fileio.isSaving = function isSaving() {
+        return writesInProgress > 0;
+    };
+
     // One write at a time: each task starts when the previous one has finished.
     let writeQueue = Promise.resolve();
     function exclusive(task) {
@@ -4942,17 +4987,44 @@ App.template.newDeckHtml = function newDeckHtml() {
             fileInput.click();
             return;
         }
+        await pickAndOpen(null);
+    };
+
+    /*
+     * Recent files (recent.js): a page opened from disk may not ask to read a
+     * remembered file again, so show the Open window in that file's folder.
+     */
+    App.fileio.openRecent = async function openRecent(handle) {
+        if (!(await confirmDiscard())) {
+            return;
+        }
+        if (!window.showOpenFilePicker) {
+            fileInput.click();
+            return;
+        }
+        await pickAndOpen(handle);
+    };
+
+    /* The Open window (optionally starting in the folder of handle `startIn`), then open the choice. */
+    async function pickAndOpen(startIn) {
+        const options = { types: HTML_TYPES, multiple: false };
+        if (startIn) {
+            options.startIn = startIn;
+        }
         let handle;
         try {
-            [handle] = await window.showOpenFilePicker({ types: HTML_TYPES, multiple: false });
+            [handle] = await window.showOpenFilePicker(options);
         } catch (error) {
             if (error.name === 'AbortError') {
                 return;   // the user closed the dialog
             }
+            if (startIn && error.name === 'TypeError') {
+                return pickAndOpen(null);   // the remembered place is no longer usable: open anywhere
+            }
             throw error;
         }
         await App.fileio.openFile(await handle.getFile(), handle);
-    };
+    }
 
     /* Import a File (from any of the three ways) and show it. */
     App.fileio.openFile = async function openFile(file, handle) {
@@ -4973,7 +5045,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             await App.dialogs.showImportReport(result.report);
         }
         // drafts.js offers unsaved changes newer than this file (SPEC 6.2).
-        App.events.emit('file-opened', { fileName: file.name, lastModified: file.lastModified });
+        App.events.emit('file-opened', { fileName: file.name, lastModified: file.lastModified, handle: handle || null });
         return result.report;
     };
 
@@ -4986,6 +5058,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         try {
             const result = await App.importer.importDeck(html);
             await showDeck(result.html, fileName || NEW_DECK_NAME, null);
+            App.state.isNew = true;   // not in any file yet
             App.history.markDirty();
         } finally {
             App.ui.setBusy(null);
@@ -4999,6 +5072,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.state.fileHandle = handle || null;
         App.state.openedHtml = html;          // for "Revert to version opened" (SPEC 6.1)
         App.state.diskLastModified = null;
+        App.state.isNew = false;
         App.history.reset();
         App.ui.showDeck();
     }
@@ -5010,6 +5084,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Through the importer like any deck, so there is only one way in.
         const result = await App.importer.importDeck(App.template.newDeckHtml());
         await showDeck(result.html, NEW_DECK_NAME, null);
+        App.state.isNew = true;
         App.ui.setStatus('New deck');
     };
 
@@ -5082,6 +5157,7 @@ App.template.newDeckHtml = function newDeckHtml() {
      */
     function afterSave(fileName, details) {
         App.state.fileName = fileName;
+        App.state.isNew = false;
         App.history.markSaved(details.stateId);
         App.ui.setStatus((details.auto ? 'AutoSaved ' : 'Saved ') + fileName);
         App.events.emit('saved', { fileName: fileName, toHandle: !!details.toHandle, auto: !!details.auto });
@@ -5095,9 +5171,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             return App.fileio.saveAs();
         }
         return exclusive(async () => {
-            App.ui.setStatus('Saving…');
             const stateId = App.history.stateId();
-            const used = await App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile);
+            const used = await writing(() =>
+                App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile));
             if (!used) {
                 App.ui.setStatus('Save cancelled');
                 return;
@@ -5124,9 +5200,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (!force && await App.fileio.changedOnDisk(handle, App.state.diskLastModified)) {
                 return 'conflict';
             }
-            App.ui.setStatus('Saving…');
             const stateId = App.history.stateId();
-            await App.fileio.writeToHandle(handle, App.fileio.currentHtml());
+            await writing(() => App.fileio.writeToHandle(handle, App.fileio.currentHtml()));
             await recordDiskVersion(handle);
             afterSave(handle.name, { stateId: stateId, toHandle: true, auto: true });
             return 'saved';
@@ -5193,8 +5268,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (!handle) {
                 return;
             }
-            App.ui.setStatus('Saving…');
-            await App.fileio.writeToHandle(handle, html);
+            await writing(() => App.fileio.writeToHandle(handle, html));
             App.state.fileHandle = handle;
             await recordDiskVersion(handle);
             afterSave(handle.name, { stateId: stateId, toHandle: true });
@@ -5335,6 +5409,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     let savedToFile = false;       // a manual save into a writable file happened this session
     let askingUser = false;        // the "changed on disk" question is open
     let composing = false;         // IME composition in progress
+    let switchedOff = false;       // was on, then switched off or paused this session (status bar)
     let toggle = null;
 
     App.autosave.init = function init() {
@@ -5342,6 +5417,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         buildToggle();
 
         App.events.on('deck-loaded', () => {
+            switchedOff = false;
             setEnabled(false);
             userTurnedOff = false;
             savedToFile = false;
@@ -5395,12 +5471,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         return enabled;
     };
 
+    /* True when AutoSave was on and is now off (by the user, a conflict or an error). */
+    App.autosave.isOff = function isOff() {
+        return !enabled && switchedOff;
+    };
+
     function listenForComposition(targetWindow) {
         targetWindow.addEventListener('compositionstart', () => { composing = true; });
         targetWindow.addEventListener('compositionend', () => { composing = false; });
     }
 
     function setEnabled(value, reason) {
+        switchedOff = !value && (switchedOff || (enabled && !!reason));
         enabled = value;
         if (!value) {
             scheduler.cancel();
@@ -5526,7 +5608,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  *   drafts     one small record per draft: { id, deckId, session, fileName, savedAt }
  *   draftHtml  the draft's full deck HTML, under the same id (kept apart so
  *              listing the drafts does not read megabytes of pictures)
- *   recent     Recent files (Phase 2, step 7)
+ *   recent     Recent files, only when the user turned them on: { id, name, openedAt, handle }
  *
  * Talks to: drafts.js (the only user so far).
  */
@@ -5664,12 +5746,206 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     };
 
+    // Recent files (recent.js): { id, name, openedAt, handle }. Chromium can keep a
+    // file handle in IndexedDB; it remembers the file's place, not its content.
+
+    App.storage.addRecent = function addRecent(record) {
+        return attempt(['recent'], 'readwrite', null, (transaction) =>
+            done(transaction.objectStore('recent').add(Object.assign({}, record))));
+    };
+
+    App.storage.listRecent = function listRecent() {
+        return attempt(['recent'], 'readonly', [], (transaction) => done(transaction.objectStore('recent').getAll()));
+    };
+
+    App.storage.deleteRecent = function deleteRecent(ids) {
+        if (db && ids.length === 0) {
+            return Promise.resolve(true);
+        }
+        return attempt(['recent'], 'readwrite', false, (transaction) => {
+            ids.forEach((id) => transaction.objectStore('recent').delete(id));
+            return true;
+        });
+    };
+
+    App.storage.clearRecent = function clearRecent() {
+        return attempt(['recent'], 'readwrite', false, (transaction) => {
+            transaction.objectStore('recent').clear();
+            return true;
+        });
+    };
+
     /* "Delete all drafts now": empty every store (SPEC 6.3). */
     App.storage.clearAll = function clearAll() {
         return attempt(STORES, 'readwrite', false, (transaction) => {
             STORES.forEach((name) => transaction.objectStore(name).clear());
             return true;
         });
+    };
+})();
+
+</script>
+<script>
+// ---- js/settings.js ----
+/*
+ * settings.js - the editor's privacy settings and the File > Settings dialog (SPEC 6.3).
+ *
+ *   keepDrafts      keep crash-recovery drafts in this browser      (default on)
+ *   retentionDays   delete drafts after this many days, 1 to 30     (default 1)
+ *   rememberRecent  keep a Recent files list                        (default off)
+ *                   (only possible while drafts are kept)
+ *
+ * The settings live in localStorage, not in the IndexedDB database, so
+ * "Delete all drafts now" empties that database without resetting them.
+ * They hold no deck content. If localStorage is blocked, the settings still
+ * work for the session and fall back to the defaults next time.
+ *
+ * Talks to: drafts.js and recent.js (react to 'settings-changed'), storage.js
+ *           (is recovery available?), dialogs.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.settings = {};
+
+    const KEY = 'deck-editor-settings';
+    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false });
+
+    let store = null;   // localStorage, or a fake one in the tests
+    let current = Object.assign({}, App.settings.DEFAULTS);
+
+    // ---------------------------------------------------------------
+    // Pure helper (tested in tests/unit/settings.test.js)
+    // ---------------------------------------------------------------
+
+    /* Turn anything (saved JSON, form values) into valid settings. */
+    App.settings.normalize = function normalize(raw) {
+        const value = raw || {};
+        const keepDrafts = value.keepDrafts === undefined ? App.settings.DEFAULTS.keepDrafts : !!value.keepDrafts;
+        let days = Math.round(Number(value.retentionDays));
+        if (!Number.isFinite(days) || days < 1) {
+            days = App.settings.DEFAULTS.retentionDays;
+        }
+        return {
+            keepDrafts: keepDrafts,
+            retentionDays: Math.min(30, days),
+            rememberRecent: keepDrafts && !!value.rememberRecent,   // no drafts means no recent files either
+        };
+    };
+
+    // ---------------------------------------------------------------
+    // Reading and saving
+    // ---------------------------------------------------------------
+
+    App.settings.init = function init() {
+        let local = null;
+        try {
+            local = window.localStorage;
+        } catch (error) {
+            local = null;   // blocked: defaults for this session
+        }
+        App.settings.load(local);
+    };
+
+    /* Read the settings from `storage` (an object with getItem/setItem). */
+    App.settings.load = function load(storage) {
+        store = storage;
+        current = Object.assign({}, App.settings.DEFAULTS);
+        try {
+            const text = store && store.getItem(KEY);
+            if (text) {
+                current = App.settings.normalize(JSON.parse(text));
+            }
+        } catch (error) {
+            console.warn('Settings could not be read; using the defaults.', error);
+        }
+    };
+
+    App.settings.get = function get() {
+        return Object.assign({}, current);
+    };
+
+    /* Change some settings, save them, and tell the other modules. */
+    App.settings.update = function update(patch) {
+        const before = App.settings.get();
+        current = App.settings.normalize(Object.assign({}, current, patch));
+        try {
+            if (store) {
+                store.setItem(KEY, JSON.stringify(current));
+            }
+        } catch (error) {
+            console.warn('Settings could not be saved; they apply to this session only.', error);
+        }
+        if (App.events) {
+            App.events.emit('settings-changed', { before: before, after: App.settings.get() });
+        }
+    };
+
+    // ---------------------------------------------------------------
+    // File > Settings
+    // ---------------------------------------------------------------
+
+    const el = (...args) => App.util.el(...args);
+
+    App.settings.openDialog = async function openDialog() {
+        const settings = App.settings.get();
+        const available = App.storage.isAvailable();
+
+        const keep = el('input', { type: 'checkbox', id: 'settings-keep-drafts' });
+        keep.checked = settings.keepDrafts;
+        const days = el('input', { type: 'number', id: 'settings-retention', min: '1', max: '30', step: '1' });
+        days.value = String(settings.retentionDays);
+        const recent = el('input', { type: 'checkbox', id: 'settings-recent' });
+        recent.checked = settings.rememberRecent;
+
+        const syncControls = () => {
+            if (!keep.checked) {
+                recent.checked = false;
+            }
+            keep.disabled = !available;
+            days.disabled = !available || !keep.checked;
+            recent.disabled = !available || !keep.checked;
+        };
+        keep.addEventListener('change', syncControls);
+        syncControls();
+
+        const result = el('p', { class: 'settings-result', role: 'status' });
+        const deleteAll = el('button', {
+            type: 'button', class: 'btn btn-danger', id: 'settings-delete-all', disabled: !available,
+            onclick: async () => {
+                const ok = await App.drafts.deleteAll();
+                result.textContent = ok
+                    ? 'All drafts and recent files were deleted. While a deck has unsaved changes, a new draft is made ' +
+                      'again after 30 seconds, unless drafts are turned off.'
+                    : 'Nothing could be deleted: the browser storage is not available.';
+            },
+        }, ['Delete all drafts now']);
+
+        const body = el('div', { class: 'settings' }, [
+            el('h3', {}, ['Crash recovery']),
+            available ? '' : el('p', { class: 'settings-warning' }, [
+                'Recovery is unavailable: this browser blocks storage for pages opened from disk. ' +
+                'AutoSave to the file still works.']),
+            el('label', { class: 'settings-row' }, [keep, ' Keep recovery drafts in this browser']),
+            el('label', { class: 'settings-row' }, ['Delete drafts after ', days, ' days (1–30)']),
+            el('label', { class: 'settings-row' }, [recent, ' Remember recent files (file names only, in this browser)']),
+            el('p', { class: 'settings-note' }, [
+                'Drafts stay only in this browser profile on this computer. They are never uploaded or synced. ' +
+                'They are deleted when you save the deck, and in any case after the number of days above. ' +
+                'Other HTML files you open from disk in this browser can read them.']),
+            el('div', { class: 'settings-row' }, [deleteAll]),
+            result,
+        ]);
+
+        const choice = await App.dialogs.show({
+            title: 'Settings',
+            body: body,
+            buttons: [{ label: 'Cancel', value: false }, { label: 'OK', value: true, primary: true }],
+        });
+        if (choice === true && available) {
+            App.settings.update({ keepDrafts: keep.checked, retentionDays: days.value, rememberRecent: recent.checked });
+        }
     };
 })();
 
@@ -5689,7 +5965,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  *   - deleted when the deck is saved, or is back to its saved state (undo),
  *   - deleted when the tab is closed with nothing unsaved,
  *   - deleted when the user discards them,
- *   - and in any case deleted after 1 day (retention, a setting from step 7).
+ *   - and in any case deleted after 1 day (retention: File > Settings, 1-30 days),
+ *   - and never written at all when the user turns drafts off (settings.js).
  *
  * Recovery: when the editor starts, or when a deck with newer drafts than its
  * file is opened, a dialog offers Recover / Compare / Discard.
@@ -5699,7 +5976,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * another tab that has the same deck open. A deck the editor never saved has
  * no id in its file yet, so its drafts are found by file name instead.
  *
- * Talks to: storage.js, autosave.js (reuses its timing scheduler), fileio.js
+ * Talks to: storage.js, settings.js, autosave.js (reuses its timing scheduler), fileio.js
  *           (current HTML, opening a recovered deck), importer.js, deck.js,
  *           history.js, dialogs.js, thumbnails.js (miniatures), ui.js (status).
  */
@@ -5812,14 +6089,13 @@ App.template.newDeckHtml = function newDeckHtml() {
     // Drafts in the editor
     // ---------------------------------------------------------------
 
-    // Defaults from SPEC 6.3; the Settings dialog (step 7) changes them.
-    App.drafts.settings = { keep: true, retentionDays: 1 };
-
     let interval = 30000;
     let available = false;
+    let started = false;     // the attempt to open the database has finished
     let session = null;      // a random id for this tab
     let deckId = null;       // the deck on screen
     let scheduler = null;
+    let lastDraftAt = null;  // time of this tab's latest draft of the unsaved changes (status bar)
 
     // Storage calls run one after another, so "delete on save" can never
     // overtake a draft that was being written at that moment.
@@ -5837,6 +6113,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.events.on('deck-loaded', () => {
             const previous = deckId;
             scheduler.cancel();
+            setLastDraft(null);
             deckId = App.deck.getDeckId();
             if (previous) {
                 // The previous deck was saved, or the user agreed to discard its changes.
@@ -5851,11 +6128,22 @@ App.template.newDeckHtml = function newDeckHtml() {
                 scheduler.notifyChange();
             } else {
                 scheduler.cancel();   // back to the saved version (e.g. by undo): nothing to protect
+                setLastDraft(null);
                 serial(() => deleteDeckDrafts(deckId, true));
             }
         });
         // A save makes every draft of this deck useless, whichever tab wrote it.
-        App.events.on('saved', () => serial(() => deleteDeckDrafts(deckId, false)));
+        App.events.on('saved', () => {
+            setLastDraft(null);
+            serial(() => deleteDeckDrafts(deckId, false));
+        });
+        App.events.on('settings-changed', (info) => {
+            if (info.before.keepDrafts && !info.after.keepDrafts) {
+                App.drafts.deleteAll();   // drafts off: none may stay behind
+            } else if (info.after.retentionDays !== info.before.retentionDays) {
+                serial(purgeExpired);
+            }
+        });
         App.events.on('file-opened', (info) => {
             offerForOpenedDeck(info.fileName, info.lastModified).catch(reportError);
         });
@@ -5880,11 +6168,11 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     async function start() {
         available = await App.storage.open();
-        if (!available) {
-            App.ui.setStatus('Recovery unavailable');
-            return;
+        started = true;
+        App.events.emit('drafts-changed');   // the status bar shows "Recovery unavailable" if it failed
+        if (available) {
+            await serial(purgeExpired);
         }
-        await serial(purgeExpired);
     }
 
     function reportError(error) {
@@ -5913,8 +6201,36 @@ App.template.newDeckHtml = function newDeckHtml() {
         return available;
     };
 
+    /* True once we know the browser blocks storage ("Recovery unavailable"). */
+    App.drafts.isUnavailable = function isUnavailable() {
+        return started && !available;
+    };
+
+    /* When this tab last stored a draft of the unsaved changes, or null. */
+    App.drafts.lastDraftAt = function lastDraftAtTime() {
+        return lastDraftAt;
+    };
+
+    function setLastDraft(time) {
+        if (lastDraftAt !== time) {
+            lastDraftAt = time;
+            App.events.emit('drafts-changed');
+        }
+    }
+
+    /* File > Settings > "Delete all drafts now": empty the whole database, Recent files included. */
+    App.drafts.deleteAll = async function deleteAll() {
+        let ok = false;
+        await serial(async () => {
+            ok = await App.storage.clearAll();
+        });
+        setLastDraft(null);
+        App.events.emit('drafts-cleared');
+        return ok;
+    };
+
     async function writeDraft() {
-        if (!available || !App.drafts.settings.keep || !App.state.hasDeck || !App.history.isDirty()) {
+        if (!available || !App.settings.get().keepDrafts || !App.state.hasDeck || !App.history.isDirty()) {
             return;
         }
         const savedAt = Date.now();
@@ -5927,10 +6243,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const all = await App.storage.listDrafts();
         const old = App.drafts.idsToPrune(all, KEEP_PER_DECK)
-            .concat(App.drafts.expiredIds(all, savedAt, App.drafts.settings.retentionDays));
+            .concat(App.drafts.expiredIds(all, savedAt, App.settings.get().retentionDays));
         await App.storage.deleteDrafts(old);
-        App.ui.setStatus('Draft saved ' + App.drafts.formatClock(savedAt));
-        App.events.emit('draft-saved', { savedAt: savedAt });
+        setLastDraft(savedAt);
     }
 
     /* ownOnly: only the drafts this tab wrote. */
@@ -5945,7 +6260,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     async function purgeExpired() {
         const all = await App.storage.listDrafts();
-        await App.storage.deleteDrafts(App.drafts.expiredIds(all, Date.now(), App.drafts.settings.retentionDays));
+        await App.storage.deleteDrafts(App.drafts.expiredIds(all, Date.now(), App.settings.get().retentionDays));
     }
 
     // ---------------------------------------------------------------
@@ -6069,7 +6384,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     function retentionText() {
-        const days = App.drafts.settings.retentionDays;
+        const days = App.settings.get().retentionDays;
         return days === 1 ? '1 day' : days + ' days';
     }
 
@@ -6118,6 +6433,172 @@ App.template.newDeckHtml = function newDeckHtml() {
             ],
         });
     }
+})();
+
+</script>
+<script>
+// ---- js/recent.js ----
+/*
+ * recent.js - the Recent files list (SPEC 6.2), off by default.
+ *
+ * Only when the user turns on "Remember recent files" in File > Settings:
+ * each deck opened from, or saved into, a file is remembered with its name
+ * and its "file handle" (Chromium can keep a handle in IndexedDB; it points
+ * at the file's place on disk, not at its content). The last 10 are kept.
+ *
+ * A page opened from disk may not ask for permission to read the file again,
+ * so choosing a recent file shows the Open window already in that file's
+ * folder; the user picks the file there (fileio.openRecent).
+ *
+ * Shown on the welcome screen and in File > Open recent….
+ *
+ * Talks to: storage.js, settings.js, fileio.js, dialogs.js, drafts.js (its
+ *           start-up opens the database), events (file-opened, saved, ...).
+ */
+
+(function () {
+    'use strict';
+
+    App.recent = {};
+
+    const MAX_ENTRIES = 10;
+
+    // ---------------------------------------------------------------
+    // Pure helpers (tested in tests/unit/recent.test.js)
+    // ---------------------------------------------------------------
+
+    App.recent.sorted = function sorted(list) {
+        return list.slice().sort((a, b) => (b.openedAt - a.openedAt) || (b.id - a.id));
+    };
+
+    /* The ids beyond the newest `max` entries. */
+    App.recent.idsToDrop = function idsToDrop(list, max) {
+        return App.recent.sorted(list).slice(max).map((entry) => entry.id).sort((a, b) => a - b);
+    };
+
+    /*
+     * The ids of entries for the same file as `handle`. isSameEntry() tells
+     * two files with the same name in different folders apart; a handle
+     * without it (or one that fails) is compared by name.
+     */
+    App.recent.duplicateIds = async function duplicateIds(list, handle) {
+        const ids = [];
+        for (const entry of list) {
+            let same = entry.name === handle.name;
+            if (same && entry.handle && typeof entry.handle.isSameEntry === 'function') {
+                try {
+                    same = await entry.handle.isSameEntry(handle);
+                } catch (error) {
+                    same = true;   // cannot tell: same name, so treat it as the same file
+                }
+            }
+            if (same) {
+                ids.push(entry.id);
+            }
+        }
+        return ids;
+    };
+
+    // ---------------------------------------------------------------
+    // The list in the editor
+    // ---------------------------------------------------------------
+
+    let entries = [];       // newest first, as last read from storage
+    let welcomeList = null;
+
+    App.recent.init = function init() {
+        welcomeList = buildWelcomeList();
+
+        App.events.on('file-opened', (info) => remember(info.handle));
+        App.events.on('saved', (info) => {
+            if (info.toHandle) {
+                remember(App.state.fileHandle);
+            }
+        });
+        App.events.on('settings-changed', async (info) => {
+            if (info.before.rememberRecent && !info.after.rememberRecent) {
+                await App.storage.clearRecent();   // turning it off forgets the list
+            }
+            refresh();
+        });
+        App.events.on('drafts-cleared', refresh);
+        App.drafts.ready.then(refresh);
+    };
+
+    App.recent.hasEntries = function hasEntries() {
+        return entries.length > 0;
+    };
+
+    async function remember(handle) {
+        if (!handle || !App.settings.get().rememberRecent || !App.storage.isAvailable()) {
+            return;
+        }
+        const list = await App.storage.listRecent();
+        await App.storage.deleteRecent(await App.recent.duplicateIds(list, handle));
+        await App.storage.addRecent({ name: handle.name, openedAt: Date.now(), handle: handle });
+        await App.storage.deleteRecent(App.recent.idsToDrop(await App.storage.listRecent(), MAX_ENTRIES));
+        await refresh();
+    }
+
+    async function refresh() {
+        const on = App.settings.get().rememberRecent && App.storage.isAvailable();
+        entries = on ? App.recent.sorted(await App.storage.listRecent()) : [];
+        renderList(welcomeList.querySelector('ul'), entries, (entry) => App.recent.open(entry));
+        welcomeList.hidden = entries.length === 0;
+        App.events.emit('recent-changed');
+    }
+
+    function buildWelcomeList() {
+        const section = App.util.el('section', { id: 'welcome-recent', hidden: true }, [
+            App.util.el('h2', {}, ['Recent']),
+            App.util.el('ul', { class: 'recent-list' }),
+            App.util.el('p', { class: 'welcome-hint' }, ['Opens the Open window in the file\'s folder.']),
+        ]);
+        document.getElementById('welcome').appendChild(section);
+        return section;
+    }
+
+    function renderList(list, items, onChoose) {
+        list.innerHTML = '';
+        items.forEach((entry) => {
+            list.appendChild(App.util.el('li', {}, [App.util.el('button', {
+                type: 'button', class: 'recent-item', title: 'Open "' + entry.name + '"',
+                onclick: () => onChoose(entry),
+            }, [
+                App.util.el('span', { class: 'recent-name' }, [entry.name]),
+                App.util.el('span', { class: 'recent-when' }, [App.drafts.formatTime(entry.openedAt)]),
+            ])]));
+        });
+    }
+
+    App.recent.open = function open(entry) {
+        return App.fileio.openRecent(entry.handle).catch((error) => {
+            App.ui.setBusy(null);
+            console.error(error);
+            App.dialogs.alert('Could not open the file', (error && error.message) || String(error));
+        });
+    };
+
+    /* File > Open recent…: the same list in a dialog. */
+    App.recent.openDialog = async function openDialog() {
+        let chosen = null;
+        const list = App.util.el('ul', { class: 'recent-list' });
+        const body = App.util.el('div', {}, [
+            list,
+            App.util.el('p', { class: 'recent-note' }, ['Opens the Open window in the file\'s folder; choose the file there.']),
+        ]);
+        let close = null;
+        renderList(list, entries, (entry) => {
+            chosen = entry;
+            close();
+        });
+        const shown = App.dialogs.show({ title: 'Open recent', body: body, buttons: [{ label: 'Cancel', value: null }] });
+        close = () => body.closest('dialog').close();   // resolves the dialog (as Esc does)
+        await shown;
+        if (chosen) {
+            await App.recent.open(chosen);
+        }
+    };
 })();
 
 </script>
@@ -6186,6 +6667,10 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.commands.init = function init() {
         App.commands.define('newDeck', { label: 'New', run: () => App.fileio.newDeck() });
         App.commands.define('open', { label: 'Open…', run: () => App.fileio.open() });
+        App.commands.define('openRecent', {
+            label: 'Open recent…', run: () => App.recent.openDialog(), isEnabled: () => App.recent.hasEntries(),
+        });
+        App.commands.define('settings', { label: 'Settings…', run: () => App.settings.openDialog() });
         App.commands.define('save', { label: 'Save', run: () => App.fileio.save(), isEnabled: hasDeck });
         App.commands.define('saveAs', { label: 'Save As…', run: () => App.fileio.saveAs(), isEnabled: hasDeck });
 
@@ -6332,9 +6817,11 @@ App.template.newDeckHtml = function newDeckHtml() {
     const FILE_MENU = [
         ['newDeck', 'newDeck', ''],
         ['open', 'open', 'Ctrl+O'],
+        ['openRecent', 'recent', ''],
         ['save', 'save', 'Ctrl+S'],
         ['saveAs', 'saveAs', 'Ctrl+Shift+S'],
         ['revertToOpened', 'undo', ''],
+        ['settings', 'settings', ''],
     ];
 
     let panel = null;
@@ -6447,7 +6934,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
         });
 
-        ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed']
+        ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
+         'recent-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 
@@ -6472,9 +6960,15 @@ App.template.newDeckHtml = function newDeckHtml() {
  *
  * It mostly listens to events and updates text; it never changes the deck.
  *
- * Talks to: events (deck-loaded, slide-changed, history-changed, saved),
- *           deck.js, fileio.js (window title), commands.js. (The zoom controls
- *           in the status bar belong to canvas.js.)
+ * The status bar has two texts: the save state (always one of Saved ·
+ * Saving… · Unsaved changes · AutoSave off, plus "Draft saved 14:32" or
+ * "Recovery unavailable" when they apply, SPEC 6.4) and a message about the
+ * last action ("Opened deck.html").
+ *
+ * Talks to: events (deck-loaded, slide-changed, history-changed, saved, saving,
+ *           autosave-changed, drafts-changed), deck.js, fileio.js (window title),
+ *           autosave.js, drafts.js, commands.js. (The zoom controls in the
+ *           status bar belong to canvas.js.)
  */
 
 (function () {
@@ -6484,12 +6978,36 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     const nodes = {};
 
+    /*
+     * The save-state text (tested in tests/unit/settings.test.js).
+     * state = { hasDeck, saving, dirty, isNew, autosaveOff, draftAt, recoveryUnavailable }
+     */
+    App.ui.statusText = function statusText(state) {
+        const parts = [];
+        if (state.hasDeck) {
+            if (state.saving) {
+                parts.push('Saving…');
+            } else if (!state.dirty) {
+                parts.push(state.isNew ? 'Not saved yet' : 'Saved');
+            } else {
+                parts.push(state.autosaveOff ? 'AutoSave off' : 'Unsaved changes');
+            }
+            if (state.dirty && !state.saving && state.draftAt) {
+                parts.push('Draft saved ' + App.drafts.formatClock(state.draftAt));
+            }
+        }
+        if (state.recoveryUnavailable) {
+            parts.push('Recovery unavailable');
+        }
+        return parts.join(' · ');
+    };
+
     function byId(id) {
         return document.getElementById(id);
     }
 
     App.ui.init = function init() {
-        ['title-file', 'title-dirty', 'status-slide', 'status-message', 'notes-text',
+        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'notes-text',
          'welcome', 'canvas-stage-box', 'drop-zone', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
@@ -6509,7 +7027,21 @@ App.template.newDeckHtml = function newDeckHtml() {
             updateSlideInfo();
         });
         App.events.on('saved', App.ui.updateTitle);
+        ['deck-loaded', 'history-changed', 'saved', 'saving', 'autosave-changed', 'drafts-changed']
+            .forEach((name) => App.events.on(name, updateSaveState));
     };
+
+    function updateSaveState() {
+        nodes['status-save'].textContent = App.ui.statusText({
+            hasDeck: App.state.hasDeck,
+            saving: App.fileio.isSaving(),
+            dirty: App.state.hasDeck && App.history.isDirty(),
+            isNew: App.state.isNew,
+            autosaveOff: App.autosave.isOff(),
+            draftAt: App.drafts.lastDraftAt(),
+            recoveryUnavailable: App.drafts.isUnavailable(),
+        });
+    }
 
     // Save / Undo / Redo in the title bar, like PowerPoint's Quick Access Toolbar.
     function buildQuickAccess() {
@@ -6546,11 +7078,6 @@ App.template.newDeckHtml = function newDeckHtml() {
         document.title = App.fileio.windowTitle(App.state.hasDeck ? App.state.fileName : null, dirty);
         nodes['title-file'].textContent = App.state.hasDeck ? App.state.fileName : 'Deck Editor';
         nodes['title-dirty'].hidden = !dirty;
-        if (App.state.hasDeck && !dirty && nodes['status-message'].textContent === 'Unsaved changes') {
-            App.ui.setStatus('Saved');
-        } else if (dirty) {
-            App.ui.setStatus('Unsaved changes');
-        }
     };
 
     function updateSlideInfo() {

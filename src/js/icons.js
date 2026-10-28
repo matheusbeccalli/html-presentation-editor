@@ -38,6 +38,8 @@
         front: '<rect x="3" y="3" width="8" height="8" stroke-dasharray="2 1.5"/><rect x="8" y="8" width="9" height="9" fill="currentColor" fill-opacity="0.25"/>',
         forward: '<rect x="3" y="3" width="8" height="8"/><rect x="8" y="8" width="9" height="9" fill="currentColor" fill-opacity="0.25"/>',
         backward: '<rect x="8" y="8" width="9" height="9"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
+        recent: '<circle cx="10" cy="10" r="7.5"/><path d="M10 5.5V10l3 2"/>',
+        settings: '<circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2.5M10 15v2.5M2.5 10H5M15 10h2.5M4.7 4.7l1.8 1.8M13.5 13.5l1.8 1.8M4.7 15.3l1.8-1.8M13.5 6.5l1.8-1.8"/>',
         back: '<rect x="8" y="8" width="9" height="9" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
     };
 

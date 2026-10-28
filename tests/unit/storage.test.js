@@ -58,3 +58,17 @@ test('storage: a missing IndexedDB (undefined) also returns false', async () => 
     App.storage.close();
     assertEqual(await App.storage.open({ name: TEST_DB, indexedDB: null }), false);
 });
+
+test('storage: recent files are added, listed, deleted and cleared', async () => {
+    await freshStorage();
+    const a = await App.storage.addRecent({ name: 'a.html', openedAt: 1, handle: { kind: 'file', name: 'a.html' } });
+    const b = await App.storage.addRecent({ name: 'b.html', openedAt: 2, handle: null });
+    assertEqual((await App.storage.listRecent()).map((entry) => entry.name), ['a.html', 'b.html']);
+    assert(await App.storage.deleteRecent([a]));
+    assertEqual((await App.storage.listRecent()).map((entry) => entry.id), [b]);
+    await App.storage.addDraft({ deckId: 'd1', savedAt: 1 }, 'A');
+    assert(await App.storage.clearRecent());
+    assertEqual(await App.storage.listRecent(), []);
+    assertEqual((await App.storage.listDrafts()).length, 1, 'clearing recent files keeps drafts');
+    App.storage.close();
+});

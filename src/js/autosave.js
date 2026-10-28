@@ -119,6 +119,7 @@
     let savedToFile = false;       // a manual save into a writable file happened this session
     let askingUser = false;        // the "changed on disk" question is open
     let composing = false;         // IME composition in progress
+    let switchedOff = false;       // was on, then switched off or paused this session (status bar)
     let toggle = null;
 
     App.autosave.init = function init() {
@@ -126,6 +127,7 @@
         buildToggle();
 
         App.events.on('deck-loaded', () => {
+            switchedOff = false;
             setEnabled(false);
             userTurnedOff = false;
             savedToFile = false;
@@ -179,12 +181,18 @@
         return enabled;
     };
 
+    /* True when AutoSave was on and is now off (by the user, a conflict or an error). */
+    App.autosave.isOff = function isOff() {
+        return !enabled && switchedOff;
+    };
+
     function listenForComposition(targetWindow) {
         targetWindow.addEventListener('compositionstart', () => { composing = true; });
         targetWindow.addEventListener('compositionend', () => { composing = false; });
     }
 
     function setEnabled(value, reason) {
+        switchedOff = !value && (switchedOff || (enabled && !!reason));
         enabled = value;
         if (!value) {
             scheduler.cancel();

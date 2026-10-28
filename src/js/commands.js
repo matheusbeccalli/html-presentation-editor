@@ -61,6 +61,10 @@
     App.commands.init = function init() {
         App.commands.define('newDeck', { label: 'New', run: () => App.fileio.newDeck() });
         App.commands.define('open', { label: 'Open…', run: () => App.fileio.open() });
+        App.commands.define('openRecent', {
+            label: 'Open recent…', run: () => App.recent.openDialog(), isEnabled: () => App.recent.hasEntries(),
+        });
+        App.commands.define('settings', { label: 'Settings…', run: () => App.settings.openDialog() });
         App.commands.define('save', { label: 'Save', run: () => App.fileio.save(), isEnabled: hasDeck });
         App.commands.define('saveAs', { label: 'Save As…', run: () => App.fileio.saveAs(), isEnabled: hasDeck });
 

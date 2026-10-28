@@ -44,10 +44,12 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |
 | `autosave.js` | AutoSave to the file (SPEC 6.1): the title-bar switch, a scheduler (5 s after the last change, max 30 s, never during a drag/IME, never two writes), the changed-on-disk question | fileio, history, dialogs |
 | `storage.js` | The editor's IndexedDB (drafts, draft HTML, recent files); never throws: blocked storage gives false/null/[] | — |
+| `settings.js` | Privacy settings (keep drafts, retention 1–30 days, recent files) in localStorage, and the File > Settings dialog | storage, drafts, dialogs |
 | `drafts.js` | Crash-recovery drafts (SPEC 6.2): a draft 30 s after unsaved changes (last 5 per deck), deleted on save/clean state/discard/after 1 day; Recover / Compare / Discard dialogs | storage, autosave (scheduler), fileio, importer, deck, thumbnails |
+| `recent.js` | Recent files (off by default): remembers file handles on open/save, last 10; welcome list and File > Open recent… open the picker in the file's folder | storage, settings, fileio |
 | `commands.js` | Every user action by name; one place that reports errors | fileio, history, deck |
 | `ribbon.js` | File menu and tabs; buttons only name commands | commands |
-| `ui.js` | Title bar, status bar, notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events |
+| `ui.js` | Title bar, status bar (save state per SPEC 6.4 + last message), notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events, fileio, autosave, drafts |
 
 **Planned, Phase 3: `text.js`, the only door to text (SPEC 3.7).** Every text action (ribbon, shortcuts, paste,
 import, save) goes through `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`.

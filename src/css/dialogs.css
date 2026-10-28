@@ -39,3 +39,20 @@
 .compare-pair { display: flex; gap: 16px; flex-wrap: wrap; }
 .compare-side { margin: 0; }
 .compare-side figcaption { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
+/* File > Settings (settings.js) and File > Open recent (recent.js). */
+.settings h3 { margin: 4px 0 8px; font-size: 13px; font-weight: 600; }
+.settings-row { display: block; margin: 8px 0; }
+.settings-row input[type="number"] { width: 56px; }
+.settings-note, .recent-note { color: var(--text-muted); font-size: 12px; margin: 10px 0 !important; }
+.settings-warning { color: #a4262c; margin-bottom: 8px !important; }
+.settings-result { font-size: 12px; min-height: 1em; }
+.recent-list { list-style: none; margin: 0; padding: 0; }
+.recent-item {
+    display: flex; justify-content: space-between; gap: 16px; width: 100%;
+    padding: 6px 8px; border: 0; background: none; text-align: left; cursor: pointer; font: inherit; border-radius: 3px;
+}
+.recent-item:hover, .recent-item:focus-visible { background: #f3f2f1; }
+.recent-when { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+#welcome-recent { margin-top: 18px; text-align: left; }
+#welcome-recent h2 { font-size: 13px; font-weight: 600; margin: 0 0 4px; }

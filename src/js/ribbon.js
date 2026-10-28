@@ -47,9 +47,11 @@
     const FILE_MENU = [
         ['newDeck', 'newDeck', ''],
         ['open', 'open', 'Ctrl+O'],
+        ['openRecent', 'recent', ''],
         ['save', 'save', 'Ctrl+S'],
         ['saveAs', 'saveAs', 'Ctrl+Shift+S'],
         ['revertToOpened', 'undo', ''],
+        ['settings', 'settings', ''],
     ];
 
     let panel = null;
@@ -162,7 +164,8 @@
             }
         });
 
-        ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed']
+        ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
+         'recent-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 

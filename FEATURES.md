@@ -48,10 +48,10 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [x] **Done when:** a Copilot deck opens, shows all slides, saves back unchanged (except normalization), and the saved file presents on its own. *(Automated with the sample decks in `tests/e2e_test.py`; the manual checks below are for you.)*
   - [ ] In Edge: File > Open a **real** Copilot deck (keep it in `private/`), check every slide is there and looks like the original
   - [ ] Ctrl+S on a deck opened with File > Open: Edge asks for write permission once, then the file on disk is overwritten (open it in Notepad to confirm)
-  - [ ] Drop a deck onto the window, then Ctrl+S: it saves to the same file
-  - [ ] Double-click the saved file: arrows, Space, Home/End and F (full screen) work; hidden slides are skipped
+  - [x] Drop a deck onto the window, then Ctrl+S: it saves to the same file
+  - [x] Double-click the saved file: arrows, Space, Home/End and F (full screen) work; hidden slides are skipped
   - [ ] Ctrl+P on the saved file: one slide per landscape page, hidden slides left out
-  - [ ] Close the tab with unsaved changes: the browser asks before leaving
+  - [x] Close the tab with unsaved changes: the browser asks before leaving
 
 ## Phase 2: Select, move, resize, autosave
 

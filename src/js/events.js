@@ -11,6 +11,11 @@
  *   'history-changed'  a change, undo or redo happened       (history.js via app.js)
  *   'saved'            the deck was written to disk          (fileio.js)
  *
+ * Added in Phase 2:
+ *   'selection-changed' another element (or none) was selected (selection.js)
+ *   'clipboard-changed' something was copied, Paste can run    (elements.js)
+ *   'zoom-changed'      the canvas zoom changed                (canvas.js)
+ *
  * Talks to: nothing (others call it). Created in app.js as App.events.
  */
 

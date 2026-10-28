@@ -172,3 +172,56 @@ test('history: undoLabel names the next step', () => {
     history.undo();
     assertEqual(history.redoLabel(), 'Remove blocked references');
 });
+
+// A clock the test controls, so "within one second" needs no real waiting.
+function fakeClock() {
+    let now = 1000;
+    return { now: () => now, advance: (ms) => { now += ms; } };
+}
+
+function setText(doc, id, text) {
+    doc.querySelector('[data-id="' + id + '"]').textContent = text;
+}
+
+test('history: changes with the same mergeKey within a second become one undo step (held arrow key)', () => {
+    const doc = deckWithTwoSlides();
+    const clock = fakeClock();
+    const history = App.createHistory({ getDoc: () => doc, now: clock.now });
+    ['A', 'B', 'C'].forEach((text) => {
+        history.change('Nudge', { slideId: 's1' }, () => setText(doc, 'e1', text), { mergeKey: 'nudge:e1' });
+        clock.advance(200);
+    });
+    history.undo();
+    assertEqual(textOf(doc, 'e1'), 'One', 'one undo goes back to before the first nudge');
+    assert(!history.canUndo(), 'only one step was recorded');
+    history.redo();
+    assertEqual(textOf(doc, 'e1'), 'C', 'redo goes to the last nudge');
+});
+
+test('history: no merging after a pause, with another key, or across a save', () => {
+    const doc = deckWithTwoSlides();
+    const clock = fakeClock();
+    const history = App.createHistory({ getDoc: () => doc, now: clock.now });
+    const nudge = (text, key) => history.change('Nudge', { slideId: 's1' }, () => setText(doc, 'e1', text), { mergeKey: key });
+    nudge('A', 'k');
+    clock.advance(1500);
+    nudge('B', 'k');            // after a pause: new step
+    nudge('C', 'other');        // different key: new step
+    history.markSaved();
+    nudge('D', 'other');        // after a save: new step, so the deck becomes dirty again
+    assert(history.isDirty(), 'dirty after the change that followed the save');
+    let steps = 0;
+    while (history.undo()) {
+        steps += 1;
+    }
+    assertEqual(steps, 4);
+});
+
+test('history: a merged change still notifies listeners (thumbnails, autosave)', () => {
+    const doc = deckWithTwoSlides();
+    const calls = [];
+    const history = App.createHistory({ getDoc: () => doc, onChange: (info) => calls.push(info.action) });
+    history.change('Nudge', { slideId: 's1' }, () => setText(doc, 'e1', 'A'), { mergeKey: 'k' });
+    history.change('Nudge', { slideId: 's1' }, () => setText(doc, 'e1', 'B'), { mergeKey: 'k' });
+    assertEqual(calls, ['change', 'change']);
+});

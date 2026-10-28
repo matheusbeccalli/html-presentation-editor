@@ -58,10 +58,10 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 
 - [x] Click to select; selection box with 8 resize handles drawn in the overlay layer
 - [x] Drag to move; Shift while resizing keeps the aspect ratio *(snapping, and Alt to turn it off, moved to Phase 7 by decision)*
-- [ ] Arrow keys nudge 1 px, Shift+arrow 10 px
-- [ ] Delete removes the selected element
-- [ ] Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D (duplicate), also across slides
-- [ ] Bring forward / send backward / bring to front / send to back
+- [x] Arrow keys nudge 1 px, Shift+arrow 10 px (a held key is one undo step)
+- [x] Delete removes the selected element
+- [x] Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D (duplicate), also across slides
+- [x] Bring forward / send backward / bring to front / send to back
 - [ ] Format pane "Size & position": X, Y, W, H in px, editable
 - [ ] Right-click context menu with the common actions
 - [ ] Canvas zoom: Ctrl+mouse wheel and zoom slider, 50–400%

@@ -25,7 +25,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `util.js` | Pure helpers: px↔inch, scaling px values, escaping, ids, debounce, `el()` | — |
 | `events.js` | Tiny publish/subscribe bus (`App.events.on/emit`) | — |
 | `shortcuts.js` | The one key → command registry; ignores keys while typing | commands |
-| `history.js` | Undo/redo by HTML snapshots of a slide (or the whole deck); dirty tracking | deck (via `getDoc`) |
+| `history.js` | Undo/redo by HTML snapshots of a slide (or the whole deck); dirty tracking; `mergeKey` joins quick repeats (held arrow key) into one step | deck (via `getDoc`) |
 | `charts.js` | Chart JSON → SVG. **Phase 1: placeholder only** | importer |
 | `template.js` | The blank deck for File > New | fileio |
 | `importer.js` | Parse, sanitize (scripts, handlers), find blocked/missing refs, detect slides, run the import | normalize, charts |
@@ -37,6 +37,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `canvas.js` | Fit-to-window zoom of the 1280×720 stage; overlay layer for handles | deck |
 | `transform.js` | Pure maths: move/resize a `{left, top, width, height}` box, hit-test, stacking order | — |
 | `selection.js` | The overlay catches mouse actions: click selects, drag moves, handles resize; draws the selection box | transform, history, deck, canvas |
+| `elements.js` | Actions on the selected element: nudge (merged undo), delete, cut/copy/paste/duplicate (own clipboard, fresh ids), stacking order | selection, transform, history, deck |
 | `thumbnails.js` | Slide rail; one small sandboxed iframe per slide, drawn lazily, refreshed debounced | deck, history events |
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |
 | `commands.js` | Every user action by name; one place that reports errors | fileio, history, deck |

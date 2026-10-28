@@ -455,6 +455,91 @@ def test_select_move_resize(browser):
     editor.close()
 
 
+def test_nudge_delete_clipboard_and_order(browser):
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    editor.close_dialog_if_open()
+    page = editor.page
+    selected = "App.selection.selectedId()"
+    undo_steps = """() => { let n = 0; while (App.history.canUndo()) { App.history.undo(); n++; } return n; }"""
+
+    # Arrow keys nudge 1 px, Shift+arrow 10 px; a burst of nudges is one undo step.
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    for _ in range(5):
+        page.keyboard.press("ArrowRight")
+    page.keyboard.press("Shift+ArrowDown")
+    rect = element_rect(page, "e2")
+    check((rect["left"], rect["top"]) == (69, 240), f"nudged: {rect}")
+    page.keyboard.press("Control+z")
+    rect = element_rect(page, "e2")
+    check((rect["left"], rect["top"]) == (64, 230), f"one undo reverts the whole burst: {rect}")
+    check(not page.evaluate("App.history.canUndo()"), "the burst was a single step")
+
+    # Delete removes; undo brings it back.
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("Delete")
+    check(page.evaluate("!App.deck.getDocument().querySelector('[data-id=\"e2\"]')"), "Delete removed e2")
+    check(page.evaluate(selected) is None, "nothing selected after delete")
+    page.keyboard.press("Control+z")
+    check(element_rect(page, "e2")["left"] == 64, "undo restores e2")
+
+    # Copy on slide 1, paste on slide 2: same position, fresh id, on top, selected.
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("Control+c")
+    page.keyboard.press("PageDown")
+    page.keyboard.press("Control+v")
+    new_id = page.evaluate(selected)
+    check(new_id not in (None, "e2"), f"pasted element selected with a fresh id: {new_id}")
+    ids = page.evaluate("Array.from(App.deck.getDocument().querySelectorAll('[data-id]'), n => n.getAttribute('data-id'))")
+    check(len(ids) == len(set(ids)), "all data-id values stay unique")
+    pasted = page.evaluate("""id => {
+        const el = App.deck.getDocument().querySelector('[data-id="' + id + '"]');
+        const slide = el.closest('section.slide');
+        const zs = App.transform.topLevelElements(slide).map(App.transform.zIndexOf);
+        return { slide: slide.getAttribute('data-slide-id'), text: el.textContent.trim(),
+                 rect: App.transform.readRect(el), z: App.transform.zIndexOf(el), maxZ: Math.max(...zs) };
+    }""", new_id)
+    check(pasted["slide"] != "s1" and pasted["text"] == "Projeto Atlas", f"pasted on slide 2: {pasted}")
+    check(pasted["rect"]["left"] == 64 and pasted["rect"]["top"] == 230, "keeps its position on another slide")
+    check(pasted["z"] == pasted["maxZ"], "pasted on top")
+    page.keyboard.press("Control+v")
+    check(element_rect(page, page.evaluate(selected))["left"] == 74, "a second paste steps 10 px aside")
+
+    # Duplicate on the same slide steps aside; cut + paste puts it back in the same spot.
+    page.keyboard.press("PageUp")
+    page.mouse.click(*slide_to_screen(page, 100, 70))
+    page.keyboard.press("Control+d")
+    dup = page.evaluate(selected)
+    check(dup != "e1" and element_rect(page, dup)["left"] == 74, "duplicate 10 px down-right")
+    page.keyboard.press("Control+x")
+    check(page.evaluate("id => !App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]')", dup), "cut removes")
+    page.keyboard.press("Control+v")
+    check(element_rect(page, page.evaluate(selected))["left"] == 74, "cut then paste: same spot")
+
+    # Stacking order from the Arrange tab: the logo (z 1, at the back) to the front and back again.
+    page.mouse.click(*slide_to_screen(page, 68, 60))   # the corner the pasted copy (at 74, 66) does not cover
+    check(page.evaluate(selected) == "e1", "logo selected")
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.click("button[data-command='bringToFront']")
+    order = page.evaluate("App.transform.topLevelElements(App.deck.getCurrentSlide()).map(e => e.getAttribute('data-id'))")
+    check(order[-1] == "e1", f"logo in front: {order}")
+    check(page.is_disabled("button[data-command='bringForward']"), "Bring forward disabled at the top")
+    page.click("button[data-command='sendToBack']")
+    order = page.evaluate("App.transform.topLevelElements(App.deck.getCurrentSlide()).map(e => e.getAttribute('data-id'))")
+    check(order[0] == "e1", f"logo at the back: {order}")
+    page.screenshot(path=str(OUTPUT / "13-arrange.png"))
+
+    # Working in the slide rail clears the element selection, so Delete there never removes an element.
+    page.click(".thumb[data-index='0']")
+    check(page.evaluate(selected) is None, "clicking a thumbnail deselects the element")
+    page.keyboard.press("Delete")
+    check(page.evaluate("!!App.deck.getDocument().querySelector('[data-id=\"e1\"]')"), "Delete in the rail kept e1")
+
+    check(page.evaluate(undo_steps) >= 6, "every action was an undo step")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_drag_and_drop_opens_a_deck(browser):
     editor = Editor(browser)
     text = CONTRACT.read_text(encoding="utf-8")
@@ -506,6 +591,7 @@ TESTS = [
     test_drag_and_drop_opens_a_deck,
     test_heavy_deck_stays_responsive,
     test_select_move_resize,
+    test_nudge_delete_clipboard_and_order,
 ]
 
 

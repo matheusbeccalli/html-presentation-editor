@@ -15,6 +15,11 @@
  * For long interactions such as a drag (Phase 2), call begin() when the drag
  * starts and commit() when it ends, so the whole drag is one undo step.
  *
+ * Merging: change(label, scope, fn, { mergeKey: 'nudge:e3' }) joins the
+ * previous step when that step has the same mergeKey and is less than a
+ * second old. Holding an arrow key fires ~30 nudges a second; this makes them
+ * one undo step instead of filling the 100-step history.
+ *
  * Scope of a change:
  *   { slideId: 's3' }  -> snapshot of that slide only (fast, the common case)
  *   'deck'             -> snapshot of the whole <head> and <body> (theme,
@@ -32,6 +37,8 @@ App.createHistory = function createHistory(options) {
     const getDoc = options.getDoc;
     const limit = options.limit || 100;
     const onChange = options.onChange || function () {};
+    const now = options.now || (() => Date.now());   // tests pass a fake clock
+    const MERGE_WINDOW_MS = 1000;
 
     let undoStack = [];      // entries: { label, scope, before, after, stateBefore, stateAfter }
     let redoStack = [];
@@ -77,10 +84,11 @@ App.createHistory = function createHistory(options) {
 
     // ---- Recording ----
 
-    function push(label, scope, before) {
+    function push(label, scope, before, mergeKey) {
         const entry = {
             label: label, scope: scope, before: before, after: null,
             stateBefore: currentState, stateAfter: nextStateNumber,
+            mergeKey: mergeKey || null, time: now(),
         };
         nextStateNumber += 1;
         currentState = entry.stateAfter;
@@ -93,11 +101,25 @@ App.createHistory = function createHistory(options) {
     }
 
     /*
+     * Can a change with this mergeKey join the last step? Only if that step is
+     * the current state (nothing undone since), has the same key, is recent,
+     * and was not saved: a change after a save must make the deck dirty again.
+     */
+    function canMerge(mergeKey) {
+        const last = undoStack[undoStack.length - 1];
+        return !!mergeKey && !!last && last.mergeKey === mergeKey &&
+            currentState === last.stateAfter && savedState !== currentState &&
+            now() - last.time < MERGE_WINDOW_MS;
+    }
+
+    /*
      * Run `fn`, which changes the deck, as one undoable step.
      * If `fn` throws, the deck is put back as it was and nothing is recorded.
+     * options.mergeKey: see "Merging" at the top of this file.
      */
-    function change(label, scope, fn) {
+    function change(label, scope, fn, changeOptions) {
         validateScope(scope);
+        const mergeKey = changeOptions && changeOptions.mergeKey;
         const before = takeSnapshot(scope);
         try {
             fn();
@@ -105,7 +127,13 @@ App.createHistory = function createHistory(options) {
             restoreSnapshot(scope, before);
             throw error;
         }
-        push(label, scope, before);
+        if (canMerge(mergeKey)) {
+            // Keep the older "before" snapshot; just refresh the time window.
+            undoStack[undoStack.length - 1].time = now();
+            onChange({ action: 'change', label: label, scope: scope, merged: true });
+            return;
+        }
+        push(label, scope, before, mergeKey);
     }
 
     function begin(label, scope) {

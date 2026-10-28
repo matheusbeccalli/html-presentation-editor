@@ -31,6 +31,14 @@
         slides: '<rect x="2.5" y="4" width="15" height="9.5"/><path d="M6 16.5h8"/>',
         hidden: '<path d="M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z"/><path d="M3.5 16.5l13-13"/>',
         file: '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M7.5 10h5M7.5 13h5"/>',
+        cut: '<circle cx="6" cy="14.5" r="2.5"/><circle cx="14" cy="14.5" r="2.5"/><path d="M7.5 12.5L14 3M12.5 12.5L6 3"/>',
+        copy: '<rect x="7" y="7" width="10" height="10.5" rx="1"/><path d="M13 7V3.5H3.5V14H7"/>',
+        paste: '<rect x="4" y="4" width="12" height="13.5" rx="1"/><path d="M7.5 4V2.5h5V4"/><path d="M7 9h6M7 12h6"/>',
+        duplicate: '<rect x="3" y="3" width="9.5" height="9.5"/><rect x="7.5" y="7.5" width="9.5" height="9.5"/>',
+        front: '<rect x="3" y="3" width="8" height="8" stroke-dasharray="2 1.5"/><rect x="8" y="8" width="9" height="9" fill="currentColor" fill-opacity="0.25"/>',
+        forward: '<rect x="3" y="3" width="8" height="8"/><rect x="8" y="8" width="9" height="9" fill="currentColor" fill-opacity="0.25"/>',
+        backward: '<rect x="8" y="8" width="9" height="9"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
+        back: '<rect x="8" y="8" width="9" height="9" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
     };
 
     App.icons.get = function get(name) {

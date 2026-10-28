@@ -185,6 +185,21 @@
         ['Home', 'firstSlide'],
         ['End', 'lastSlide'],
         ['Escape', 'deselect'],
+        ['ArrowLeft', 'nudgeLeft'],
+        ['ArrowRight', 'nudgeRight'],
+        ['ArrowUp', 'nudgeUp'],
+        ['ArrowDown', 'nudgeDown'],
+        ['Shift+ArrowLeft', 'nudgeLeftFar'],
+        ['Shift+ArrowRight', 'nudgeRightFar'],
+        ['Shift+ArrowUp', 'nudgeUpFar'],
+        ['Shift+ArrowDown', 'nudgeDownFar'],
+        ['Delete', 'delete'],
+        ['Backspace', 'delete'],
+        ['Ctrl+X', 'cut'],
+        ['Ctrl+C', 'copy'],
+        ['Ctrl+V', 'paste'],
+        // Ctrl+D is the browser's "bookmark this page"; never let it open with nothing selected.
+        ['Ctrl+D', 'duplicate', { blockBrowserDefault: true }],
     ];
 
     App.shortcuts.init = function init() {

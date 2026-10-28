@@ -11,7 +11,8 @@
  *   - after a change, only the affected slide is redrawn, after a short pause
  *     (debounced), so typing does not redraw on every key press.
  *
- * Talks to: deck.js (reads slides, goTo on click), events from history.js.
+ * Talks to: deck.js (reads slides, goTo on click), events from history.js,
+ *           selection.js (working in the rail clears the element selection).
  */
 
 (function () {
@@ -35,6 +36,11 @@
         App.events.on('deck-loaded', rebuild);
         App.events.on('slide-changed', highlightCurrent);
         App.events.on('history-changed', onHistoryChanged);
+
+        // Working in the rail means working on slides, not on an element (as in PowerPoint):
+        // without this, Delete or the arrow keys here would act on the element still selected.
+        rail.addEventListener('pointerdown', () => App.selection.clear());
+        rail.addEventListener('focusin', () => App.selection.clear());
 
         rail.addEventListener('keydown', (event) => {
             if (event.key === 'ArrowDown') {

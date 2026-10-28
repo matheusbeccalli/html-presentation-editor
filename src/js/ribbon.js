@@ -19,13 +19,24 @@
         {
             id: 'home', label: 'Home',
             groups: [
+                { label: 'Clipboard', commands: [['paste', 'paste'], ['cut', 'cut'], ['copy', 'copy'], ['duplicate', 'duplicate']] },
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
-            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). Text formatting arrives in Phase 3.',
+            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions); arrow keys nudge it. Text formatting arrives in Phase 3.',
         },
         { id: 'insert', label: 'Insert', note: 'Text boxes, tables, images, shapes and charts arrive in Phases 3 to 6.' },
-        { id: 'arrange', label: 'Arrange', note: 'Align, distribute, group and rotate arrive in Phase 7.' },
+        {
+            id: 'arrange', label: 'Arrange',
+            groups: [
+                {
+                    label: 'Order',
+                    commands: [['bringToFront', 'front'], ['bringForward', 'forward'],
+                        ['sendBackward', 'backward'], ['sendToBack', 'back']],
+                },
+            ],
+            note: 'Align, distribute, group and rotate arrive in Phase 7.',
+        },
         {
             id: 'slideshow', label: 'Slide Show',
             note: 'Presenting from the editor arrives in Phase 8. Saved decks already present on their own: open the saved file in the browser and use the arrow keys (F = full screen).',
@@ -155,7 +166,8 @@
             }
         });
 
-        ['deck-loaded', 'history-changed', 'saved'].forEach((name) => App.events.on(name, App.ribbon.refresh));
+        ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed']
+            .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 
     App.ribbon.showDefaultTab = function showDefaultTab() {

@@ -6,7 +6,7 @@
  * action behaves the same however it is started, and errors are shown in one
  * consistent way.
  *
- * Talks to: fileio.js, history.js, deck.js, importer.js, selection.js (the actions),
+ * Talks to: fileio.js, history.js, deck.js, importer.js, selection.js, elements.js (the actions),
  *           shortcuts.js and ribbon.js (they run commands), ui.js.
  */
 
@@ -87,6 +87,30 @@
         App.commands.define('previousSlide', { label: 'Previous slide', run: () => App.deck.previous(), isEnabled: hasDeck });
         App.commands.define('firstSlide', { label: 'First slide', run: () => App.deck.first(), isEnabled: hasDeck });
         App.commands.define('lastSlide', { label: 'Last slide', run: () => App.deck.last(), isEnabled: hasDeck });
+
+        // ---- Selected element (elements.js) ----
+        const hasSelection = () => App.elements.hasSelection();
+        [['Left', -1, 0], ['Right', 1, 0], ['Up', 0, -1], ['Down', 0, 1]].forEach(([name, dx, dy]) => {
+            App.commands.define('nudge' + name, {
+                label: 'Nudge ' + name.toLowerCase(), isEnabled: hasSelection, run: () => App.elements.nudge(dx, dy),
+            });
+            App.commands.define('nudge' + name + 'Far', {
+                label: 'Nudge ' + name.toLowerCase() + ' 10 px', isEnabled: hasSelection,
+                run: () => App.elements.nudge(dx * 10, dy * 10),
+            });
+        });
+        App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
+        App.commands.define('cut', { label: 'Cut', isEnabled: hasSelection, run: () => App.elements.cut() });
+        App.commands.define('copy', { label: 'Copy', isEnabled: hasSelection, run: () => App.elements.copy() });
+        App.commands.define('paste', { label: 'Paste', isEnabled: () => App.elements.canPaste(), run: () => App.elements.paste() });
+        App.commands.define('duplicate', { label: 'Duplicate', isEnabled: hasSelection, run: () => App.elements.duplicate() });
+        [['bringToFront', 'Bring to front', 'front'], ['bringForward', 'Bring forward', 'forward'],
+         ['sendBackward', 'Send backward', 'backward'], ['sendToBack', 'Send to back', 'back']]
+            .forEach(([name, label, action]) => {
+                App.commands.define(name, {
+                    label: label, isEnabled: () => App.elements.canArrange(action), run: () => App.elements.arrange(action),
+                });
+            });
 
         App.commands.define('deselect', {
             label: 'Deselect',

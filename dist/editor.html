@@ -772,6 +772,11 @@ App.util.el = function el(tag, attributes, children) {
  *   'history-changed'  a change, undo or redo happened       (history.js via app.js)
  *   'saved'            the deck was written to disk          (fileio.js)
  *
+ * Added in Phase 2:
+ *   'selection-changed' another element (or none) was selected (selection.js)
+ *   'clipboard-changed' something was copied, Paste can run    (elements.js)
+ *   'zoom-changed'      the canvas zoom changed                (canvas.js)
+ *
  * Talks to: nothing (others call it). Created in app.js as App.events.
  */
 
@@ -997,6 +1002,21 @@ App.createEventBus = function createEventBus() {
         ['Home', 'firstSlide'],
         ['End', 'lastSlide'],
         ['Escape', 'deselect'],
+        ['ArrowLeft', 'nudgeLeft'],
+        ['ArrowRight', 'nudgeRight'],
+        ['ArrowUp', 'nudgeUp'],
+        ['ArrowDown', 'nudgeDown'],
+        ['Shift+ArrowLeft', 'nudgeLeftFar'],
+        ['Shift+ArrowRight', 'nudgeRightFar'],
+        ['Shift+ArrowUp', 'nudgeUpFar'],
+        ['Shift+ArrowDown', 'nudgeDownFar'],
+        ['Delete', 'delete'],
+        ['Backspace', 'delete'],
+        ['Ctrl+X', 'cut'],
+        ['Ctrl+C', 'copy'],
+        ['Ctrl+V', 'paste'],
+        // Ctrl+D is the browser's "bookmark this page"; never let it open with nothing selected.
+        ['Ctrl+D', 'duplicate', { blockBrowserDefault: true }],
     ];
 
     App.shortcuts.init = function init() {
@@ -1039,6 +1059,11 @@ App.createEventBus = function createEventBus() {
  * For long interactions such as a drag (Phase 2), call begin() when the drag
  * starts and commit() when it ends, so the whole drag is one undo step.
  *
+ * Merging: change(label, scope, fn, { mergeKey: 'nudge:e3' }) joins the
+ * previous step when that step has the same mergeKey and is less than a
+ * second old. Holding an arrow key fires ~30 nudges a second; this makes them
+ * one undo step instead of filling the 100-step history.
+ *
  * Scope of a change:
  *   { slideId: 's3' }  -> snapshot of that slide only (fast, the common case)
  *   'deck'             -> snapshot of the whole <head> and <body> (theme,
@@ -1056,6 +1081,8 @@ App.createHistory = function createHistory(options) {
     const getDoc = options.getDoc;
     const limit = options.limit || 100;
     const onChange = options.onChange || function () {};
+    const now = options.now || (() => Date.now());   // tests pass a fake clock
+    const MERGE_WINDOW_MS = 1000;
 
     let undoStack = [];      // entries: { label, scope, before, after, stateBefore, stateAfter }
     let redoStack = [];
@@ -1101,10 +1128,11 @@ App.createHistory = function createHistory(options) {
 
     // ---- Recording ----
 
-    function push(label, scope, before) {
+    function push(label, scope, before, mergeKey) {
         const entry = {
             label: label, scope: scope, before: before, after: null,
             stateBefore: currentState, stateAfter: nextStateNumber,
+            mergeKey: mergeKey || null, time: now(),
         };
         nextStateNumber += 1;
         currentState = entry.stateAfter;
@@ -1117,11 +1145,25 @@ App.createHistory = function createHistory(options) {
     }
 
     /*
+     * Can a change with this mergeKey join the last step? Only if that step is
+     * the current state (nothing undone since), has the same key, is recent,
+     * and was not saved: a change after a save must make the deck dirty again.
+     */
+    function canMerge(mergeKey) {
+        const last = undoStack[undoStack.length - 1];
+        return !!mergeKey && !!last && last.mergeKey === mergeKey &&
+            currentState === last.stateAfter && savedState !== currentState &&
+            now() - last.time < MERGE_WINDOW_MS;
+    }
+
+    /*
      * Run `fn`, which changes the deck, as one undoable step.
      * If `fn` throws, the deck is put back as it was and nothing is recorded.
+     * options.mergeKey: see "Merging" at the top of this file.
      */
-    function change(label, scope, fn) {
+    function change(label, scope, fn, changeOptions) {
         validateScope(scope);
+        const mergeKey = changeOptions && changeOptions.mergeKey;
         const before = takeSnapshot(scope);
         try {
             fn();
@@ -1129,7 +1171,13 @@ App.createHistory = function createHistory(options) {
             restoreSnapshot(scope, before);
             throw error;
         }
-        push(label, scope, before);
+        if (canMerge(mergeKey)) {
+            // Keep the older "before" snapshot; just refresh the time window.
+            undoStack[undoStack.length - 1].time = now();
+            onChange({ action: 'change', label: label, scope: scope, merged: true });
+            return;
+        }
+        push(label, scope, before, mergeKey);
     }
 
     function begin(label, scope) {
@@ -2931,6 +2979,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         slides: '<rect x="2.5" y="4" width="15" height="9.5"/><path d="M6 16.5h8"/>',
         hidden: '<path d="M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z"/><path d="M3.5 16.5l13-13"/>',
         file: '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M7.5 10h5M7.5 13h5"/>',
+        cut: '<circle cx="6" cy="14.5" r="2.5"/><circle cx="14" cy="14.5" r="2.5"/><path d="M7.5 12.5L14 3M12.5 12.5L6 3"/>',
+        copy: '<rect x="7" y="7" width="10" height="10.5" rx="1"/><path d="M13 7V3.5H3.5V14H7"/>',
+        paste: '<rect x="4" y="4" width="12" height="13.5" rx="1"/><path d="M7.5 4V2.5h5V4"/><path d="M7 9h6M7 12h6"/>',
+        duplicate: '<rect x="3" y="3" width="9.5" height="9.5"/><rect x="7.5" y="7.5" width="9.5" height="9.5"/>',
+        front: '<rect x="3" y="3" width="8" height="8" stroke-dasharray="2 1.5"/><rect x="8" y="8" width="9" height="9" fill="currentColor" fill-opacity="0.25"/>',
+        forward: '<rect x="3" y="3" width="8" height="8"/><rect x="8" y="8" width="9" height="9" fill="currentColor" fill-opacity="0.25"/>',
+        backward: '<rect x="8" y="8" width="9" height="9"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
+        back: '<rect x="8" y="8" width="9" height="9" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
     };
 
     App.icons.get = function get(name) {
@@ -3688,6 +3744,210 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/elements.js ----
+/*
+ * elements.js - actions on the selected element (SPEC 4, Phase 2):
+ * nudge with the arrow keys, delete, cut / copy / paste / duplicate (also
+ * across slides), and the stacking order (bring forward, send to back ...).
+ *
+ * Every action is one undoable step on the current slide (history.js).
+ * The pure helpers at the top are tested in tests/unit/elements.test.js.
+ *
+ * The clipboard is the editor's own (a string of HTML in memory), so copy and
+ * paste work between slides and decks in this tab. Pasting from other programs
+ * (tables from Excel, screenshots) arrives in Phases 4 and 5.
+ *
+ * Talks to: selection.js (what is selected), transform.js (positions, order),
+ *           history.js, deck.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.elements = {};
+
+    const PASTE_OFFSET = 10;   // px down and right when the spot is taken, like PowerPoint
+
+    // ---------------------------------------------------------------
+    // Pure helpers
+    // ---------------------------------------------------------------
+
+    /*
+     * order: ids from back to front. Returns a new array with `id` moved:
+     * 'front' / 'back' to the end / start, 'forward' / 'backward' one place.
+     */
+    App.elements.restack = function restack(order, id, action) {
+        const result = order.filter((item) => item !== id);
+        const index = order.indexOf(id);
+        let target = index;
+        if (action === 'front') {
+            target = result.length;
+        } else if (action === 'back') {
+            target = 0;
+        } else if (action === 'forward') {
+            target = Math.min(result.length, index + 1);
+        } else if (action === 'backward') {
+            target = Math.max(0, index - 1);
+        }
+        result.splice(target, 0, id);
+        return result;
+    };
+
+    /* Give `element` and every element inside it that has a data-id a new, unused id. */
+    App.elements.giveFreshIds = function giveFreshIds(element, usedIds) {
+        [element].concat(Array.from(element.querySelectorAll('[data-id]'))).forEach((node) => {
+            node.setAttribute('data-id', App.util.uniqueId('e', usedIds));
+        });
+    };
+
+    /*
+     * Where a pasted element goes: its own position if no element on the
+     * slide starts there, otherwise 10 px further down-right until free.
+     * So paste on another slide keeps the position; paste on the same slide
+     * (or a second paste) does not hide exactly behind the original.
+     */
+    App.elements.pastePosition = function pastePosition(rect, takenRects) {
+        const isTaken = (left, top) => takenRects.some((r) => r.left === left && r.top === top);
+        let left = rect.left;
+        let top = rect.top;
+        while (isTaken(left, top)) {
+            left += PASTE_OFFSET;
+            top += PASTE_OFFSET;
+        }
+        return { left: left, top: top, width: rect.width, height: rect.height };
+    };
+
+    // ---------------------------------------------------------------
+    // Actions on the live deck
+    // ---------------------------------------------------------------
+
+    let clipboardHtml = null;
+
+    function currentSlideScope() {
+        return { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
+    }
+
+    App.elements.hasSelection = function hasSelection() {
+        return !!App.selection.getElement();
+    };
+
+    App.elements.canPaste = function canPaste() {
+        return clipboardHtml !== null && !!App.deck.getCurrentSlide();
+    };
+
+    /* Move the selected element by (dx, dy) px; a held key is one undo step. */
+    App.elements.nudge = function nudge(dx, dy) {
+        const element = App.selection.getElement();
+        if (!element) {
+            return;
+        }
+        App.history.change('Move', currentSlideScope(), () => {
+            App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element), dx, dy));
+        }, { mergeKey: 'nudge:' + element.getAttribute('data-id') });
+    };
+
+    App.elements.remove = function remove(label) {
+        const element = App.selection.getElement();
+        if (!element) {
+            return;
+        }
+        App.history.change(label || 'Delete', currentSlideScope(), () => element.remove());
+        App.selection.clear();
+    };
+
+    App.elements.copy = function copy() {
+        const element = App.selection.getElement();
+        if (element) {
+            clipboardHtml = element.outerHTML;
+            App.events.emit('clipboard-changed');   // Paste buttons become enabled
+        }
+    };
+
+    App.elements.cut = function cut() {
+        App.elements.copy();
+        App.elements.remove('Cut');
+    };
+
+    /*
+     * Put a copy of `html` (one element) on the current slide, on top of the
+     * others, with fresh ids; select it. Returns the new element.
+     */
+    function insertCopy(html, label) {
+        const doc = App.deck.getDocument();
+        const slide = App.deck.getCurrentSlide();
+        const template = doc.createElement('template');
+        template.innerHTML = html.trim();
+        const element = template.content.firstElementChild;
+        if (!element) {
+            return null;
+        }
+        App.history.change(label, currentSlideScope(), () => {
+            const usedIds = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+            App.elements.giveFreshIds(element, usedIds);
+
+            const others = App.transform.topLevelElements(slide);
+            const taken = others.map((other) => App.transform.readRect(other));
+            App.transform.writeRect(element, App.elements.pastePosition(App.transform.readRect(element), taken));
+            const topZ = others.reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
+            element.style.zIndex = String(topZ + 1);
+
+            // Speaker notes stay the last thing in the slide.
+            slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+        });
+        App.selection.select(element);
+        return element;
+    }
+
+    App.elements.paste = function paste() {
+        if (App.elements.canPaste()) {
+            insertCopy(clipboardHtml, 'Paste');
+        }
+    };
+
+    App.elements.duplicate = function duplicate() {
+        const element = App.selection.getElement();
+        if (element) {
+            insertCopy(element.outerHTML, 'Duplicate');
+        }
+    };
+
+    const ARRANGE_LABELS = {
+        front: 'Bring to front', forward: 'Bring forward', backward: 'Send backward', back: 'Send to back',
+    };
+
+    /* Can the selected element move in this direction? (false at the top/bottom of the stack) */
+    App.elements.canArrange = function canArrange(action) {
+        const element = App.selection.getElement();
+        if (!element) {
+            return false;
+        }
+        const order = App.transform.topLevelElements(App.deck.getCurrentSlide());
+        const index = order.indexOf(element);
+        return (action === 'front' || action === 'forward') ? index < order.length - 1 : index > 0;
+    };
+
+    /*
+     * Change the stacking order. All elements of the slide get z-index 1, 2,
+     * 3 ... in the new order, so ties and gaps in the old numbers cannot
+     * make an element jump unexpectedly.
+     */
+    App.elements.arrange = function arrange(action) {
+        if (!App.elements.canArrange(action)) {
+            return;
+        }
+        const element = App.selection.getElement();
+        const order = App.transform.topLevelElements(App.deck.getCurrentSlide());
+        const newOrder = App.elements.restack(order, element, action);
+        App.history.change(ARRANGE_LABELS[action], currentSlideScope(), () => {
+            newOrder.forEach((item, index) => {
+                item.style.zIndex = String(index + 1);
+            });
+        });
+    };
+})();
+
+</script>
+<script>
 // ---- js/thumbnails.js ----
 /*
  * thumbnails.js - the rail of slide miniatures on the left (SPEC 4, Phase 1).
@@ -3702,7 +3962,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  *   - after a change, only the affected slide is redrawn, after a short pause
  *     (debounced), so typing does not redraw on every key press.
  *
- * Talks to: deck.js (reads slides, goTo on click), events from history.js.
+ * Talks to: deck.js (reads slides, goTo on click), events from history.js,
+ *           selection.js (working in the rail clears the element selection).
  */
 
 (function () {
@@ -3726,6 +3987,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.events.on('deck-loaded', rebuild);
         App.events.on('slide-changed', highlightCurrent);
         App.events.on('history-changed', onHistoryChanged);
+
+        // Working in the rail means working on slides, not on an element (as in PowerPoint):
+        // without this, Delete or the arrow keys here would act on the element still selected.
+        rail.addEventListener('pointerdown', () => App.selection.clear());
+        rail.addEventListener('focusin', () => App.selection.clear());
 
         rail.addEventListener('keydown', (event) => {
             if (event.key === 'ArrowDown') {
@@ -4250,7 +4516,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * action behaves the same however it is started, and errors are shown in one
  * consistent way.
  *
- * Talks to: fileio.js, history.js, deck.js, importer.js, selection.js (the actions),
+ * Talks to: fileio.js, history.js, deck.js, importer.js, selection.js, elements.js (the actions),
  *           shortcuts.js and ribbon.js (they run commands), ui.js.
  */
 
@@ -4332,6 +4598,30 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('firstSlide', { label: 'First slide', run: () => App.deck.first(), isEnabled: hasDeck });
         App.commands.define('lastSlide', { label: 'Last slide', run: () => App.deck.last(), isEnabled: hasDeck });
 
+        // ---- Selected element (elements.js) ----
+        const hasSelection = () => App.elements.hasSelection();
+        [['Left', -1, 0], ['Right', 1, 0], ['Up', 0, -1], ['Down', 0, 1]].forEach(([name, dx, dy]) => {
+            App.commands.define('nudge' + name, {
+                label: 'Nudge ' + name.toLowerCase(), isEnabled: hasSelection, run: () => App.elements.nudge(dx, dy),
+            });
+            App.commands.define('nudge' + name + 'Far', {
+                label: 'Nudge ' + name.toLowerCase() + ' 10 px', isEnabled: hasSelection,
+                run: () => App.elements.nudge(dx * 10, dy * 10),
+            });
+        });
+        App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
+        App.commands.define('cut', { label: 'Cut', isEnabled: hasSelection, run: () => App.elements.cut() });
+        App.commands.define('copy', { label: 'Copy', isEnabled: hasSelection, run: () => App.elements.copy() });
+        App.commands.define('paste', { label: 'Paste', isEnabled: () => App.elements.canPaste(), run: () => App.elements.paste() });
+        App.commands.define('duplicate', { label: 'Duplicate', isEnabled: hasSelection, run: () => App.elements.duplicate() });
+        [['bringToFront', 'Bring to front', 'front'], ['bringForward', 'Bring forward', 'forward'],
+         ['sendBackward', 'Send backward', 'backward'], ['sendToBack', 'Send to back', 'back']]
+            .forEach(([name, label, action]) => {
+                App.commands.define(name, {
+                    label: label, isEnabled: () => App.elements.canArrange(action), run: () => App.elements.arrange(action),
+                });
+            });
+
         App.commands.define('deselect', {
             label: 'Deselect',
             isEnabled: () => !!App.selection.selectedId(),
@@ -4376,13 +4666,24 @@ App.template.newDeckHtml = function newDeckHtml() {
         {
             id: 'home', label: 'Home',
             groups: [
+                { label: 'Clipboard', commands: [['paste', 'paste'], ['cut', 'cut'], ['copy', 'copy'], ['duplicate', 'duplicate']] },
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
-            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). Text formatting arrives in Phase 3.',
+            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions); arrow keys nudge it. Text formatting arrives in Phase 3.',
         },
         { id: 'insert', label: 'Insert', note: 'Text boxes, tables, images, shapes and charts arrive in Phases 3 to 6.' },
-        { id: 'arrange', label: 'Arrange', note: 'Align, distribute, group and rotate arrive in Phase 7.' },
+        {
+            id: 'arrange', label: 'Arrange',
+            groups: [
+                {
+                    label: 'Order',
+                    commands: [['bringToFront', 'front'], ['bringForward', 'forward'],
+                        ['sendBackward', 'backward'], ['sendToBack', 'back']],
+                },
+            ],
+            note: 'Align, distribute, group and rotate arrive in Phase 7.',
+        },
         {
             id: 'slideshow', label: 'Slide Show',
             note: 'Presenting from the editor arrives in Phase 8. Saved decks already present on their own: open the saved file in the browser and use the arrow keys (F = full screen).',
@@ -4512,7 +4813,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
         });
 
-        ['deck-loaded', 'history-changed', 'saved'].forEach((name) => App.events.on(name, App.ribbon.refresh));
+        ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed']
+            .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 
     App.ribbon.showDefaultTab = function showDefaultTab() {

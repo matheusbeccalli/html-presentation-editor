@@ -1,0 +1,241 @@
+/*
+ * selection.js - click to select, drag to move, handles to resize (SPEC 4, Phase 2).
+ *
+ * The overlay layer (#overlay, see canvas.js) lies on top of the deck iframe
+ * and catches every mouse action on the slide. It works out which element is
+ * under the mouse from the elements' left/top/width/height (transform.js), so
+ * the deck itself never needs to receive clicks. The selection box and its 8
+ * handles are drawn in the overlay too, never inside the slide (SPEC 3.5),
+ * so nothing of the selection can end up in the saved file.
+ *
+ * The selection is remembered by the element's data-id, not as a reference to
+ * the element: undo rebuilds the whole slide from a snapshot (history.js), so
+ * the old element object no longer exists afterwards.
+ *
+ * A drag is one undo step: history.begin() when the mouse has moved a few
+ * pixels, history.commit() when it is released, history.cancel() on Escape.
+ *
+ * Events: emits 'selection-changed'. Listens to deck-loaded, slide-changed,
+ * history-changed and zoom-changed.
+ *
+ * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom).
+ */
+
+(function () {
+    'use strict';
+
+    App.selection = {};
+
+    // A press must move this many screen pixels before it counts as a drag,
+    // so a slightly shaky click does not move the element.
+    const DRAG_THRESHOLD = 3;
+
+    let overlay = null;
+    let box = null;
+    let selectedId = null;
+    let selectedSlideIndex = -1;
+    let dragging = false;
+
+    App.selection.init = function init() {
+        overlay = document.getElementById('overlay');
+        box = buildBox();
+        overlay.appendChild(box);
+
+        overlay.addEventListener('pointerdown', onPointerDown);
+        overlay.addEventListener('pointermove', updateHoverCursor);
+
+        App.events.on('deck-loaded', () => App.selection.clear());
+        App.events.on('slide-changed', (info) => {
+            if (info.index !== selectedSlideIndex) {
+                App.selection.clear();
+            }
+        });
+        // After undo/redo the element may have been rebuilt, moved or removed.
+        App.events.on('history-changed', () => App.selection.refresh());
+        App.events.on('zoom-changed', (info) => {
+            // Handles keep the same size on screen at every zoom (see .selection-box in panels.css).
+            overlay.style.setProperty('--inverse-zoom', String(1 / info.zoom));
+        });
+    };
+
+    function buildBox() {
+        const element = App.util.el('div', { class: 'selection-box', hidden: true });
+        App.transform.HANDLES.forEach((handle) => {
+            element.appendChild(App.util.el('div', { class: 'selection-handle', 'data-handle': handle }));
+        });
+        return element;
+    }
+
+    // ---------------------------------------------------------------
+    // Selection state
+    // ---------------------------------------------------------------
+
+    App.selection.selectedId = function selectedIdFn() {
+        return selectedId;
+    };
+
+    App.selection.isDragging = function isDragging() {
+        return dragging;
+    };
+
+    /* The selected element in the live deck, or null. */
+    App.selection.getElement = function getElement() {
+        const slide = App.deck.getCurrentSlide();
+        if (!selectedId || !slide) {
+            return null;
+        }
+        return slide.querySelector('[data-id="' + CSS.escape(selectedId) + '"]');
+    };
+
+    App.selection.select = function select(element) {
+        const id = element ? element.getAttribute('data-id') : null;
+        if (id === selectedId) {
+            App.selection.refresh();
+            return;
+        }
+        selectedId = id;
+        selectedSlideIndex = App.deck.getCurrentIndex();
+        App.selection.refresh();
+        App.events.emit('selection-changed', { id: selectedId });
+    };
+
+    App.selection.clear = function clear() {
+        App.selection.select(null);
+    };
+
+    /* Redraw the box; drop the selection if its element is gone (e.g. undo of a paste). */
+    App.selection.refresh = function refresh() {
+        const element = App.selection.getElement();
+        if (selectedId && !element) {
+            selectedId = null;
+            App.events.emit('selection-changed', { id: null });
+        }
+        box.hidden = !element;
+        if (element) {
+            App.transform.writeRect(box, App.transform.readRect(element));
+        }
+    };
+
+    // ---------------------------------------------------------------
+    // Mouse
+    // ---------------------------------------------------------------
+
+    /* Mouse position in slide pixels (the overlay is scaled with the slide). */
+    function toSlidePoint(event) {
+        const rect = overlay.getBoundingClientRect();
+        const zoom = App.canvas.getZoom();
+        return { x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom };
+    }
+
+    /* The element under slide point (x, y), or null. */
+    App.selection.elementAt = function elementAt(x, y) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return null;
+        }
+        const elements = App.transform.topLevelElements(slide);
+        const items = elements.map((element, index) => ({
+            id: index, rect: App.transform.readRect(element), z: App.transform.zIndexOf(element),
+        }));
+        const hit = App.transform.hitTest(items, x, y);
+        return hit === null ? null : elements[hit];
+    };
+
+    function updateHoverCursor(event) {
+        if (dragging) {
+            return;
+        }
+        const point = toSlidePoint(event);
+        overlay.style.cursor = App.selection.elementAt(point.x, point.y) ? 'move' : '';
+    }
+
+    function onPointerDown(event) {
+        if (!App.state.hasDeck || (event.button !== 0 && event.button !== 2)) {
+            return;
+        }
+        // A field in the Format pane still being edited gets its change applied first.
+        if (document.activeElement && document.activeElement !== document.body) {
+            document.activeElement.blur();
+        }
+        const handle = event.target.getAttribute && event.target.getAttribute('data-handle');
+        if (handle && event.button === 0) {
+            startDrag(event, 'resize', handle);
+            return;
+        }
+        const point = toSlidePoint(event);
+        const element = App.selection.elementAt(point.x, point.y);
+        App.selection.select(element);
+        if (element && event.button === 0) {
+            startDrag(event, 'move', null);
+        }
+    }
+
+    /*
+     * Follow the mouse until it is released. kind is 'move' or 'resize';
+     * Shift while resizing keeps the aspect ratio.
+     */
+    function startDrag(downEvent, kind, handle) {
+        const element = App.selection.getElement();
+        const slide = App.deck.getCurrentSlide();
+        if (!element || !slide) {
+            return;
+        }
+        const startRect = App.transform.readRect(element);
+        const start = toSlidePoint(downEvent);
+        const zoom = App.canvas.getZoom();
+        let started = false;
+        overlay.setPointerCapture(downEvent.pointerId);   // keep getting moves outside the slide
+
+        function onMove(event) {
+            const point = toSlidePoint(event);
+            const dx = point.x - start.x;
+            const dy = point.y - start.y;
+            if (!started) {
+                if (Math.hypot(dx * zoom, dy * zoom) < DRAG_THRESHOLD) {
+                    return;
+                }
+                started = true;
+                dragging = true;
+                App.history.begin(kind === 'move' ? 'Move' : 'Resize', { slideId: slide.getAttribute('data-slide-id') });
+            }
+            const rect = kind === 'move'
+                ? App.transform.moveRect(startRect, dx, dy)
+                : App.transform.resizeRect(startRect, handle, dx, dy, event.shiftKey);
+            App.transform.writeRect(element, rect);
+            App.selection.refresh();
+        }
+
+        function finish(cancelled) {
+            overlay.removeEventListener('pointermove', onMove);
+            overlay.removeEventListener('pointerup', onUp);
+            overlay.removeEventListener('pointercancel', onCancel);
+            window.removeEventListener('keydown', onKey, true);
+            if (!started) {
+                return;
+            }
+            dragging = false;
+            if (cancelled) {
+                App.history.cancel();   // puts the slide back exactly as before the drag
+                App.selection.refresh();
+            } else {
+                App.history.commit();
+            }
+        }
+
+        const onUp = () => finish(false);
+        const onCancel = () => finish(true);
+        function onKey(event) {
+            if (event.key === 'Escape') {
+                // Capture phase + stopPropagation: Escape ends the drag only, it does not also deselect.
+                event.stopPropagation();
+                event.preventDefault();
+                finish(true);
+            }
+        }
+
+        overlay.addEventListener('pointermove', onMove);
+        overlay.addEventListener('pointerup', onUp);
+        overlay.addEventListener('pointercancel', onCancel);
+        window.addEventListener('keydown', onKey, true);
+    }
+})();

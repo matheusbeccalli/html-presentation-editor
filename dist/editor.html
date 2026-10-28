@@ -278,7 +278,40 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     transform-origin: 0 0;
 }
 #deck-frame { display: block; width: 1280px; height: 720px; border: 0; background: #fff; }
-#overlay { position: absolute; inset: 0; pointer-events: none; }
+/*
+ * The overlay catches every mouse action on the slide (selection.js). It is
+ * scaled together with the slide, so sizes that must stay constant on screen
+ * (handles, outline) are multiplied by --inverse-zoom (1 / zoom).
+ */
+#overlay {
+    position: absolute; inset: 0;
+    --inverse-zoom: 1;
+    user-select: none;
+    touch-action: none;
+}
+.selection-box {
+    position: absolute;
+    outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;                    /* clicks go through to the overlay's hit test */
+}
+.selection-handle {
+    position: absolute;
+    width: calc(9px * var(--inverse-zoom));
+    height: calc(9px * var(--inverse-zoom));
+    transform: translate(-50%, -50%);
+    border: calc(1px * var(--inverse-zoom)) solid var(--focus);
+    border-radius: 50%;
+    background: #fff;
+    pointer-events: auto;
+}
+.selection-handle[data-handle="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.selection-handle[data-handle="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.selection-handle[data-handle="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.selection-handle[data-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.selection-handle[data-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.selection-handle[data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.selection-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+.selection-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
 
 #welcome {
     max-width: 520px; padding: 32px 36px;
@@ -400,7 +433,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
                 <div id="canvas-stage">
                     <!-- The deck: same-origin so the editor can edit it, no scripts so the deck's code never runs (SPEC 3.5). -->
                     <iframe id="deck-frame" sandbox="allow-same-origin" title="Current slide"></iframe>
-                    <!-- Selection handles are drawn here, never inside the slide (Phase 2). -->
+                    <!-- Catches mouse actions on the slide; selection handles are drawn here, never inside the slide (selection.js). -->
                     <div id="overlay"></div>
                 </div>
             </div>
@@ -601,6 +634,7 @@ App.start = function start() {
     App.ui.init();
     App.ribbon.init();
     App.canvas.init();
+    App.selection.init();
     App.thumbnails.init();
     App.deck.init();
     App.fileio.init();
@@ -783,9 +817,14 @@ App.createEventBus = function createEventBus() {
  * as "save". The command itself lives in commands.js, so the same command can
  * be run from the ribbon, a menu or the keyboard.
  *
- * Rule: shortcuts are ignored while the user types in a text field, unless the
- * shortcut is registered with { whileTyping: true } (formatting keys like
- * Ctrl+B in Phase 3, and Save, which should work even mid-sentence).
+ * Rules:
+ *  - shortcuts are ignored while the user types in a text field, unless the
+ *    shortcut is registered with { whileTyping: true } (formatting keys like
+ *    Ctrl+B in Phase 3, and Save, which should work even mid-sentence);
+ *  - shortcuts are ignored while a dialog is open;
+ *  - a shortcut whose command is disabled right now (e.g. Escape with nothing
+ *    selected) leaves the key to the browser, unless registered with
+ *    { blockBrowserDefault: true } (Ctrl+S must never open "Save page as").
  *
  * Talks to: commands.js (runs commands), deck.js (listens to the deck iframe,
  * because key presses inside an iframe do not reach the main window).
@@ -890,7 +929,11 @@ App.createEventBus = function createEventBus() {
             if (entries.has(key)) {
                 throw new Error('Shortcut ' + key + ' is already used by "' + entries.get(key).command + '"');
             }
-            entries.set(key, { combo: key, command: command, whileTyping: !!(options && options.whileTyping) });
+            entries.set(key, {
+                combo: key, command: command,
+                whileTyping: !!(options && options.whileTyping),
+                blockBrowserDefault: !!(options && options.blockBrowserDefault),
+            });
         }
 
         function lookup(combo) {
@@ -900,9 +943,12 @@ App.createEventBus = function createEventBus() {
         /*
          * Look up the event; if it matches, call runCommand(commandName) and stop
          * the browser's own action (e.g. Ctrl+S would otherwise save the web page).
+         * isEnabled(commandName), if given, says whether the command can run now;
+         * a disabled command leaves the key to the browser, so for example Escape
+         * with nothing selected still closes menus.
          * Returns true if the key was handled.
          */
-        function handle(event, runCommand) {
+        function handle(event, runCommand, isEnabled) {
             if (event.isComposing) {
                 return false;   // the user is composing a character with an IME (e.g. accents)
             }
@@ -911,6 +957,16 @@ App.createEventBus = function createEventBus() {
                 return false;
             }
             if (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping) {
+                return false;
+            }
+            // An open dialog owns the keyboard (Escape closes it, Enter presses its button).
+            if (event.target && event.target.closest && event.target.closest('dialog')) {
+                return false;
+            }
+            if (isEnabled && !isEnabled(entry.command)) {
+                if (entry.blockBrowserDefault) {
+                    event.preventDefault();   // e.g. no "Save page as" window when there is no deck to save
+                }
                 return false;
             }
             event.preventDefault();
@@ -930,9 +986,9 @@ App.createEventBus = function createEventBus() {
      * and never pass them to the page, so "New deck" is a menu item only.
      */
     App.shortcuts.DEFAULTS = [
-        ['Ctrl+O', 'open', { whileTyping: true }],
-        ['Ctrl+S', 'save', { whileTyping: true }],
-        ['Ctrl+Shift+S', 'saveAs', { whileTyping: true }],
+        ['Ctrl+O', 'open', { whileTyping: true, blockBrowserDefault: true }],
+        ['Ctrl+S', 'save', { whileTyping: true, blockBrowserDefault: true }],
+        ['Ctrl+Shift+S', 'saveAs', { whileTyping: true, blockBrowserDefault: true }],
         ['Ctrl+Z', 'undo'],
         ['Ctrl+Y', 'redo'],
         ['Ctrl+Shift+Z', 'redo'],
@@ -940,6 +996,7 @@ App.createEventBus = function createEventBus() {
         ['PageUp', 'previousSlide'],
         ['Home', 'firstSlide'],
         ['End', 'lastSlide'],
+        ['Escape', 'deselect'],
     ];
 
     App.shortcuts.init = function init() {
@@ -956,7 +1013,8 @@ App.createEventBus = function createEventBus() {
      */
     App.shortcuts.listenTo = function listenTo(targetWindow) {
         targetWindow.addEventListener('keydown', (event) => {
-            App.shortcuts.registry.handle(event, (command) => App.commands.run(command));
+            App.shortcuts.registry.handle(event, (command) => App.commands.run(command),
+                (command) => App.commands.isEnabled(command));
         });
     };
 })();
@@ -3239,6 +3297,397 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/transform.js ----
+/*
+ * transform.js - the maths of moving and resizing elements (SPEC 4, Phase 2).
+ *
+ * A "rect" is a plain object { left, top, width, height } in slide pixels,
+ * the same four values every element carries in its inline style (SPEC 3.3).
+ * The functions here only calculate; selection.js decides when to call them
+ * and history.js makes the result undoable. Tested in tests/unit/transform.test.js.
+ *
+ * Talks to: nothing (selection.js and elements.js call it).
+ */
+
+(function () {
+    'use strict';
+
+    App.transform = {};
+
+    // The 8 resize handles, named by compass direction: n = top edge, se = bottom-right corner ...
+    App.transform.HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
+
+    // Smallest width/height a resize can make, so a box never disappears or flips inside out.
+    App.transform.MIN_SIZE = 4;
+
+    const round = Math.round;
+
+    App.transform.moveRect = function moveRect(rect, dx, dy) {
+        return { left: round(rect.left + dx), top: round(rect.top + dy), width: rect.width, height: rect.height };
+    };
+
+    /*
+     * Resize `rect` by dragging `handle` by (dx, dy) slide pixels.
+     * keepAspect (Shift held): the width/height ratio stays the same. On a
+     * corner the opposite corner stays put; on a side the box grows evenly
+     * on the other axis, like PowerPoint.
+     */
+    App.transform.resizeRect = function resizeRect(rect, handle, dx, dy, keepAspect) {
+        const min = App.transform.MIN_SIZE;
+        const movesLeft = handle.indexOf('w') !== -1;
+        const movesRight = handle.indexOf('e') !== -1;
+        const movesTop = handle.indexOf('n') !== -1;
+        const movesBottom = handle.indexOf('s') !== -1;
+
+        // New width/height from the dragged edges, never below the minimum.
+        let width = rect.width;
+        let height = rect.height;
+        if (movesRight) { width = rect.width + dx; }
+        if (movesLeft) { width = rect.width - dx; }
+        if (movesBottom) { height = rect.height + dy; }
+        if (movesTop) { height = rect.height - dy; }
+        width = Math.max(min, width);
+        height = Math.max(min, height);
+
+        if (keepAspect && rect.width > 0 && rect.height > 0) {
+            const ratio = rect.width / rect.height;
+            const isCorner = handle.length === 2;
+            if (isCorner) {
+                // Follow whichever side the mouse changed more.
+                const scaleX = width / rect.width;
+                const scaleY = height / rect.height;
+                const scale = Math.abs(scaleX - 1) >= Math.abs(scaleY - 1) ? scaleX : scaleY;
+                width = rect.width * scale;
+                height = rect.height * scale;
+            } else if (movesLeft || movesRight) {
+                height = width / ratio;
+            } else {
+                width = height * ratio;
+            }
+        }
+
+        // Place the box: the edges that were not dragged stay where they were.
+        let left = rect.left;
+        let top = rect.top;
+        if (movesLeft) {
+            left = rect.left + rect.width - width;
+        } else if (!movesRight) {
+            left = rect.left + (rect.width - width) / 2;   // side handle + Shift: grow evenly
+        }
+        if (movesTop) {
+            top = rect.top + rect.height - height;
+        } else if (!movesBottom) {
+            top = rect.top + (rect.height - height) / 2;
+        }
+        return { left: round(left), top: round(top), width: round(width), height: round(height) };
+    };
+
+    /*
+     * items: [{ id, rect, z }] in slide order. Returns the id of the element
+     * drawn on top at point (x, y), or null. Higher z-index wins; with equal
+     * z-index the later element wins, because the browser draws it last.
+     */
+    App.transform.hitTest = function hitTest(items, x, y) {
+        let best = null;
+        items.forEach((item, index) => {
+            const r = item.rect;
+            const inside = x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height;
+            if (inside && (!best || item.z > best.z || (item.z === best.z && index > best.index))) {
+                best = { id: item.id, z: item.z, index: index };
+            }
+        });
+        return best ? best.id : null;
+    };
+
+    // ---- Reading and writing elements (DOM, but no page state) ----
+
+    App.transform.readRect = function readRect(element) {
+        const style = element.style;
+        const value = (text, fallback) => {
+            const number = parseFloat(text);
+            return Number.isFinite(number) ? number : fallback;
+        };
+        return {
+            left: value(style.left, element.offsetLeft || 0),
+            top: value(style.top, element.offsetTop || 0),
+            width: value(style.width, element.offsetWidth || 0),
+            height: value(style.height, element.offsetHeight || 0),
+        };
+    };
+
+    App.transform.writeRect = function writeRect(element, rect) {
+        element.style.left = rect.left + 'px';
+        element.style.top = rect.top + 'px';
+        element.style.width = rect.width + 'px';
+        element.style.height = rect.height + 'px';
+    };
+
+    App.transform.zIndexOf = function zIndexOf(element) {
+        const z = parseInt(element.style.zIndex, 10);
+        return Number.isFinite(z) ? z : 0;
+    };
+
+    /*
+     * The elements that can be selected on a slide: its direct .el children
+     * (elements inside a group belong to the group; groups arrive in Phase 7),
+     * sorted back to front: by z-index, then by their order in the slide.
+     */
+    App.transform.topLevelElements = function topLevelElements(slide) {
+        const elements = Array.from(slide.children).filter((child) => child.classList.contains('el'));
+        return elements
+            .map((element, index) => ({ element: element, index: index, z: App.transform.zIndexOf(element) }))
+            .sort((a, b) => (a.z - b.z) || (a.index - b.index))
+            .map((entry) => entry.element);
+    };
+})();
+
+</script>
+<script>
+// ---- js/selection.js ----
+/*
+ * selection.js - click to select, drag to move, handles to resize (SPEC 4, Phase 2).
+ *
+ * The overlay layer (#overlay, see canvas.js) lies on top of the deck iframe
+ * and catches every mouse action on the slide. It works out which element is
+ * under the mouse from the elements' left/top/width/height (transform.js), so
+ * the deck itself never needs to receive clicks. The selection box and its 8
+ * handles are drawn in the overlay too, never inside the slide (SPEC 3.5),
+ * so nothing of the selection can end up in the saved file.
+ *
+ * The selection is remembered by the element's data-id, not as a reference to
+ * the element: undo rebuilds the whole slide from a snapshot (history.js), so
+ * the old element object no longer exists afterwards.
+ *
+ * A drag is one undo step: history.begin() when the mouse has moved a few
+ * pixels, history.commit() when it is released, history.cancel() on Escape.
+ *
+ * Events: emits 'selection-changed'. Listens to deck-loaded, slide-changed,
+ * history-changed and zoom-changed.
+ *
+ * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom).
+ */
+
+(function () {
+    'use strict';
+
+    App.selection = {};
+
+    // A press must move this many screen pixels before it counts as a drag,
+    // so a slightly shaky click does not move the element.
+    const DRAG_THRESHOLD = 3;
+
+    let overlay = null;
+    let box = null;
+    let selectedId = null;
+    let selectedSlideIndex = -1;
+    let dragging = false;
+
+    App.selection.init = function init() {
+        overlay = document.getElementById('overlay');
+        box = buildBox();
+        overlay.appendChild(box);
+
+        overlay.addEventListener('pointerdown', onPointerDown);
+        overlay.addEventListener('pointermove', updateHoverCursor);
+
+        App.events.on('deck-loaded', () => App.selection.clear());
+        App.events.on('slide-changed', (info) => {
+            if (info.index !== selectedSlideIndex) {
+                App.selection.clear();
+            }
+        });
+        // After undo/redo the element may have been rebuilt, moved or removed.
+        App.events.on('history-changed', () => App.selection.refresh());
+        App.events.on('zoom-changed', (info) => {
+            // Handles keep the same size on screen at every zoom (see .selection-box in panels.css).
+            overlay.style.setProperty('--inverse-zoom', String(1 / info.zoom));
+        });
+    };
+
+    function buildBox() {
+        const element = App.util.el('div', { class: 'selection-box', hidden: true });
+        App.transform.HANDLES.forEach((handle) => {
+            element.appendChild(App.util.el('div', { class: 'selection-handle', 'data-handle': handle }));
+        });
+        return element;
+    }
+
+    // ---------------------------------------------------------------
+    // Selection state
+    // ---------------------------------------------------------------
+
+    App.selection.selectedId = function selectedIdFn() {
+        return selectedId;
+    };
+
+    App.selection.isDragging = function isDragging() {
+        return dragging;
+    };
+
+    /* The selected element in the live deck, or null. */
+    App.selection.getElement = function getElement() {
+        const slide = App.deck.getCurrentSlide();
+        if (!selectedId || !slide) {
+            return null;
+        }
+        return slide.querySelector('[data-id="' + CSS.escape(selectedId) + '"]');
+    };
+
+    App.selection.select = function select(element) {
+        const id = element ? element.getAttribute('data-id') : null;
+        if (id === selectedId) {
+            App.selection.refresh();
+            return;
+        }
+        selectedId = id;
+        selectedSlideIndex = App.deck.getCurrentIndex();
+        App.selection.refresh();
+        App.events.emit('selection-changed', { id: selectedId });
+    };
+
+    App.selection.clear = function clear() {
+        App.selection.select(null);
+    };
+
+    /* Redraw the box; drop the selection if its element is gone (e.g. undo of a paste). */
+    App.selection.refresh = function refresh() {
+        const element = App.selection.getElement();
+        if (selectedId && !element) {
+            selectedId = null;
+            App.events.emit('selection-changed', { id: null });
+        }
+        box.hidden = !element;
+        if (element) {
+            App.transform.writeRect(box, App.transform.readRect(element));
+        }
+    };
+
+    // ---------------------------------------------------------------
+    // Mouse
+    // ---------------------------------------------------------------
+
+    /* Mouse position in slide pixels (the overlay is scaled with the slide). */
+    function toSlidePoint(event) {
+        const rect = overlay.getBoundingClientRect();
+        const zoom = App.canvas.getZoom();
+        return { x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom };
+    }
+
+    /* The element under slide point (x, y), or null. */
+    App.selection.elementAt = function elementAt(x, y) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return null;
+        }
+        const elements = App.transform.topLevelElements(slide);
+        const items = elements.map((element, index) => ({
+            id: index, rect: App.transform.readRect(element), z: App.transform.zIndexOf(element),
+        }));
+        const hit = App.transform.hitTest(items, x, y);
+        return hit === null ? null : elements[hit];
+    };
+
+    function updateHoverCursor(event) {
+        if (dragging) {
+            return;
+        }
+        const point = toSlidePoint(event);
+        overlay.style.cursor = App.selection.elementAt(point.x, point.y) ? 'move' : '';
+    }
+
+    function onPointerDown(event) {
+        if (!App.state.hasDeck || (event.button !== 0 && event.button !== 2)) {
+            return;
+        }
+        // A field in the Format pane still being edited gets its change applied first.
+        if (document.activeElement && document.activeElement !== document.body) {
+            document.activeElement.blur();
+        }
+        const handle = event.target.getAttribute && event.target.getAttribute('data-handle');
+        if (handle && event.button === 0) {
+            startDrag(event, 'resize', handle);
+            return;
+        }
+        const point = toSlidePoint(event);
+        const element = App.selection.elementAt(point.x, point.y);
+        App.selection.select(element);
+        if (element && event.button === 0) {
+            startDrag(event, 'move', null);
+        }
+    }
+
+    /*
+     * Follow the mouse until it is released. kind is 'move' or 'resize';
+     * Shift while resizing keeps the aspect ratio.
+     */
+    function startDrag(downEvent, kind, handle) {
+        const element = App.selection.getElement();
+        const slide = App.deck.getCurrentSlide();
+        if (!element || !slide) {
+            return;
+        }
+        const startRect = App.transform.readRect(element);
+        const start = toSlidePoint(downEvent);
+        const zoom = App.canvas.getZoom();
+        let started = false;
+        overlay.setPointerCapture(downEvent.pointerId);   // keep getting moves outside the slide
+
+        function onMove(event) {
+            const point = toSlidePoint(event);
+            const dx = point.x - start.x;
+            const dy = point.y - start.y;
+            if (!started) {
+                if (Math.hypot(dx * zoom, dy * zoom) < DRAG_THRESHOLD) {
+                    return;
+                }
+                started = true;
+                dragging = true;
+                App.history.begin(kind === 'move' ? 'Move' : 'Resize', { slideId: slide.getAttribute('data-slide-id') });
+            }
+            const rect = kind === 'move'
+                ? App.transform.moveRect(startRect, dx, dy)
+                : App.transform.resizeRect(startRect, handle, dx, dy, event.shiftKey);
+            App.transform.writeRect(element, rect);
+            App.selection.refresh();
+        }
+
+        function finish(cancelled) {
+            overlay.removeEventListener('pointermove', onMove);
+            overlay.removeEventListener('pointerup', onUp);
+            overlay.removeEventListener('pointercancel', onCancel);
+            window.removeEventListener('keydown', onKey, true);
+            if (!started) {
+                return;
+            }
+            dragging = false;
+            if (cancelled) {
+                App.history.cancel();   // puts the slide back exactly as before the drag
+                App.selection.refresh();
+            } else {
+                App.history.commit();
+            }
+        }
+
+        const onUp = () => finish(false);
+        const onCancel = () => finish(true);
+        function onKey(event) {
+            if (event.key === 'Escape') {
+                // Capture phase + stopPropagation: Escape ends the drag only, it does not also deselect.
+                event.stopPropagation();
+                event.preventDefault();
+                finish(true);
+            }
+        }
+
+        overlay.addEventListener('pointermove', onMove);
+        overlay.addEventListener('pointerup', onUp);
+        overlay.addEventListener('pointercancel', onCancel);
+        window.addEventListener('keydown', onKey, true);
+    }
+})();
+
+</script>
+<script>
 // ---- js/thumbnails.js ----
 /*
  * thumbnails.js - the rail of slide miniatures on the left (SPEC 4, Phase 1).
@@ -3801,7 +4250,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * action behaves the same however it is started, and errors are shown in one
  * consistent way.
  *
- * Talks to: fileio.js, history.js, deck.js, importer.js (the actions),
+ * Talks to: fileio.js, history.js, deck.js, importer.js, selection.js (the actions),
  *           shortcuts.js and ribbon.js (they run commands), ui.js.
  */
 
@@ -3883,6 +4332,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('firstSlide', { label: 'First slide', run: () => App.deck.first(), isEnabled: hasDeck });
         App.commands.define('lastSlide', { label: 'Last slide', run: () => App.deck.last(), isEnabled: hasDeck });
 
+        App.commands.define('deselect', {
+            label: 'Deselect',
+            isEnabled: () => !!App.selection.selectedId(),
+            run: () => App.selection.clear(),
+        });
+
         App.commands.define('removeBlockedRefs', {
             label: 'Remove blocked references',
             isEnabled: hasDeck,
@@ -3924,7 +4379,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
-            note: 'Selecting, moving and formatting elements arrive in Phases 2 and 3.',
+            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). Text formatting arrives in Phase 3.',
         },
         { id: 'insert', label: 'Insert', note: 'Text boxes, tables, images, shapes and charts arrive in Phases 3 to 6.' },
         { id: 'arrange', label: 'Arrange', note: 'Align, distribute, group and rotate arrive in Phase 7.' },

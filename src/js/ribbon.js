@@ -22,7 +22,7 @@
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
-            note: 'Selecting, moving and formatting elements arrive in Phases 2 and 3.',
+            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). Text formatting arrives in Phase 3.',
         },
         { id: 'insert', label: 'Insert', note: 'Text boxes, tables, images, shapes and charts arrive in Phases 3 to 6.' },
         { id: 'arrange', label: 'Arrange', note: 'Align, distribute, group and rotate arrive in Phase 7.' },

@@ -5,9 +5,14 @@
  * as "save". The command itself lives in commands.js, so the same command can
  * be run from the ribbon, a menu or the keyboard.
  *
- * Rule: shortcuts are ignored while the user types in a text field, unless the
- * shortcut is registered with { whileTyping: true } (formatting keys like
- * Ctrl+B in Phase 3, and Save, which should work even mid-sentence).
+ * Rules:
+ *  - shortcuts are ignored while the user types in a text field, unless the
+ *    shortcut is registered with { whileTyping: true } (formatting keys like
+ *    Ctrl+B in Phase 3, and Save, which should work even mid-sentence);
+ *  - shortcuts are ignored while a dialog is open;
+ *  - a shortcut whose command is disabled right now (e.g. Escape with nothing
+ *    selected) leaves the key to the browser, unless registered with
+ *    { blockBrowserDefault: true } (Ctrl+S must never open "Save page as").
  *
  * Talks to: commands.js (runs commands), deck.js (listens to the deck iframe,
  * because key presses inside an iframe do not reach the main window).
@@ -112,7 +117,11 @@
             if (entries.has(key)) {
                 throw new Error('Shortcut ' + key + ' is already used by "' + entries.get(key).command + '"');
             }
-            entries.set(key, { combo: key, command: command, whileTyping: !!(options && options.whileTyping) });
+            entries.set(key, {
+                combo: key, command: command,
+                whileTyping: !!(options && options.whileTyping),
+                blockBrowserDefault: !!(options && options.blockBrowserDefault),
+            });
         }
 
         function lookup(combo) {
@@ -122,9 +131,12 @@
         /*
          * Look up the event; if it matches, call runCommand(commandName) and stop
          * the browser's own action (e.g. Ctrl+S would otherwise save the web page).
+         * isEnabled(commandName), if given, says whether the command can run now;
+         * a disabled command leaves the key to the browser, so for example Escape
+         * with nothing selected still closes menus.
          * Returns true if the key was handled.
          */
-        function handle(event, runCommand) {
+        function handle(event, runCommand, isEnabled) {
             if (event.isComposing) {
                 return false;   // the user is composing a character with an IME (e.g. accents)
             }
@@ -133,6 +145,16 @@
                 return false;
             }
             if (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping) {
+                return false;
+            }
+            // An open dialog owns the keyboard (Escape closes it, Enter presses its button).
+            if (event.target && event.target.closest && event.target.closest('dialog')) {
+                return false;
+            }
+            if (isEnabled && !isEnabled(entry.command)) {
+                if (entry.blockBrowserDefault) {
+                    event.preventDefault();   // e.g. no "Save page as" window when there is no deck to save
+                }
                 return false;
             }
             event.preventDefault();
@@ -152,9 +174,9 @@
      * and never pass them to the page, so "New deck" is a menu item only.
      */
     App.shortcuts.DEFAULTS = [
-        ['Ctrl+O', 'open', { whileTyping: true }],
-        ['Ctrl+S', 'save', { whileTyping: true }],
-        ['Ctrl+Shift+S', 'saveAs', { whileTyping: true }],
+        ['Ctrl+O', 'open', { whileTyping: true, blockBrowserDefault: true }],
+        ['Ctrl+S', 'save', { whileTyping: true, blockBrowserDefault: true }],
+        ['Ctrl+Shift+S', 'saveAs', { whileTyping: true, blockBrowserDefault: true }],
         ['Ctrl+Z', 'undo'],
         ['Ctrl+Y', 'redo'],
         ['Ctrl+Shift+Z', 'redo'],
@@ -162,6 +184,7 @@
         ['PageUp', 'previousSlide'],
         ['Home', 'firstSlide'],
         ['End', 'lastSlide'],
+        ['Escape', 'deselect'],
     ];
 
     App.shortcuts.init = function init() {
@@ -178,7 +201,8 @@
      */
     App.shortcuts.listenTo = function listenTo(targetWindow) {
         targetWindow.addEventListener('keydown', (event) => {
-            App.shortcuts.registry.handle(event, (command) => App.commands.run(command));
+            App.shortcuts.registry.handle(event, (command) => App.commands.run(command),
+                (command) => App.commands.isEnabled(command));
         });
     };
 })();

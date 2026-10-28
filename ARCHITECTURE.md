@@ -34,7 +34,9 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `icons.js` | Inline SVG icons | ribbon, ui, dialogs |
 | `dialogs.js` | `<dialog>`-based alert/confirm and the import report | commands |
 | `deck.js` | Loads the deck into the canvas iframe; current slide; editor-only view CSS | shortcuts, fileio |
-| `canvas.js` | Fit-to-window zoom of the 1280×720 stage; overlay layer for handles (Phase 2) | deck |
+| `canvas.js` | Fit-to-window zoom of the 1280×720 stage; overlay layer for handles | deck |
+| `transform.js` | Pure maths: move/resize a `{left, top, width, height}` box, hit-test, stacking order | — |
+| `selection.js` | The overlay catches mouse actions: click selects, drag moves, handles resize; draws the selection box | transform, history, deck, canvas |
 | `thumbnails.js` | Slide rail; one small sandboxed iframe per slide, drawn lazily, refreshed debounced | deck, history events |
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |
 | `commands.js` | Every user action by name; one place that reports errors | fileio, history, deck |
@@ -63,6 +65,15 @@ button → commands.run(name) → history.change(label, scope, fn)
   snapshot of the slide/deck → fn() edits the iframe DOM → 'history-changed' event
   → thumbnails redraw the affected slide (debounced) · title shows ● · ribbon enables Undo
 Ctrl+Z → commands.run('undo') → history.undo() puts the snapshot back → same event chain
+```
+
+**Selecting and dragging** (Phase 2)
+
+```text
+pointerdown on #overlay → selection.js hit-tests the slide's elements (transform.hitTest) → selects by data-id
+  → mouse moved 3 px → history.begin('Move' | 'Resize', slide) → every move: transform.moveRect/resizeRect → element style
+  → pointerup → history.commit()  (one undo step)   ·   Escape → history.cancel()
+'history-changed' → selection.refresh() finds the element again by data-id (undo rebuilt the slide)
 ```
 
 **Saving** (Ctrl+S)

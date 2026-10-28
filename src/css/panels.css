@@ -56,7 +56,40 @@
     transform-origin: 0 0;
 }
 #deck-frame { display: block; width: 1280px; height: 720px; border: 0; background: #fff; }
-#overlay { position: absolute; inset: 0; pointer-events: none; }
+/*
+ * The overlay catches every mouse action on the slide (selection.js). It is
+ * scaled together with the slide, so sizes that must stay constant on screen
+ * (handles, outline) are multiplied by --inverse-zoom (1 / zoom).
+ */
+#overlay {
+    position: absolute; inset: 0;
+    --inverse-zoom: 1;
+    user-select: none;
+    touch-action: none;
+}
+.selection-box {
+    position: absolute;
+    outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;                    /* clicks go through to the overlay's hit test */
+}
+.selection-handle {
+    position: absolute;
+    width: calc(9px * var(--inverse-zoom));
+    height: calc(9px * var(--inverse-zoom));
+    transform: translate(-50%, -50%);
+    border: calc(1px * var(--inverse-zoom)) solid var(--focus);
+    border-radius: 50%;
+    background: #fff;
+    pointer-events: auto;
+}
+.selection-handle[data-handle="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+.selection-handle[data-handle="n"] { left: 50%; top: 0; cursor: ns-resize; }
+.selection-handle[data-handle="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+.selection-handle[data-handle="e"] { left: 100%; top: 50%; cursor: ew-resize; }
+.selection-handle[data-handle="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+.selection-handle[data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
+.selection-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+.selection-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
 
 #welcome {
     max-width: 520px; padding: 32px 36px;

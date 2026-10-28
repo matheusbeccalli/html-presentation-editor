@@ -56,8 +56,8 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 
 ## Phase 2: Select, move, resize, autosave
 
-- [ ] Click to select; selection box with 8 resize handles drawn in the overlay layer
-- [ ] Drag to move; Shift while resizing keeps the aspect ratio; Alt disables snapping
+- [x] Click to select; selection box with 8 resize handles drawn in the overlay layer
+- [x] Drag to move; Shift while resizing keeps the aspect ratio *(snapping, and Alt to turn it off, moved to Phase 7 by decision)*
 - [ ] Arrow keys nudge 1 px, Shift+arrow 10 px
 - [ ] Delete removes the selected element
 - [ ] Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D (duplicate), also across slides
@@ -153,7 +153,7 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 
 - [ ] Multi-select (Shift+click, or drag a rectangle on empty canvas)
 - [ ] Align left / center / right / top / middle / bottom; distribute horizontally / vertically
-- [ ] Smart guides and snapping to slide edges, center lines and other elements (5 px threshold)
+- [ ] Smart guides and snapping to slide edges, center lines and other elements (5 px threshold); Alt while dragging disables snapping
 - [ ] Optional gridlines and rulers
 - [ ] Group / ungroup (Ctrl+G / Ctrl+Shift+G)
 - [ ] Rotate (handle and degrees field)

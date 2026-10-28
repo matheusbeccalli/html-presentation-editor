@@ -155,6 +155,27 @@ def visible_slide_ids(page):
         .filter(s => getComputedStyle(s).display !== 'none').map(s => s.getAttribute('data-slide-id'))""")
 
 
+def slide_to_screen(page, x, y):
+    """Screen position of slide pixel (x, y), whatever the zoom."""
+    return page.evaluate("""([x, y]) => {
+        const r = document.getElementById('overlay').getBoundingClientRect();
+        const zoom = App.canvas.getZoom();
+        return [r.left + x * zoom, r.top + y * zoom];
+    }""", [x, y])
+
+
+def element_rect(page, data_id):
+    return page.evaluate("""id => App.transform.readRect(
+        App.deck.getDocument().querySelector('[data-id="' + id + '"]'))""", data_id)
+
+
+def drag(page, start, end, steps=8):
+    page.mouse.move(*start)
+    page.mouse.down()
+    page.mouse.move(*end, steps=steps)
+    page.mouse.up()
+
+
 # ----------------------------------------------------------------------
 # Tests
 # ----------------------------------------------------------------------
@@ -375,6 +396,65 @@ def test_shortcuts_dirty_dot_and_close_warning(browser):
     editor.close()
 
 
+def test_select_move_resize(browser):
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    editor.close_dialog_if_open()
+    page = editor.page
+    zoom = page.evaluate("App.canvas.getZoom()")
+    selected = "App.selection.selectedId()"
+
+    # Click selects; the box with 8 handles sits exactly on the element.
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    check(page.evaluate(selected) == "e2", "click selects the text box e2")
+    check(page.locator("#overlay .selection-handle").count() == 8, "8 resize handles")
+    check(page.is_visible("#overlay .selection-box"), "selection box visible")
+    box = page.evaluate("App.transform.readRect(document.querySelector('#overlay .selection-box'))")
+    check(box == element_rect(page, "e2"), f"box matches the element: {box}")
+    check(page.evaluate("App.history.canUndo()") is False, "a plain click records no undo step")
+
+    # Drag moves; the whole drag is one undo step.
+    start = slide_to_screen(page, 300, 290)
+    drag(page, start, (start[0] + 100, start[1] + 50))
+    rect = element_rect(page, "e2")
+    check(abs(rect["left"] - (64 + 100 / zoom)) <= 1 and abs(rect["top"] - (230 + 50 / zoom)) <= 1, f"moved: {rect}")
+    check(page.evaluate("App.history.undoLabel()") == "Move", "undo label")
+    check(page.is_visible("#title-dirty"), "a move makes the deck dirty")
+    page.keyboard.press("Control+Z")
+    check(element_rect(page, "e2") == {"left": 64, "top": 230, "width": 1100, "height": 120}, "undo puts it back")
+    check(page.evaluate(selected) == "e2", "still selected after undo (the slide was rebuilt)")
+    check(page.evaluate("App.history.canUndo()") is False, "the drag was a single step")
+
+    # Shift + corner handle keeps the 3:1 logo ratio, anchored top-left.
+    page.mouse.click(*slide_to_screen(page, 100, 70))
+    check(page.evaluate(selected) == "e1", "click selects the logo")
+    handle = slide_to_screen(page, 64 + 120, 56 + 40)
+    page.keyboard.down("Shift")
+    drag(page, handle, (handle[0] + 60, handle[1] + 5))
+    page.keyboard.up("Shift")
+    rect = element_rect(page, "e1")
+    check(rect["left"] == 64 and rect["top"] == 56, f"top-left corner stays: {rect}")
+    check(rect["width"] > 150 and abs(rect["width"] / rect["height"] - 3) < 0.1, f"ratio kept: {rect}")
+    check(page.evaluate("App.history.undoLabel()") == "Resize", "resize undo label")
+    page.screenshot(path=str(OUTPUT / "12-selection.png"))
+
+    # Escape, a click on empty slide, and changing slides all deselect.
+    page.keyboard.press("Escape")
+    check(page.evaluate(selected) is None, "Escape deselects")
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.mouse.click(*slide_to_screen(page, 1250, 700))
+    check(page.evaluate(selected) is None, "click on empty slide deselects")
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("PageDown")
+    check(page.evaluate(selected) is None and page.is_hidden("#overlay .selection-box"), "slide change deselects")
+
+    # Nothing of the selection ends up in the saved file.
+    html = page.evaluate("App.fileio.currentHtml()")
+    check("selection" not in html, "no selection traces in the saved HTML")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_drag_and_drop_opens_a_deck(browser):
     editor = Editor(browser)
     text = CONTRACT.read_text(encoding="utf-8")
@@ -425,6 +505,7 @@ TESTS = [
     test_shortcuts_dirty_dot_and_close_warning,
     test_drag_and_drop_opens_a_deck,
     test_heavy_deck_stays_responsive,
+    test_select_move_resize,
 ]
 
 

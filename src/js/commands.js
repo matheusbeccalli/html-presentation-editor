@@ -6,7 +6,7 @@
  * action behaves the same however it is started, and errors are shown in one
  * consistent way.
  *
- * Talks to: fileio.js, history.js, deck.js, importer.js (the actions),
+ * Talks to: fileio.js, history.js, deck.js, importer.js, selection.js (the actions),
  *           shortcuts.js and ribbon.js (they run commands), ui.js.
  */
 
@@ -87,6 +87,12 @@
         App.commands.define('previousSlide', { label: 'Previous slide', run: () => App.deck.previous(), isEnabled: hasDeck });
         App.commands.define('firstSlide', { label: 'First slide', run: () => App.deck.first(), isEnabled: hasDeck });
         App.commands.define('lastSlide', { label: 'Last slide', run: () => App.deck.last(), isEnabled: hasDeck });
+
+        App.commands.define('deselect', {
+            label: 'Deselect',
+            isEnabled: () => !!App.selection.selectedId(),
+            run: () => App.selection.clear(),
+        });
 
         App.commands.define('removeBlockedRefs', {
             label: 'Remove blocked references',

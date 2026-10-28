@@ -48,7 +48,7 @@
                 <div id="canvas-stage">
                     <!-- The deck: same-origin so the editor can edit it, no scripts so the deck's code never runs (SPEC 3.5). -->
                     <iframe id="deck-frame" sandbox="allow-same-origin" title="Current slide"></iframe>
-                    <!-- Selection handles are drawn here, never inside the slide (Phase 2). -->
+                    <!-- Catches mouse actions on the slide; selection handles are drawn here, never inside the slide (selection.js). -->
                     <div id="overlay"></div>
                 </div>
             </div>
@@ -106,6 +106,8 @@
 <!-- INLINE-JS: js/dialogs.js -->
 <!-- INLINE-JS: js/deck.js -->
 <!-- INLINE-JS: js/canvas.js -->
+<!-- INLINE-JS: js/transform.js -->
+<!-- INLINE-JS: js/selection.js -->
 <!-- INLINE-JS: js/thumbnails.js -->
 <!-- INLINE-JS: js/fileio.js -->
 <!-- INLINE-JS: js/commands.js -->

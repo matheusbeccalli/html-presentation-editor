@@ -76,6 +76,40 @@ test('shortcuts: ignored while typing unless marked whileTyping', () => {
     assertEqual(ran, ['bold']);
 });
 
+test('shortcuts: a disabled command leaves the key to the browser (e.g. Escape closes a dialog)', () => {
+    const registry = App.shortcuts.createRegistry();
+    const ran = [];
+    registry.register('Escape', 'deselect');
+    const event = fakeKey('Escape');
+    const handled = registry.handle(event, (c) => ran.push(c), () => false);
+    assert(!handled, 'not handled');
+    assert(!event.wasPrevented(), 'default not prevented');
+    assertEqual(ran, []);
+});
+
+test('shortcuts: blockBrowserDefault keeps the browser away even when the command is disabled', () => {
+    const registry = App.shortcuts.createRegistry();
+    registry.register('Ctrl+S', 'save', { blockBrowserDefault: true });
+    const event = fakeKey('s', { ctrl: true });
+    const ran = [];
+    registry.handle(event, (c) => ran.push(c), () => false);
+    assert(event.wasPrevented(), "no 'Save page as' window from the browser");
+    assertEqual(ran, []);
+});
+
+test('shortcuts: ignored while a dialog is open (keys belong to the dialog)', () => {
+    const registry = App.shortcuts.createRegistry();
+    const ran = [];
+    registry.register('Escape', 'deselect');
+    const dialog = document.createElement('dialog');
+    const button = document.createElement('button');
+    dialog.appendChild(button);
+    const event = fakeKey('Escape', {}, button);
+    registry.handle(event, (c) => ran.push(c), () => true);
+    assertEqual(ran, []);
+    assert(!event.wasPrevented(), 'default not prevented');
+});
+
 test('shortcuts: ignored during IME composition', () => {
     const registry = App.shortcuts.createRegistry();
     const ran = [];

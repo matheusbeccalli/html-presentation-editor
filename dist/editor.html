@@ -202,20 +202,23 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     color: var(--text-muted); font-size: 12px; line-height: 1.4;
 }
 
-.file-menu {
+/* Pop-up menus: the File menu (ribbon.js) and the right-click menu (contextmenu.js). */
+.menu {
     position: fixed; z-index: 700;
     min-width: 240px; padding: 4px;
     background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 }
-.file-menu-item {
+.context-menu { min-width: 210px; }
+.menu-item {
     display: flex; align-items: center; gap: 10px; width: 100%;
     padding: 7px 10px; border: 0; border-radius: 4px; background: transparent; cursor: pointer; text-align: left;
 }
-.file-menu-item:hover:not(:disabled), .file-menu-item:focus-visible { background: var(--accent-soft); outline: none; }
-.file-menu-item:disabled { opacity: 0.4; cursor: default; }
-.file-menu-label { flex: 1; }
-.file-menu-keys { color: var(--text-muted); font-size: 11px; }
+.menu-item:hover:not(:disabled), .menu-item:focus-visible, .menu-item:focus { background: var(--accent-soft); outline: none; }
+.menu-item:disabled { opacity: 0.4; cursor: default; }
+.menu-label { flex: 1; }
+.menu-keys { color: var(--text-muted); font-size: 11px; }
+.menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 
 </style>
 <style>
@@ -348,6 +351,23 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 }
 #format-pane h2 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
 #format-pane .panel-hint { line-height: 1.5; }
+#format-pane h3 {
+    margin: 14px 0 8px; font-size: 11px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted);
+}
+#format-type { font-weight: 600; }
+.format-grid {
+    display: grid; grid-template-columns: auto 1fr auto;
+    align-items: center; gap: 6px 8px;
+}
+.format-grid input {
+    width: 100%; min-width: 0; padding: 4px 6px;
+    border: 1px solid var(--border); border-radius: 3px;
+    font: inherit; text-align: right;
+}
+.format-grid input:focus { outline: 2px solid var(--focus); outline-offset: -1px; border-color: transparent; }
+.format-grid span { color: var(--text-muted); }
+.format-tip { margin: 10px 0 0; font-size: 12px; }
 
 /* ---- Status bar (bottom) ---- */
 #statusbar {
@@ -457,7 +477,19 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 
     <aside id="format-pane" aria-label="Format">
         <h2>Format</h2>
-        <p class="panel-hint">Select an object on the slide to see its options here. Selection arrives in Phase 2.</p>
+        <p class="panel-hint" id="format-hint">Select an object on the slide to see its options here.</p>
+        <!-- Filled by formatpane.js for the selected element. -->
+        <section id="format-size" hidden>
+            <div id="format-type"></div>
+            <h3>Size &amp; position</h3>
+            <div class="format-grid">
+                <label for="format-x">X</label><input id="format-x" data-field="left" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-y">Y</label><input id="format-y" data-field="top" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-w">Width</label><input id="format-w" data-field="width" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-h">Height</label><input id="format-h" data-field="height" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+            </div>
+            <p class="panel-hint format-tip">Enter or Tab applies a value, Esc cancels. Arrow keys step 1 px (Shift: 10 px).</p>
+        </section>
     </aside>
 </main>
 
@@ -635,6 +667,8 @@ App.start = function start() {
     App.ribbon.init();
     App.canvas.init();
     App.selection.init();
+    App.formatPane.init();
+    App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
     App.fileio.init();
@@ -775,6 +809,7 @@ App.util.el = function el(tag, attributes, children) {
  * Added in Phase 2:
  *   'selection-changed' another element (or none) was selected (selection.js)
  *   'clipboard-changed' something was copied, Paste can run    (elements.js)
+ *   'selection-dragged' the selected element moves during a drag (selection.js)
  *   'zoom-changed'      the canvas zoom changed                (canvas.js)
  *
  * Talks to: nothing (others call it). Created in app.js as App.events.
@@ -1017,7 +1052,15 @@ App.createEventBus = function createEventBus() {
         ['Ctrl+V', 'paste'],
         // Ctrl+D is the browser's "bookmark this page"; never let it open with nothing selected.
         ['Ctrl+D', 'duplicate', { blockBrowserDefault: true }],
+        ['Shift+F10', 'contextMenu'],
+        ['ContextMenu', 'contextMenu'],
     ];
+
+    /* The first shortcut of a command, e.g. keysFor('save') -> 'Ctrl+S' ('' if none). For menus and tooltips. */
+    App.shortcuts.keysFor = function keysFor(command) {
+        const entry = App.shortcuts.DEFAULTS.find((item) => item[1] === command);
+        return entry ? App.shortcuts.normalizeCombo(entry[0]) : '';
+    };
 
     App.shortcuts.init = function init() {
         App.shortcuts.registry = App.shortcuts.createRegistry();
@@ -3517,7 +3560,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
- * Events: emits 'selection-changed'. Listens to deck-loaded, slide-changed,
+ * Events: emits 'selection-changed' and, during a drag, 'selection-dragged'.
+ * Listens to deck-loaded, slide-changed,
  * history-changed and zoom-changed.
  *
  * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom).
@@ -3705,6 +3749,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 : App.transform.resizeRect(startRect, handle, dx, dy, event.shiftKey);
             App.transform.writeRect(element, rect);
             App.selection.refresh();
+            App.events.emit('selection-dragged');   // the Format pane shows the values live
         }
 
         function finish(cancelled) {
@@ -3944,6 +3989,286 @@ App.template.newDeckHtml = function newDeckHtml() {
             });
         });
     };
+})();
+
+</script>
+<script>
+// ---- js/formatpane.js ----
+/*
+ * formatpane.js - the Format pane on the right (SPEC 4, Phase 2: "Size & position").
+ *
+ * Shows X, Y, Width and Height of the selected element in px. Typing a value
+ * and pressing Enter or Tab (or clicking elsewhere) applies it as one undo
+ * step; Esc puts the old value back. Arrow keys in a field step 1 px, Shift
+ * 10 px, like PowerPoint's spinner fields. Later phases add their own
+ * sections here (text, table, image, chart options).
+ *
+ * Talks to: selection.js (what is selected), transform.js, history.js,
+ *           events (selection-changed, selection-dragged, history-changed).
+ */
+
+(function () {
+    'use strict';
+
+    App.formatPane = {};
+
+    const TYPE_LABELS = {
+        text: 'Text box', image: 'Picture', table: 'Table', shape: 'Shape', chart: 'Chart', group: 'Group',
+    };
+
+    // ---------------------------------------------------------------
+    // Pure helpers (tested in tests/unit/formatpane.test.js)
+    // ---------------------------------------------------------------
+
+    /*
+     * Read a number typed by the user: "120", "12.5", "12,5" (decimal comma,
+     * as typed in Brazil) or "120 px". Rounded to 2 decimals. null if it is
+     * not a number.
+     */
+    App.formatPane.parseNumber = function parseNumber(text) {
+        const cleaned = String(text).trim().replace(/\s*px$/i, '').replace(',', '.');
+        if (!/^-?\d+(\.\d+)?$/.test(cleaned)) {
+            return null;
+        }
+        return App.util.round2(parseFloat(cleaned));
+    };
+
+    /* A copy of rect with one field changed; width/height stay at least MIN_SIZE. */
+    App.formatPane.withField = function withField(rect, field, value) {
+        const result = Object.assign({}, rect);
+        const isSize = field === 'width' || field === 'height';
+        result[field] = isSize ? Math.max(App.transform.MIN_SIZE, value) : value;
+        return result;
+    };
+
+    // ---------------------------------------------------------------
+    // The pane
+    // ---------------------------------------------------------------
+
+    let hint = null;
+    let section = null;
+    let typeLabel = null;
+    let inputs = [];
+    const edited = new Set();   // fields the user is typing in, not applied yet
+
+    App.formatPane.init = function init() {
+        hint = document.getElementById('format-hint');
+        section = document.getElementById('format-size');
+        typeLabel = document.getElementById('format-type');
+        inputs = Array.from(section.querySelectorAll('input[data-field]'));
+
+        inputs.forEach((input) => {
+            input.addEventListener('input', () => edited.add(input));
+            input.addEventListener('change', () => apply(input));   // fires on Tab / click elsewhere
+            input.addEventListener('keydown', (event) => onFieldKey(event, input));
+        });
+
+        ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded'].forEach((name) => {
+            App.events.on(name, () => App.formatPane.refresh());
+        });
+        App.events.on('selection-dragged', () => App.formatPane.refresh());
+    };
+
+    /* Show the selected element's values (fields being typed in are left alone). */
+    App.formatPane.refresh = function refresh() {
+        const element = App.selection.getElement();
+        hint.hidden = !!element;
+        section.hidden = !element;
+        if (!element) {
+            edited.clear();
+            return;
+        }
+        typeLabel.textContent = TYPE_LABELS[element.getAttribute('data-type')] || 'Object';
+        const rect = App.transform.readRect(element);
+        inputs.forEach((input) => {
+            if (!edited.has(input)) {
+                input.value = String(App.util.round2(rect[input.getAttribute('data-field')]));
+            }
+        });
+    };
+
+    function revert(input) {
+        edited.delete(input);
+        App.formatPane.refresh();
+    }
+
+    /* Apply the typed value of one field as one undo step. */
+    function apply(input) {
+        const element = App.selection.getElement();
+        const value = App.formatPane.parseNumber(input.value);
+        edited.delete(input);
+        if (!element || value === null) {
+            App.formatPane.refresh();   // not a number: show the old value again
+            return;
+        }
+        const field = input.getAttribute('data-field');
+        const rect = App.transform.readRect(element);
+        const next = App.formatPane.withField(rect, field, value);
+        if (next[field] === rect[field]) {
+            App.formatPane.refresh();
+            return;
+        }
+        const label = (field === 'left' || field === 'top') ? 'Move' : 'Resize';
+        const scope = { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
+        App.history.change(label, scope, () => App.transform.writeRect(element, next));
+        // history-changed redraws the selection box and this pane.
+    }
+
+    function onFieldKey(event, input) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            apply(input);
+            input.select();
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            revert(input);
+            input.blur();
+        } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            const current = App.formatPane.parseNumber(input.value);
+            if (current === null) {
+                return;
+            }
+            const step = (event.shiftKey ? 10 : 1) * (event.key === 'ArrowUp' ? 1 : -1);
+            input.value = String(App.util.round2(current + step));
+            apply(input);
+        }
+    }
+})();
+
+</script>
+<script>
+// ---- js/contextmenu.js ----
+/*
+ * contextmenu.js - the right-click menu on the slide (SPEC 4, Phase 2).
+ *
+ * Right-click on an element: it is selected (selection.js does that on
+ * pointerdown) and the menu lists the element actions. Right-click on empty
+ * slide: only Paste. Shift+F10 or the Menu key opens it for the selection,
+ * like PowerPoint. The items only name commands (commands.js), so they behave
+ * exactly like the same action from the ribbon or the keyboard.
+ *
+ * Keyboard inside the menu: Up/Down move, Enter runs, Esc or Tab closes.
+ *
+ * Talks to: commands.js, shortcuts.js (key hints), selection.js, canvas.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.contextMenu = {};
+
+    const ELEMENT_ITEMS = ['cut', 'copy', 'paste', 'duplicate', 'delete', '-',
+        'bringToFront', 'bringForward', 'sendBackward', 'sendToBack'];
+    const EMPTY_SLIDE_ITEMS = ['paste'];
+
+    let menu = null;
+
+    App.contextMenu.init = function init() {
+        // tabindex -1: the menu itself can hold the keyboard focus when no item is enabled.
+        menu = App.util.el('div', { class: 'menu context-menu', role: 'menu', tabindex: '-1', hidden: true });
+        menu.addEventListener('keydown', onMenuKey);
+        document.body.appendChild(menu);
+
+        const overlay = document.getElementById('overlay');
+        overlay.addEventListener('contextmenu', (event) => {
+            event.preventDefault();   // our menu instead of the browser's
+            App.contextMenu.open(event.clientX, event.clientY);
+        });
+
+        // Anything else the user does closes the menu.
+        document.addEventListener('pointerdown', (event) => {
+            if (!menu.hidden && !menu.contains(event.target)) {
+                App.contextMenu.close();
+            }
+        }, true);
+        window.addEventListener('blur', () => App.contextMenu.close());
+        window.addEventListener('resize', () => App.contextMenu.close());
+        ['slide-changed', 'deck-loaded', 'zoom-changed'].forEach((name) => App.events.on(name, () => App.contextMenu.close()));
+    };
+
+    App.contextMenu.isOpen = function isOpen() {
+        return !!menu && !menu.hidden;
+    };
+
+    /* Open the menu with its top-left corner at screen point (x, y). */
+    App.contextMenu.open = function open(x, y) {
+        const commands = App.selection.getElement() ? ELEMENT_ITEMS : EMPTY_SLIDE_ITEMS;
+        menu.innerHTML = '';
+        commands.forEach((command) => menu.appendChild(command === '-' ? separator() : item(command)));
+        menu.hidden = false;
+        placeInsideWindow(x, y);
+        const first = enabledItems()[0];
+        (first || menu).focus();   // keys (Esc, arrows) must reach the menu either way
+    };
+
+    /* Shift+F10 / Menu key: open at the middle of the selected element (or of the slide). */
+    App.contextMenu.openForSelection = function openForSelection() {
+        const overlayRect = document.getElementById('overlay').getBoundingClientRect();
+        const zoom = App.canvas.getZoom();
+        const element = App.selection.getElement();
+        const rect = element ? App.transform.readRect(element) : { left: 0, top: 0, width: 1280, height: 720 };
+        App.contextMenu.open(overlayRect.left + (rect.left + rect.width / 2) * zoom,
+            overlayRect.top + (rect.top + rect.height / 2) * zoom);
+    };
+
+    App.contextMenu.close = function close() {
+        if (menu && !menu.hidden) {
+            menu.hidden = true;
+            menu.innerHTML = '';
+        }
+    };
+
+    function item(command) {
+        const button = App.util.el('button', {
+            type: 'button', class: 'menu-item', role: 'menuitem', 'data-command': command,
+            disabled: !App.commands.isEnabled(command),
+            onclick: () => {
+                App.contextMenu.close();
+                App.commands.run(command);
+            },
+        });
+        button.append(App.util.el('span', { class: 'menu-label' }, [App.commands.label(command)]),
+            App.util.el('span', { class: 'menu-keys' }, [App.shortcuts.keysFor(command)]));
+        return button;
+    }
+
+    function separator() {
+        return App.util.el('div', { class: 'menu-separator', role: 'separator' });
+    }
+
+    function enabledItems() {
+        return Array.from(menu.querySelectorAll('.menu-item:not(:disabled)'));
+    }
+
+    // Open below-right of the mouse, but flip/shift so the menu never leaves the window.
+    function placeInsideWindow(x, y) {
+        const width = menu.offsetWidth;
+        const height = menu.offsetHeight;
+        const left = x + width > window.innerWidth ? Math.max(0, x - width) : x;
+        const top = y + height > window.innerHeight ? Math.max(0, y - height) : y;
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+    }
+
+    function onMenuKey(event) {
+        const items = enabledItems();
+        const index = items.indexOf(document.activeElement);
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            const step = event.key === 'ArrowDown' ? 1 : -1;
+            const next = items[(index + step + items.length) % items.length];
+            if (next) {
+                next.focus();
+            }
+        } else if (event.key === 'Escape' || event.key === 'Tab') {
+            App.contextMenu.close();
+        } else {
+            return;   // Enter / Space: the focused button clicks itself
+        }
+        // Keys used by the menu must not also reach the editor's shortcuts (Escape would deselect).
+        event.preventDefault();
+        event.stopPropagation();
+    }
 })();
 
 </script>
@@ -4622,6 +4947,10 @@ App.template.newDeckHtml = function newDeckHtml() {
                 });
             });
 
+        App.commands.define('contextMenu', {
+            label: 'Show menu', isEnabled: () => App.state.hasDeck, run: () => App.contextMenu.openForSelection(),
+        });
+
         App.commands.define('deselect', {
             label: 'Deselect',
             isEnabled: () => !!App.selection.selectedId(),
@@ -4702,13 +5031,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     let fileMenu = null;
     const buttons = [];   // [{ button, command }] so enabled states can be refreshed
 
-    function shortcutFor(command) {
-        const entry = App.shortcuts.DEFAULTS.find((item) => item[1] === command);
-        return entry ? entry[0] : '';
-    }
-
     function commandButton(command, iconName, extraClass) {
-        const keys = shortcutFor(command);
+        const keys = App.shortcuts.keysFor(command);
         const button = el('button', {
             type: 'button', class: 'ribbon-button ' + (extraClass || ''),
             title: App.commands.label(command) + (keys ? ' (' + keys + ')' : ''),
@@ -4746,18 +5070,18 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     function buildFileMenu() {
-        fileMenu = el('div', { class: 'file-menu', role: 'menu', hidden: true });
+        fileMenu = el('div', { class: 'menu file-menu', role: 'menu', hidden: true });
         FILE_MENU.forEach(([command, icon, keys]) => {
             const item = el('button', {
-                type: 'button', class: 'file-menu-item', role: 'menuitem', 'data-command': command,
+                type: 'button', class: 'menu-item', role: 'menuitem', 'data-command': command,
                 onclick: () => {
                     closeFileMenu();
                     App.commands.run(command);
                 },
             });
             item.innerHTML = App.icons.get(icon);
-            item.append(el('span', { class: 'file-menu-label' }, [App.commands.label(command)]),
-                el('span', { class: 'file-menu-keys' }, [keys]));
+            item.append(el('span', { class: 'menu-label' }, [App.commands.label(command)]),
+                el('span', { class: 'menu-keys' }, [keys]));
             buttons.push({ button: item, command: command });
             fileMenu.appendChild(item);
         });

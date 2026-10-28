@@ -540,6 +540,99 @@ def test_nudge_delete_clipboard_and_order(browser):
     editor.close()
 
 
+def test_format_pane_and_context_menu(browser):
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    editor.close_dialog_if_open()
+    page = editor.page
+    selected = "App.selection.selectedId()"
+
+    def fields():
+        return page.evaluate("['x', 'y', 'w', 'h'].map(f => document.getElementById('format-' + f).value)")
+
+    # Nothing selected: only the hint. Selecting fills X / Y / W / H.
+    check(page.is_visible("#format-hint") and page.is_hidden("#format-size"), "hint when nothing is selected")
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    check(page.is_visible("#format-size"), "Size & position shown")
+    check(fields() == ["64", "230", "1100", "120"], f"fields show the element: {fields()}")
+    check(page.inner_text("#format-type") == "Text box", "element type shown")
+
+    # Typing a value + Enter moves the element: one undo step, box follows.
+    page.fill("#format-x", "100")
+    page.press("#format-x", "Enter")
+    check(element_rect(page, "e2")["left"] == 100, "X = 100 moved the element")
+    check(page.evaluate("App.history.undoLabel()") == "Move", "undo label Move")
+    box = page.evaluate("App.transform.readRect(document.querySelector('#overlay .selection-box'))")
+    check(box["left"] == 100, "selection box follows")
+
+    # A decimal comma works; leaving the field (Tab) applies it.
+    page.fill("#format-w", "500,5")
+    page.press("#format-w", "Tab")
+    check(element_rect(page, "e2")["width"] == 500.5, f"W = 500,5: {element_rect(page, 'e2')}")
+
+    # Nonsense is refused and the old value comes back; Escape throws away what was typed.
+    page.fill("#format-h", "abc")
+    page.press("#format-h", "Enter")
+    check(page.input_value("#format-h") == "120" and element_rect(page, "e2")["height"] == 120, "invalid input reverted")
+    page.fill("#format-y", "999")
+    page.press("#format-y", "Escape")
+    check(page.input_value("#format-y") == "230" and element_rect(page, "e2")["top"] == 230, "Escape reverts")
+    check(page.evaluate(selected) == "e2", "Escape in a field does not deselect")
+
+    # Arrow keys in a field step the value (Shift: 10); Delete in a field never deletes the element.
+    page.press("#format-x", "ArrowUp")
+    page.press("#format-x", "Shift+ArrowUp")
+    check(element_rect(page, "e2")["left"] == 111, f"ArrowUp +1, Shift+ArrowUp +10: {element_rect(page, 'e2')}")
+    page.press("#format-x", "Delete")
+    check(page.evaluate("!!App.deck.getDocument().querySelector('[data-id=\"e2\"]')"), "Delete in a field kept e2")
+
+    # Dragging updates the fields live.
+    start = slide_to_screen(page, 300, 290)
+    page.mouse.move(*start)
+    page.mouse.down()
+    page.mouse.move(start[0] + 40, start[1], steps=5)
+    during = fields()[0]
+    page.mouse.up()
+    check(during != "111", f"X changes while dragging: {during}")
+    page.evaluate("while (App.history.canUndo()) App.history.undo()")
+    check(fields() == ["64", "230", "1100", "120"], f"fields follow undo: {fields()}")
+
+    # Right-click an element: it gets selected and the menu shows the element actions.
+    page.mouse.click(*slide_to_screen(page, 100, 70), button="right")
+    check(page.evaluate(selected) == "e1", "right-click selects")
+    check(page.is_visible(".context-menu"), "context menu open")
+    labels = page.locator(".context-menu .menu-label").all_inner_texts()
+    check(labels[:5] == ["Cut", "Copy", "Paste", "Duplicate", "Delete"] and "Bring to front" in labels, f"items: {labels}")
+    check(page.is_disabled(".context-menu button[data-command='paste']"), "Paste disabled with an empty clipboard")
+    check("Ctrl+X" in page.inner_text(".context-menu"), "shortcuts shown")
+    page.screenshot(path=str(OUTPUT / "14-context-menu.png"))
+    page.click(".context-menu button[data-command='bringToFront']")
+    check(page.is_hidden(".context-menu"), "menu closes after a choice")
+    order = page.evaluate("App.transform.topLevelElements(App.deck.getCurrentSlide()).map(e => e.getAttribute('data-id'))")
+    check(order[-1] == "e1", f"Bring to front from the menu: {order}")
+
+    # Right-click on empty slide: only Paste. Escape closes the menu but keeps nothing selected.
+    page.mouse.click(*slide_to_screen(page, 1250, 700), button="right")
+    labels = page.locator(".context-menu .menu-label").all_inner_texts()
+    check(labels == ["Paste"], f"empty-slide menu: {labels}")
+    page.keyboard.press("Escape")
+    check(page.is_hidden(".context-menu"), "Escape closes the menu")
+
+    # Keyboard: Shift+F10 opens the menu for the selection; arrows + Enter choose.
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("Shift+F10")
+    check(page.is_visible(".context-menu"), "Shift+F10 opens the menu")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Enter")
+    check(page.is_hidden(".context-menu") and page.evaluate("App.elements.canPaste()"), "ArrowDown + Enter ran Copy")
+    page.mouse.click(*slide_to_screen(page, 300, 290), button="right")
+    page.mouse.click(10, 10)
+    check(page.is_hidden(".context-menu"), "a click elsewhere closes the menu")
+
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_drag_and_drop_opens_a_deck(browser):
     editor = Editor(browser)
     text = CONTRACT.read_text(encoding="utf-8")
@@ -592,6 +685,7 @@ TESTS = [
     test_heavy_deck_stays_responsive,
     test_select_move_resize,
     test_nudge_delete_clipboard_and_order,
+    test_format_pane_and_context_menu,
 ]
 
 

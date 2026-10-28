@@ -37,6 +37,8 @@ App.start = function start() {
     App.ribbon.init();
     App.canvas.init();
     App.selection.init();
+    App.formatPane.init();
+    App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
     App.fileio.init();

@@ -55,13 +55,8 @@
     let fileMenu = null;
     const buttons = [];   // [{ button, command }] so enabled states can be refreshed
 
-    function shortcutFor(command) {
-        const entry = App.shortcuts.DEFAULTS.find((item) => item[1] === command);
-        return entry ? entry[0] : '';
-    }
-
     function commandButton(command, iconName, extraClass) {
-        const keys = shortcutFor(command);
+        const keys = App.shortcuts.keysFor(command);
         const button = el('button', {
             type: 'button', class: 'ribbon-button ' + (extraClass || ''),
             title: App.commands.label(command) + (keys ? ' (' + keys + ')' : ''),
@@ -99,18 +94,18 @@
     }
 
     function buildFileMenu() {
-        fileMenu = el('div', { class: 'file-menu', role: 'menu', hidden: true });
+        fileMenu = el('div', { class: 'menu file-menu', role: 'menu', hidden: true });
         FILE_MENU.forEach(([command, icon, keys]) => {
             const item = el('button', {
-                type: 'button', class: 'file-menu-item', role: 'menuitem', 'data-command': command,
+                type: 'button', class: 'menu-item', role: 'menuitem', 'data-command': command,
                 onclick: () => {
                     closeFileMenu();
                     App.commands.run(command);
                 },
             });
             item.innerHTML = App.icons.get(icon);
-            item.append(el('span', { class: 'file-menu-label' }, [App.commands.label(command)]),
-                el('span', { class: 'file-menu-keys' }, [keys]));
+            item.append(el('span', { class: 'menu-label' }, [App.commands.label(command)]),
+                el('span', { class: 'menu-keys' }, [keys]));
             buttons.push({ button: item, command: command });
             fileMenu.appendChild(item);
         });

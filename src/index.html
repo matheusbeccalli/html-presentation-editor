@@ -72,7 +72,19 @@
 
     <aside id="format-pane" aria-label="Format">
         <h2>Format</h2>
-        <p class="panel-hint">Select an object on the slide to see its options here. Selection arrives in Phase 2.</p>
+        <p class="panel-hint" id="format-hint">Select an object on the slide to see its options here.</p>
+        <!-- Filled by formatpane.js for the selected element. -->
+        <section id="format-size" hidden>
+            <div id="format-type"></div>
+            <h3>Size &amp; position</h3>
+            <div class="format-grid">
+                <label for="format-x">X</label><input id="format-x" data-field="left" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-y">Y</label><input id="format-y" data-field="top" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-w">Width</label><input id="format-w" data-field="width" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-h">Height</label><input id="format-h" data-field="height" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+            </div>
+            <p class="panel-hint format-tip">Enter or Tab applies a value, Esc cancels. Arrow keys step 1 px (Shift: 10 px).</p>
+        </section>
     </aside>
 </main>
 
@@ -109,6 +121,8 @@
 <!-- INLINE-JS: js/transform.js -->
 <!-- INLINE-JS: js/selection.js -->
 <!-- INLINE-JS: js/elements.js -->
+<!-- INLINE-JS: js/formatpane.js -->
+<!-- INLINE-JS: js/contextmenu.js -->
 <!-- INLINE-JS: js/thumbnails.js -->
 <!-- INLINE-JS: js/fileio.js -->
 <!-- INLINE-JS: js/commands.js -->

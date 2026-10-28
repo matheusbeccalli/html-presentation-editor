@@ -37,6 +37,8 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `canvas.js` | Fit-to-window zoom of the 1280×720 stage; overlay layer for handles | deck |
 | `transform.js` | Pure maths: move/resize a `{left, top, width, height}` box, hit-test, stacking order | — |
 | `selection.js` | The overlay catches mouse actions: click selects, drag moves, handles resize; draws the selection box | transform, history, deck, canvas |
+| `formatpane.js` | Format pane: "Size & position" X/Y/W/H fields for the selection, one undo step per applied value | selection, transform, history |
+| `contextmenu.js` | Right-click menu (and Shift+F10): element actions, or only Paste on empty slide; items name commands | commands, selection, shortcuts |
 | `elements.js` | Actions on the selected element: nudge (merged undo), delete, cut/copy/paste/duplicate (own clipboard, fresh ids), stacking order | selection, transform, history, deck |
 | `thumbnails.js` | Slide rail; one small sandboxed iframe per slide, drawn lazily, refreshed debounced | deck, history events |
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |

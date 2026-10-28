@@ -62,8 +62,8 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [x] Delete removes the selected element
 - [x] Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D (duplicate), also across slides
 - [x] Bring forward / send backward / bring to front / send to back
-- [ ] Format pane "Size & position": X, Y, W, H in px, editable
-- [ ] Right-click context menu with the common actions
+- [x] Format pane "Size & position": X, Y, W, H in px, editable (Enter/Tab applies, Esc cancels, arrows step, decimal comma accepted)
+- [x] Right-click context menu with the common actions (also Shift+F10 / Menu key)
 - [ ] Canvas zoom: Ctrl+mouse wheel and zoom slider, 50–400%
 - [ ] AutoSave layer 1 (6.1): on/off toggle in the title bar, turns on after the first manual save in the session
 - [ ] AutoSave timing: 5 s after the last change, at most every 30 s while editing; never during drag, resize or IME composition

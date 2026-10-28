@@ -112,6 +112,10 @@
                 });
             });
 
+        App.commands.define('contextMenu', {
+            label: 'Show menu', isEnabled: () => App.state.hasDeck, run: () => App.contextMenu.openForSelection(),
+        });
+
         App.commands.define('deselect', {
             label: 'Deselect',
             isEnabled: () => !!App.selection.selectedId(),

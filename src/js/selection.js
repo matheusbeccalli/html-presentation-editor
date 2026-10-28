@@ -15,7 +15,8 @@
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
- * Events: emits 'selection-changed'. Listens to deck-loaded, slide-changed,
+ * Events: emits 'selection-changed' and, during a drag, 'selection-dragged'.
+ * Listens to deck-loaded, slide-changed,
  * history-changed and zoom-changed.
  *
  * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom).
@@ -203,6 +204,7 @@
                 : App.transform.resizeRect(startRect, handle, dx, dy, event.shiftKey);
             App.transform.writeRect(element, rect);
             App.selection.refresh();
+            App.events.emit('selection-dragged');   // the Format pane shows the values live
         }
 
         function finish(cancelled) {

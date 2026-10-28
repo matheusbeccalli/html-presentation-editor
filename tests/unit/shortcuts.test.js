@@ -130,3 +130,9 @@ test('shortcuts: list() returns every shortcut for the cheat sheet', () => {
     registry.register('Ctrl+Z', 'undo');
     assertEqual(registry.list().map((s) => s.combo), ['Ctrl+S', 'Ctrl+Z']);
 });
+
+test('shortcuts: keysFor names the first shortcut of a command, for menus and tooltips', () => {
+    assertEqual(App.shortcuts.keysFor('save'), 'Ctrl+S');
+    assertEqual(App.shortcuts.keysFor('delete'), 'Delete');
+    assertEqual(App.shortcuts.keysFor('bringToFront'), '');
+});

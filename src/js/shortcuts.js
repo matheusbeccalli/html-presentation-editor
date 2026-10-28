@@ -200,7 +200,15 @@
         ['Ctrl+V', 'paste'],
         // Ctrl+D is the browser's "bookmark this page"; never let it open with nothing selected.
         ['Ctrl+D', 'duplicate', { blockBrowserDefault: true }],
+        ['Shift+F10', 'contextMenu'],
+        ['ContextMenu', 'contextMenu'],
     ];
+
+    /* The first shortcut of a command, e.g. keysFor('save') -> 'Ctrl+S' ('' if none). For menus and tooltips. */
+    App.shortcuts.keysFor = function keysFor(command) {
+        const entry = App.shortcuts.DEFAULTS.find((item) => item[1] === command);
+        return entry ? App.shortcuts.normalizeCombo(entry[0]) : '';
+    };
 
     App.shortcuts.init = function init() {
         App.shortcuts.registry = App.shortcuts.createRegistry();

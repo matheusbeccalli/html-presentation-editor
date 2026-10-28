@@ -454,6 +454,16 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .report-list li:first-child { list-style: none; margin-left: -14px; color: var(--text-muted); }
 .report-section:first-child .report-list li:first-child { list-style: disc; margin-left: 0; color: inherit; }
 
+/* Crash recovery (drafts.js): a miniature of slide 1, and the slide-by-slide comparison. */
+.recovery .miniature { margin: 10px 0; }
+.recovery-note { color: var(--text-muted); font-size: 12px; margin-top: 8px !important; }
+.miniature-empty { background: repeating-linear-gradient(45deg, #f3f2f1 0 8px, #fff 8px 16px); }
+.compare-row { margin-top: 14px; }
+.compare-row h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+.compare-pair { display: flex; gap: 16px; flex-wrap: wrap; }
+.compare-side { margin: 0; }
+.compare-side figcaption { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
+
 </style>
 </head>
 <body>
@@ -717,6 +727,7 @@ App.start = function start() {
     App.deck.init();
     App.fileio.init();
     App.autosave.init();
+    App.drafts.init();
     App.shortcuts.init();
 
     App.ui.showWelcome();
@@ -856,6 +867,9 @@ App.util.el = function el(tag, attributes, children) {
  *   'clipboard-changed' something was copied, Paste can run    (elements.js)
  *   'selection-dragged' the selected element moves during a drag (selection.js)
  *   'zoom-changed'      the canvas zoom changed                (canvas.js)
+ *   'autosave-changed'  AutoSave was switched on or off        (autosave.js)
+ *   'file-opened'       a deck was opened from a file, { lastModified } (fileio.js)
+ *   'draft-saved'       a crash-recovery draft was stored      (drafts.js)
  *
  * Talks to: nothing (others call it). Created in app.js as App.events.
  */
@@ -3285,6 +3299,12 @@ App.template.newDeckHtml = function newDeckHtml() {
  * deck. serialize.js removes it again on save. The current slide carries the
  * attribute data-editor-current (also stripped on save).
  *
+ * Deck id (SPEC 6.2): every deck gets <meta name="deck-id"> as soon as it is
+ * shown, so crash-recovery drafts find the right deck even if the file is
+ * renamed. Adding it does not count as a change; it reaches the file with the
+ * next save. Until then hasStoredId() is false, and drafts.js matches drafts
+ * by file name instead.
+ *
  * Talks to: canvas.js (sizes the iframe), thumbnails.js, ui.js (via events),
  *           shortcuts.js (key presses inside the iframe), fileio.js (drag & drop).
  */
@@ -3297,6 +3317,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     let frame = null;
     let doc = null;
     let currentIndex = 0;
+    let storedId = false;   // did the deck's file already carry its deck id?
 
     // Rules that only exist while editing. !important beats the deck's own rules,
     // e.g. Copilot decks that hide every slide except ".active".
@@ -3321,6 +3342,48 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     };
 
+    // ---------------------------------------------------------------
+    // Deck id (tested in tests/unit/drafts.test.js)
+    // ---------------------------------------------------------------
+
+    /* 32 random hex characters. crypto.getRandomValues works on file:// pages too. */
+    App.deck.newDeckId = function newDeckId() {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    };
+
+    /*
+     * Make sure `targetDoc` has a deck id and return it. A missing id becomes
+     * `fallbackId` (the id the deck had before its content was replaced), or a new one.
+     */
+    App.deck.ensureDeckId = function ensureDeckId(targetDoc, fallbackId) {
+        let meta = targetDoc.head.querySelector('meta[name="deck-id"]');
+        if (meta && meta.getAttribute('content')) {
+            return meta.getAttribute('content');
+        }
+        if (!meta) {
+            meta = targetDoc.createElement('meta');
+            meta.setAttribute('name', 'deck-id');
+            const format = targetDoc.head.querySelector('meta[name="deck-format"]');
+            if (format) {
+                format.after(meta);
+            } else {
+                targetDoc.head.prepend(meta);
+            }
+        }
+        meta.setAttribute('content', fallbackId || App.deck.newDeckId());
+        return meta.getAttribute('content');
+    };
+
+    App.deck.getDeckId = function getDeckId() {
+        const meta = doc && doc.head.querySelector('meta[name="deck-id"]');
+        return meta ? meta.getAttribute('content') : null;
+    };
+
+    App.deck.hasStoredId = function hasStoredId() {
+        return storedId;
+    };
+
     function addEditorView(targetDoc) {
         const style = targetDoc.createElement('style');
         style.setAttribute('data-editor-only', '');
@@ -3336,6 +3399,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         return new Promise((resolve) => {
             frame.addEventListener('load', () => {
                 doc = frame.contentDocument;
+                const meta = doc.head.querySelector('meta[name="deck-id"]');
+                storedId = !!(meta && meta.getAttribute('content'));
+                App.deck.ensureDeckId(doc, null);
                 addEditorView(doc);
                 App.shortcuts.listenTo(frame.contentWindow);
                 App.fileio.listenForDrops(frame.contentWindow);
@@ -3351,13 +3417,17 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /*
      * Replace the whole deck (head and body) with `html`, keeping the editor's
-     * view CSS. Used by "Revert to version opened"; call it inside
+     * view CSS and the deck id (it is still the same deck). Used by "Revert to
+     * version opened" and by recovering a draft; call it inside
      * history.change(..., 'deck', ...) so it can be undone.
      */
     App.deck.replaceContent = function replaceContent(html) {
+        const deckId = App.deck.getDeckId();
         const parsed = new DOMParser().parseFromString(html, 'text/html');
         doc.head.innerHTML = parsed.head.innerHTML;
         doc.body.innerHTML = parsed.body.innerHTML;
+        doc.head.querySelectorAll('meta[name="deck-id"]').forEach((meta) => meta.remove());
+        App.deck.ensureDeckId(doc, deckId);
         addEditorView(doc);
     };
 
@@ -4506,6 +4576,40 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     };
 
+    /*
+     * A stand-alone miniature of `slide` (from document `sourceDoc`, whose
+     * <head> brings the CSS), `width` pixels wide. Used by the recovery and
+     * compare dialogs (drafts.js). slide = null gives an empty box.
+     */
+    App.thumbnails.miniature = function miniature(sourceDoc, slide, width) {
+        const frame = App.util.el('iframe', {
+            class: 'thumb-frame', sandbox: 'allow-same-origin', tabindex: '-1', 'aria-hidden': 'true',
+        });
+        const box = App.util.el('div', { class: 'thumb-box miniature' + (slide ? '' : ' miniature-empty') });
+        box.style.setProperty('--thumb-scale', String(width / 1280));
+        box.style.width = width + 'px';
+        box.style.height = (width * 720 / 1280) + 'px';
+        if (!slide) {
+            return box;
+        }
+        box.appendChild(frame);
+        frame.addEventListener('load', () => {
+            const target = frame.contentDocument;
+            target.head.innerHTML = sourceDoc.head.innerHTML;
+            if (!target.head.querySelector('style[data-editor-only]')) {
+                const style = target.createElement('style');
+                style.textContent = App.deck.VIEW_CSS;   // shows the one slide marked data-editor-current
+                target.head.appendChild(style);
+            }
+            const copy = target.importNode(slide, true);
+            copy.setAttribute('data-editor-current', '');
+            target.body.replaceChildren(copy);
+            box.setAttribute('data-drawn', 'true');
+        }, { once: true });
+        frame.srcdoc = '<!DOCTYPE html><html><head></head><body></body></html>';
+        return box;
+    };
+
     function rebuild() {
         observer.disconnect();
         rail.innerHTML = '';
@@ -4868,7 +4972,25 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (App.importer.reportHasItems(result.report)) {
             await App.dialogs.showImportReport(result.report);
         }
+        // drafts.js offers unsaved changes newer than this file (SPEC 6.2).
+        App.events.emit('file-opened', { fileName: file.name, lastModified: file.lastModified });
         return result.report;
+    };
+
+    /*
+     * Show a recovered draft (drafts.js) as an unsaved deck. There is no file
+     * handle, so the first Save asks where to save, suggesting the old name.
+     */
+    App.fileio.openRecovered = async function openRecovered(html, fileName) {
+        App.ui.setBusy('Recovering unsaved changes…');
+        try {
+            const result = await App.importer.importDeck(html);
+            await showDeck(result.html, fileName || NEW_DECK_NAME, null);
+            App.history.markDirty();
+        } finally {
+            App.ui.setBusy(null);
+        }
+        App.ui.setStatus('Recovered unsaved changes');
     };
 
     async function showDeck(html, fileName, handle) {
@@ -5382,6 +5504,619 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         // Not saved to a file yet: a manual save first (it switches AutoSave on when it succeeds).
         App.commands.run('save');
+    }
+})();
+
+</script>
+<script>
+// ---- js/storage.js ----
+/*
+ * storage.js - the editor's own small database in the browser (IndexedDB),
+ * used for crash-recovery drafts (SPEC 6.2) and, later, Recent files.
+ *
+ * Why IndexedDB: localStorage holds only about 5 MB, too little for a deck
+ * with embedded pictures.
+ *
+ * Rule: the editor must keep working when storage is blocked (company policy,
+ * private window ...). So nothing here ever throws. Every function returns a
+ * safe value instead: false, null or an empty list, and the caller shows
+ * "Recovery unavailable" (SPEC 6.3).
+ *
+ * The database has three stores:
+ *   drafts     one small record per draft: { id, deckId, session, fileName, savedAt }
+ *   draftHtml  the draft's full deck HTML, under the same id (kept apart so
+ *              listing the drafts does not read megabytes of pictures)
+ *   recent     Recent files (Phase 2, step 7)
+ *
+ * Talks to: drafts.js (the only user so far).
+ */
+
+(function () {
+    'use strict';
+
+    App.storage = {};
+
+    const DEFAULT_NAME = 'deck-editor';
+    const VERSION = 1;
+    const STORES = ['drafts', 'draftHtml', 'recent'];
+
+    let db = null;
+
+    // IndexedDB reports results through callbacks; wrap them as Promises so we can use await.
+    function done(request) {
+        return new Promise((resolve, reject) => {
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    function finished(transaction) {
+        return new Promise((resolve, reject) => {
+            transaction.oncomplete = () => resolve();
+            transaction.onerror = () => reject(transaction.error);
+            transaction.onabort = () => reject(transaction.error || new Error('transaction aborted'));
+        });
+    }
+
+    /*
+     * Open (or create) the database. Resolves true when it can be used.
+     * options: { name, indexedDB } - tests pass their own name or a fake factory.
+     */
+    App.storage.open = async function open(options) {
+        const settings = options || {};
+        const factory = 'indexedDB' in settings ? settings.indexedDB : safeFactory();
+        db = null;
+        if (!factory) {
+            return false;
+        }
+        try {
+            const request = factory.open(settings.name || DEFAULT_NAME, VERSION);
+            request.onupgradeneeded = () => {
+                const database = request.result;
+                if (!database.objectStoreNames.contains('drafts')) {
+                    database.createObjectStore('drafts', { keyPath: 'id', autoIncrement: true });
+                }
+                if (!database.objectStoreNames.contains('draftHtml')) {
+                    database.createObjectStore('draftHtml');
+                }
+                if (!database.objectStoreNames.contains('recent')) {
+                    database.createObjectStore('recent', { keyPath: 'id', autoIncrement: true });
+                }
+            };
+            db = await done(request);
+            return true;
+        } catch (error) {
+            console.warn('Storage unavailable:', error);
+            db = null;
+            return false;
+        }
+    };
+
+    // Merely reading window.indexedDB can throw where storage is blocked.
+    function safeFactory() {
+        try {
+            return window.indexedDB || null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    App.storage.isAvailable = function isAvailable() {
+        return db !== null;
+    };
+
+    App.storage.close = function close() {
+        if (db) {
+            db.close();
+        }
+        db = null;
+    };
+
+    // Run `work(transaction)` and return its result, or `fallback` if anything fails.
+    async function attempt(storeNames, mode, fallback, work) {
+        if (!db) {
+            return fallback;
+        }
+        try {
+            const transaction = db.transaction(storeNames, mode);
+            const complete = finished(transaction);
+            complete.catch(() => {});   // handled by the await below; avoids an "unhandled" warning if work() throws first
+            const result = await work(transaction);
+            await complete;              // the data is only safely stored once the transaction completes
+            return result;
+        } catch (error) {
+            console.warn('Storage call failed:', error);
+            return fallback;
+        }
+    }
+
+    /* Store a draft. meta = { deckId, session, fileName, savedAt }. Resolves the new id, or null. */
+    App.storage.addDraft = function addDraft(meta, html) {
+        return attempt(['drafts', 'draftHtml'], 'readwrite', null, async (transaction) => {
+            const id = await done(transaction.objectStore('drafts').add(Object.assign({}, meta)));
+            transaction.objectStore('draftHtml').put(html, id);
+            return id;
+        });
+    };
+
+    /* Every draft's small record (without the HTML). */
+    App.storage.listDrafts = function listDrafts() {
+        return attempt(['drafts'], 'readonly', [], (transaction) => done(transaction.objectStore('drafts').getAll()));
+    };
+
+    App.storage.getDraftHtml = function getDraftHtml(id) {
+        return attempt(['draftHtml'], 'readonly', null, async (transaction) => {
+            const html = await done(transaction.objectStore('draftHtml').get(id));
+            return html === undefined ? null : html;
+        });
+    };
+
+    App.storage.deleteDrafts = function deleteDrafts(ids) {
+        if (db && ids.length === 0) {
+            return Promise.resolve(true);
+        }
+        return attempt(['drafts', 'draftHtml'], 'readwrite', false, (transaction) => {
+            ids.forEach((id) => {
+                transaction.objectStore('drafts').delete(id);
+                transaction.objectStore('draftHtml').delete(id);
+            });
+            return true;
+        });
+    };
+
+    /* "Delete all drafts now": empty every store (SPEC 6.3). */
+    App.storage.clearAll = function clearAll() {
+        return attempt(STORES, 'readwrite', false, (transaction) => {
+            STORES.forEach((name) => transaction.objectStore(name).clear());
+            return true;
+        });
+    };
+})();
+
+</script>
+<script>
+// ---- js/drafts.js ----
+/*
+ * drafts.js - crash-recovery drafts kept in the browser (SPEC 6.2, Layer 2).
+ *
+ * If Edge crashes or the PC restarts before the user saved, the work is not
+ * lost: every 30 seconds while there are unsaved changes, a copy of the whole
+ * deck (a "draft") goes into the browser's database (storage.js). The last 5
+ * drafts per deck are kept.
+ *
+ * Minimal exposure (SPEC 6.3): every page opened from disk shares the same
+ * browser storage, so drafts live only as long as they are needed:
+ *   - deleted when the deck is saved, or is back to its saved state (undo),
+ *   - deleted when the tab is closed with nothing unsaved,
+ *   - deleted when the user discards them,
+ *   - and in any case deleted after 1 day (retention, a setting from step 7).
+ *
+ * Recovery: when the editor starts, or when a deck with newer drafts than its
+ * file is opened, a dialog offers Recover / Compare / Discard.
+ *
+ * Each draft belongs to a deck (by its <meta name="deck-id">, see deck.js)
+ * and to a tab ("session"), so closing one tab never deletes the drafts of
+ * another tab that has the same deck open. A deck the editor never saved has
+ * no id in its file yet, so its drafts are found by file name instead.
+ *
+ * Talks to: storage.js, autosave.js (reuses its timing scheduler), fileio.js
+ *           (current HTML, opening a recovered deck), importer.js, deck.js,
+ *           history.js, dialogs.js, thumbnails.js (miniatures), ui.js (status).
+ */
+
+(function () {
+    'use strict';
+
+    App.drafts = {};
+
+    const KEEP_PER_DECK = 5;
+    const DAY = 24 * 60 * 60 * 1000;
+
+    // ---------------------------------------------------------------
+    // Pure helpers (tested in tests/unit/drafts.test.js)
+    // ---------------------------------------------------------------
+
+    const two = (n) => String(n).padStart(2, '0');
+
+    /* "14:32" in the computer's local time. */
+    App.drafts.formatClock = function formatClock(ms) {
+        const date = new Date(ms);
+        return two(date.getHours()) + ':' + two(date.getMinutes());
+    };
+
+    /* "27/10 14:32" (day/month, as in the spec). */
+    App.drafts.formatTime = function formatTime(ms) {
+        const date = new Date(ms);
+        return two(date.getDate()) + '/' + two(date.getMonth() + 1) + ' ' + App.drafts.formatClock(ms);
+    };
+
+    const newestFirst = (a, b) => (b.savedAt - a.savedAt) || (b.id - a.id);
+
+    /* The ids of the drafts beyond the newest `keep` of each deck. */
+    App.drafts.idsToPrune = function idsToPrune(drafts, keep) {
+        const seen = new Map();   // deckId -> how many newer drafts we passed
+        const ids = [];
+        drafts.slice().sort(newestFirst).forEach((draft) => {
+            const count = (seen.get(draft.deckId) || 0) + 1;
+            seen.set(draft.deckId, count);
+            if (count > keep) {
+                ids.push(draft.id);
+            }
+        });
+        return ids.sort((a, b) => a - b);
+    };
+
+    /* The ids of drafts older than `days` days at time `now`. */
+    App.drafts.expiredIds = function expiredIds(drafts, now, days) {
+        return drafts.filter((draft) => now - draft.savedAt > days * DAY).map((draft) => draft.id);
+    };
+
+    /* The newest draft of each deck, the most recent deck first. */
+    App.drafts.newestPerDeck = function newestPerDeck(drafts) {
+        const byDeck = new Map();
+        drafts.slice().sort(newestFirst).forEach((draft) => {
+            if (!byDeck.has(draft.deckId)) {
+                byDeck.set(draft.deckId, draft);
+            }
+        });
+        return Array.from(byDeck.values());
+    };
+
+    /* The slides of a document as [{ id, html }], without the editor's own marks. */
+    App.drafts.slideList = function slideList(doc) {
+        return Array.from(doc.querySelectorAll('section.slide')).map((slide, index) => {
+            const copy = slide.cloneNode(true);
+            [copy].concat(Array.from(copy.querySelectorAll('*'))).forEach((element) => {
+                Array.from(element.attributes).forEach((attribute) => {
+                    if (attribute.name.startsWith('data-editor-')) {
+                        element.removeAttribute(attribute.name);
+                    }
+                });
+            });
+            return { id: slide.getAttribute('data-slide-id') || 'index-' + index, html: copy.outerHTML };
+        });
+    };
+
+    /*
+     * Which slides differ between the saved file (`base`) and a draft?
+     * Slides are matched by their id, so an inserted slide does not make
+     * every later slide look "changed". Returns
+     *   { slides: [{ status: 'changed'|'added'|'removed', baseIndex, draftIndex }],
+     *     orderChanged }   (true when the slides both versions share are in another order)
+     */
+    App.drafts.diffSlides = function diffSlides(base, draft) {
+        const baseIndexById = new Map(base.map((slide, index) => [slide.id, index]));
+        const draftIds = new Set(draft.map((slide) => slide.id));
+        const slides = [];
+        draft.forEach((slide, draftIndex) => {
+            if (!baseIndexById.has(slide.id)) {
+                slides.push({ status: 'added', baseIndex: null, draftIndex: draftIndex });
+                return;
+            }
+            const baseIndex = baseIndexById.get(slide.id);
+            if (base[baseIndex].html !== slide.html) {
+                slides.push({ status: 'changed', baseIndex: baseIndex, draftIndex: draftIndex });
+            }
+        });
+        base.forEach((slide, baseIndex) => {
+            if (!draftIds.has(slide.id)) {
+                slides.push({ status: 'removed', baseIndex: baseIndex, draftIndex: null });
+            }
+        });
+        const sharedInBase = base.filter((slide) => draftIds.has(slide.id)).map((slide) => slide.id);
+        const sharedInDraft = draft.filter((slide) => baseIndexById.has(slide.id)).map((slide) => slide.id);
+        return { slides: slides, orderChanged: sharedInBase.join('\n') !== sharedInDraft.join('\n') };
+    };
+
+    // ---------------------------------------------------------------
+    // Drafts in the editor
+    // ---------------------------------------------------------------
+
+    // Defaults from SPEC 6.3; the Settings dialog (step 7) changes them.
+    App.drafts.settings = { keep: true, retentionDays: 1 };
+
+    let interval = 30000;
+    let available = false;
+    let session = null;      // a random id for this tab
+    let deckId = null;       // the deck on screen
+    let scheduler = null;
+
+    // Storage calls run one after another, so "delete on save" can never
+    // overtake a draft that was being written at that moment.
+    let queue = Promise.resolve();
+    function serial(task) {
+        const run = queue.then(task);
+        queue = run.catch((error) => console.warn('Draft task failed:', error));
+        return queue;
+    }
+
+    App.drafts.init = function init() {
+        session = App.deck.newDeckId();
+        scheduler = makeScheduler();
+
+        App.events.on('deck-loaded', () => {
+            const previous = deckId;
+            scheduler.cancel();
+            deckId = App.deck.getDeckId();
+            if (previous) {
+                // The previous deck was saved, or the user agreed to discard its changes.
+                serial(() => deleteDeckDrafts(previous, true));
+            }
+        });
+        App.events.on('history-changed', () => {
+            if (!App.state.hasDeck) {
+                return;
+            }
+            if (App.history.isDirty()) {
+                scheduler.notifyChange();
+            } else {
+                scheduler.cancel();   // back to the saved version (e.g. by undo): nothing to protect
+                serial(() => deleteDeckDrafts(deckId, true));
+            }
+        });
+        // A save makes every draft of this deck useless, whichever tab wrote it.
+        App.events.on('saved', () => serial(() => deleteDeckDrafts(deckId, false)));
+        App.events.on('file-opened', (info) => {
+            offerForOpenedDeck(info.fileName, info.lastModified).catch(reportError);
+        });
+
+        // Closing the tab: keep a last draft if changes are unsaved, otherwise remove ours.
+        window.addEventListener('beforeunload', () => {
+            if (App.state.hasDeck && App.history.isDirty()) {
+                scheduler.notifyChange();
+                scheduler.flush();
+            }
+        });
+        window.addEventListener('pagehide', () => {
+            if (App.state.hasDeck && !App.history.isDirty()) {
+                serial(() => deleteDeckDrafts(deckId, true));
+            }
+        });
+
+        // `ready` resolves once the database is open (tests wait for it).
+        App.drafts.ready = start();
+        App.drafts.ready.then(() => available && offerAtStartup().catch(reportError));
+    };
+
+    async function start() {
+        available = await App.storage.open();
+        if (!available) {
+            App.ui.setStatus('Recovery unavailable');
+            return;
+        }
+        await serial(purgeExpired);
+    }
+
+    function reportError(error) {
+        console.error(error);
+        return App.dialogs.alert('Recovery failed', (error && error.message) || String(error));
+    }
+
+    function makeScheduler() {
+        // Same timing engine as AutoSave: a draft 30 s after the first unsaved
+        // change, then every 30 s while the user keeps editing.
+        return App.autosave.createScheduler({
+            delay: interval, maxWait: interval, retryMs: 1000,
+            isBusy: () => App.history.isPending(),   // not in the middle of a drag
+            save: () => serial(writeDraft),
+        });
+    }
+
+    /* Tests use a short interval instead of 30 s. */
+    App.drafts.setInterval = function setInterval(ms) {
+        interval = ms;
+        scheduler.cancel();
+        scheduler = makeScheduler();
+    };
+
+    App.drafts.isAvailable = function isAvailable() {
+        return available;
+    };
+
+    async function writeDraft() {
+        if (!available || !App.drafts.settings.keep || !App.state.hasDeck || !App.history.isDirty()) {
+            return;
+        }
+        const savedAt = Date.now();
+        const id = await App.storage.addDraft(
+            { deckId: deckId, session: session, fileName: App.state.fileName, savedAt: savedAt },
+            App.fileio.currentHtml());
+        if (id === null) {
+            App.ui.setStatus('Could not save a recovery draft');
+            return;
+        }
+        const all = await App.storage.listDrafts();
+        const old = App.drafts.idsToPrune(all, KEEP_PER_DECK)
+            .concat(App.drafts.expiredIds(all, savedAt, App.drafts.settings.retentionDays));
+        await App.storage.deleteDrafts(old);
+        App.ui.setStatus('Draft saved ' + App.drafts.formatClock(savedAt));
+        App.events.emit('draft-saved', { savedAt: savedAt });
+    }
+
+    /* ownOnly: only the drafts this tab wrote. */
+    async function deleteDeckDrafts(targetDeckId, ownOnly) {
+        if (!available || !targetDeckId) {
+            return;
+        }
+        const drafts = (await App.storage.listDrafts())
+            .filter((draft) => draft.deckId === targetDeckId && (!ownOnly || draft.session === session));
+        await App.storage.deleteDrafts(drafts.map((draft) => draft.id));
+    }
+
+    async function purgeExpired() {
+        const all = await App.storage.listDrafts();
+        await App.storage.deleteDrafts(App.drafts.expiredIds(all, Date.now(), App.drafts.settings.retentionDays));
+    }
+
+    // ---------------------------------------------------------------
+    // Offering the drafts back
+    // ---------------------------------------------------------------
+
+    /* At startup: drafts left over from a tab that did not close normally. */
+    async function offerAtStartup() {
+        let groups = [];
+        await serial(async () => {
+            groups = App.drafts.newestPerDeck(await App.storage.listDrafts());
+        });
+        for (const newest of groups) {
+            if (App.state.hasDeck) {
+                return;   // the user opened a deck meanwhile; its drafts are offered on open
+            }
+            const html = await App.storage.getDraftHtml(newest.id);
+            if (html === null) {
+                continue;
+            }
+            const choice = await askToRecover(newest, html, true);
+            if (choice === 'recover') {
+                await App.fileio.openRecovered(html, newest.fileName);
+                afterRecover(newest.deckId);
+                return;
+            }
+            if (choice === 'compare') {
+                // Comparing needs the saved file: opening it brings this question back, with Compare.
+                App.commands.run('open');
+                return;
+            }
+            if (choice !== 'discard') {
+                return;   // "Decide later" or Esc: keep them (until the retention period ends)
+            }
+            await serial(() => deleteDeckDrafts(newest.deckId, false));
+        }
+    }
+
+    /* A deck was opened from a file: are there drafts newer than that file? */
+    async function offerForOpenedDeck(fileName, fileLastModified) {
+        if (!available || !App.state.hasDeck) {
+            return;
+        }
+        const openedDeckId = deckId;
+        const byName = !App.deck.hasStoredId();   // never saved by the editor: no id in the file yet
+        let newer = [];
+        await serial(async () => {
+            const drafts = (await App.storage.listDrafts()).filter((draft) => draft.session !== session &&
+                (draft.deckId === openedDeckId || (byName && draft.fileName === fileName)));
+            // Drafts of this very deck older than the file were overtaken by a later save: remove them.
+            const stale = drafts.filter((draft) => draft.deckId === openedDeckId && !(draft.savedAt > fileLastModified));
+            await App.storage.deleteDrafts(stale.map((draft) => draft.id));
+            newer = drafts.filter((draft) => draft.savedAt > fileLastModified);
+        });
+        if (newer.length === 0) {
+            return;
+        }
+        const newest = App.drafts.newestPerDeck(newer)[0];
+        const html = await App.storage.getDraftHtml(newest.id);
+        if (html === null) {
+            return;
+        }
+        let choice = await askToRecover(newest, html, false);
+        let imported = null;
+        if (choice === 'compare') {
+            imported = (await App.importer.importDeck(html)).html;
+            choice = await showComparison(newest, imported);
+        }
+        if (deckId !== openedDeckId) {
+            return;   // another deck was opened while the question was open
+        }
+        if (choice === 'recover') {
+            const recovered = imported || (await App.importer.importDeck(html)).html;
+            App.history.change('Recover unsaved changes', 'deck', () => App.deck.replaceContent(recovered));
+            App.ui.setStatus('Recovered unsaved changes from ' + App.drafts.formatTime(newest.savedAt));
+            afterRecover(newest.deckId);
+        } else if (choice === 'discard') {
+            await serial(() => deleteDeckDrafts(newest.deckId, false));
+            App.ui.setStatus('Unsaved changes discarded');
+        }
+    }
+
+    /* The recovered changes are now this tab's unsaved changes: replace the old drafts with a fresh one. */
+    function afterRecover(recoveredDeckId) {
+        serial(() => deleteDeckDrafts(recoveredDeckId, false));
+        scheduler.notifyChange();
+        scheduler.flush();
+    }
+
+    function draftDocument(html) {
+        return new DOMParser().parseFromString(html, 'text/html');
+    }
+
+    /* Resolves 'recover', 'compare', 'discard' or null (decide later). */
+    function askToRecover(draft, html, atStartup) {
+        const doc = draftDocument(html);
+        const name = draft.fileName || 'an untitled deck';
+        const explain = atStartup
+            ? 'Recover opens them as an unsaved deck; use Save As to keep them. ' +
+              'Compare… asks for the saved file first and then shows which slides differ.'
+            : 'Recover puts them in place of the deck on screen (Ctrl+Z undoes it). ' +
+              'Compare shows which slides differ from the file.';
+        const body = App.util.el('div', { class: 'recovery' }, [
+            App.util.el('p', {}, ['Unsaved changes to "' + name + '" from ' + App.drafts.formatTime(draft.savedAt) + ' were found.']),
+            App.thumbnails.miniature(doc, doc.querySelector('section.slide'), 320),
+            App.util.el('p', {}, [explain]),
+            App.util.el('p', { class: 'recovery-note' }, [
+                'Discard deletes them from this browser. If you decide later, they are deleted after ' +
+                retentionText() + '.']),
+        ]);
+        return App.dialogs.show({
+            title: 'Recover unsaved changes?',
+            body: body,
+            buttons: [
+                { label: 'Discard', value: 'discard', danger: true },
+                { label: 'Decide later', value: null },
+                { label: atStartup ? 'Compare…' : 'Compare', value: 'compare' },
+                { label: 'Recover', value: 'recover', primary: true },
+            ],
+        });
+    }
+
+    function retentionText() {
+        const days = App.drafts.settings.retentionDays;
+        return days === 1 ? '1 day' : days + ' days';
+    }
+
+    /* The slides that differ, each as "saved file" and "unsaved changes" miniatures. */
+    function showComparison(draft, importedHtml) {
+        const baseDoc = App.deck.getDocument();
+        const draftDoc = draftDocument(importedHtml);
+        const baseSlides = Array.from(baseDoc.querySelectorAll('section.slide'));
+        const draftSlides = Array.from(draftDoc.querySelectorAll('section.slide'));
+        const diff = App.drafts.diffSlides(App.drafts.slideList(baseDoc), App.drafts.slideList(draftDoc));
+
+        const count = diff.slides.length;
+        let summary = count === 0
+            ? 'No slide content differs.'
+            : count + (count === 1 ? ' slide differs' : ' slides differ') + ' between the file and the unsaved changes from ' +
+              App.drafts.formatTime(draft.savedAt) + '.';
+        if (diff.orderChanged) {
+            summary += ' The order of the slides also changed.';
+        }
+        const body = App.util.el('div', { class: 'compare' }, [App.util.el('p', {}, [summary])]);
+        const labels = { changed: 'changed', added: 'added', removed: 'deleted' };
+        diff.slides.forEach((entry) => {
+            const number = entry.draftIndex !== null
+                ? 'Slide ' + (entry.draftIndex + 1)
+                : 'Slide ' + (entry.baseIndex + 1) + ' of the file';
+            const side = (doc, slide, caption) => App.util.el('figure', { class: 'compare-side' }, [
+                App.thumbnails.miniature(doc, slide || null, 240),
+                App.util.el('figcaption', {}, [caption]),
+            ]);
+            body.appendChild(App.util.el('section', { class: 'compare-row', 'data-status': entry.status }, [
+                App.util.el('h3', {}, [number + ' — ' + labels[entry.status]]),
+                App.util.el('div', { class: 'compare-pair' }, [
+                    side(baseDoc, entry.baseIndex === null ? null : baseSlides[entry.baseIndex], 'In the file'),
+                    side(draftDoc, entry.draftIndex === null ? null : draftSlides[entry.draftIndex], 'Unsaved changes'),
+                ]),
+            ]));
+        });
+        return App.dialogs.show({
+            title: 'Compare with the file',
+            body: body,
+            wide: true,
+            buttons: [
+                { label: 'Discard', value: 'discard', danger: true },
+                { label: 'Decide later', value: null },
+                { label: 'Recover', value: 'recover', primary: true },
+            ],
+        });
     }
 })();
 

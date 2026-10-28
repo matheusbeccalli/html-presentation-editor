@@ -29,3 +29,13 @@
 .report-list li { margin: 2px 0; overflow-wrap: anywhere; }
 .report-list li:first-child { list-style: none; margin-left: -14px; color: var(--text-muted); }
 .report-section:first-child .report-list li:first-child { list-style: disc; margin-left: 0; color: inherit; }
+
+/* Crash recovery (drafts.js): a miniature of slide 1, and the slide-by-slide comparison. */
+.recovery .miniature { margin: 10px 0; }
+.recovery-note { color: var(--text-muted); font-size: 12px; margin-top: 8px !important; }
+.miniature-empty { background: repeating-linear-gradient(45deg, #f3f2f1 0 8px, #fff 8px 16px); }
+.compare-row { margin-top: 14px; }
+.compare-row h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+.compare-pair { display: flex; gap: 16px; flex-wrap: wrap; }
+.compare-side { margin: 0; }
+.compare-side figcaption { font-size: 12px; color: var(--text-muted); margin-top: 4px; }

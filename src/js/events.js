@@ -16,6 +16,9 @@
  *   'clipboard-changed' something was copied, Paste can run    (elements.js)
  *   'selection-dragged' the selected element moves during a drag (selection.js)
  *   'zoom-changed'      the canvas zoom changed                (canvas.js)
+ *   'autosave-changed'  AutoSave was switched on or off        (autosave.js)
+ *   'file-opened'       a deck was opened from a file, { lastModified } (fileio.js)
+ *   'draft-saved'       a crash-recovery draft was stored      (drafts.js)
  *
  * Talks to: nothing (others call it). Created in app.js as App.events.
  */

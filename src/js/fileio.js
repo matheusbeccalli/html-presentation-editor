@@ -236,7 +236,25 @@
         if (App.importer.reportHasItems(result.report)) {
             await App.dialogs.showImportReport(result.report);
         }
+        // drafts.js offers unsaved changes newer than this file (SPEC 6.2).
+        App.events.emit('file-opened', { fileName: file.name, lastModified: file.lastModified });
         return result.report;
+    };
+
+    /*
+     * Show a recovered draft (drafts.js) as an unsaved deck. There is no file
+     * handle, so the first Save asks where to save, suggesting the old name.
+     */
+    App.fileio.openRecovered = async function openRecovered(html, fileName) {
+        App.ui.setBusy('Recovering unsaved changes…');
+        try {
+            const result = await App.importer.importDeck(html);
+            await showDeck(result.html, fileName || NEW_DECK_NAME, null);
+            App.history.markDirty();
+        } finally {
+            App.ui.setBusy(null);
+        }
+        App.ui.setStatus('Recovered unsaved changes');
     };
 
     async function showDeck(html, fileName, handle) {

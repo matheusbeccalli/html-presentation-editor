@@ -403,7 +403,7 @@ Autosave has two independent layers: writing changes back to the deck file itsel
 
 - Stored in **IndexedDB** (not `localStorage`, whose \~5 MB limit is too small for decks with base64 images).
 - Every 30 seconds while there are unsaved changes, store a snapshot of the full deck HTML with a timestamp. Keep the last 5 snapshots per deck.
-- Each deck gets a stable id (`<meta name="deck-id">`, created on first save) so drafts match the right file even if it is renamed.
+- Each deck gets a stable id (`<meta name="deck-id">`) so drafts match the right file even if it is renamed. The id is given in memory as soon as the deck opens (not counted as a change) and is written into the file with the next save. A file that has no id yet (never saved by the editor) is matched to its drafts by file name.
 - On startup, or when opening a deck that has drafts newer than the file, show a dialog: "Unsaved changes from 27/10 14:32 were found", with a thumbnail of slide 1 and buttons Recover / Compare / Discard.
 - Drafts exist only while there are unsaved changes: a deck's drafts are deleted after a successful save to file, and when the tab is closed with no unsaved changes. All drafts are purged automatically after 1 day (setting: 1–30 days).
 - Optional, off by default: a "Recent files" list, which stores file handles (and so file names) in IndexedDB. Pages opened from disk cannot ask for permission again, so choosing a recent file opens the Open window in that file's folder.

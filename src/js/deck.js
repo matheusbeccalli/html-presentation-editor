@@ -11,6 +11,12 @@
  * deck. serialize.js removes it again on save. The current slide carries the
  * attribute data-editor-current (also stripped on save).
  *
+ * Deck id (SPEC 6.2): every deck gets <meta name="deck-id"> as soon as it is
+ * shown, so crash-recovery drafts find the right deck even if the file is
+ * renamed. Adding it does not count as a change; it reaches the file with the
+ * next save. Until then hasStoredId() is false, and drafts.js matches drafts
+ * by file name instead.
+ *
  * Talks to: canvas.js (sizes the iframe), thumbnails.js, ui.js (via events),
  *           shortcuts.js (key presses inside the iframe), fileio.js (drag & drop).
  */
@@ -23,6 +29,7 @@
     let frame = null;
     let doc = null;
     let currentIndex = 0;
+    let storedId = false;   // did the deck's file already carry its deck id?
 
     // Rules that only exist while editing. !important beats the deck's own rules,
     // e.g. Copilot decks that hide every slide except ".active".
@@ -47,6 +54,48 @@
         });
     };
 
+    // ---------------------------------------------------------------
+    // Deck id (tested in tests/unit/drafts.test.js)
+    // ---------------------------------------------------------------
+
+    /* 32 random hex characters. crypto.getRandomValues works on file:// pages too. */
+    App.deck.newDeckId = function newDeckId() {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+    };
+
+    /*
+     * Make sure `targetDoc` has a deck id and return it. A missing id becomes
+     * `fallbackId` (the id the deck had before its content was replaced), or a new one.
+     */
+    App.deck.ensureDeckId = function ensureDeckId(targetDoc, fallbackId) {
+        let meta = targetDoc.head.querySelector('meta[name="deck-id"]');
+        if (meta && meta.getAttribute('content')) {
+            return meta.getAttribute('content');
+        }
+        if (!meta) {
+            meta = targetDoc.createElement('meta');
+            meta.setAttribute('name', 'deck-id');
+            const format = targetDoc.head.querySelector('meta[name="deck-format"]');
+            if (format) {
+                format.after(meta);
+            } else {
+                targetDoc.head.prepend(meta);
+            }
+        }
+        meta.setAttribute('content', fallbackId || App.deck.newDeckId());
+        return meta.getAttribute('content');
+    };
+
+    App.deck.getDeckId = function getDeckId() {
+        const meta = doc && doc.head.querySelector('meta[name="deck-id"]');
+        return meta ? meta.getAttribute('content') : null;
+    };
+
+    App.deck.hasStoredId = function hasStoredId() {
+        return storedId;
+    };
+
     function addEditorView(targetDoc) {
         const style = targetDoc.createElement('style');
         style.setAttribute('data-editor-only', '');
@@ -62,6 +111,9 @@
         return new Promise((resolve) => {
             frame.addEventListener('load', () => {
                 doc = frame.contentDocument;
+                const meta = doc.head.querySelector('meta[name="deck-id"]');
+                storedId = !!(meta && meta.getAttribute('content'));
+                App.deck.ensureDeckId(doc, null);
                 addEditorView(doc);
                 App.shortcuts.listenTo(frame.contentWindow);
                 App.fileio.listenForDrops(frame.contentWindow);
@@ -77,13 +129,17 @@
 
     /*
      * Replace the whole deck (head and body) with `html`, keeping the editor's
-     * view CSS. Used by "Revert to version opened"; call it inside
+     * view CSS and the deck id (it is still the same deck). Used by "Revert to
+     * version opened" and by recovering a draft; call it inside
      * history.change(..., 'deck', ...) so it can be undone.
      */
     App.deck.replaceContent = function replaceContent(html) {
+        const deckId = App.deck.getDeckId();
         const parsed = new DOMParser().parseFromString(html, 'text/html');
         doc.head.innerHTML = parsed.head.innerHTML;
         doc.body.innerHTML = parsed.body.innerHTML;
+        doc.head.querySelectorAll('meta[name="deck-id"]').forEach((meta) => meta.remove());
+        App.deck.ensureDeckId(doc, deckId);
         addEditorView(doc);
     };
 

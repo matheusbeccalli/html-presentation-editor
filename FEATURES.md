@@ -70,19 +70,21 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [x] AutoSave writes through `createWritable()` (atomic replace on close); one write at a time
 - [x] AutoSave conflict check: compare `lastModified`; if changed on disk, pause and ask overwrite / save as copy / reload *(Save as copy uses the real Save As window, so it is checked by hand below)*
 - [x] "Revert to version opened" (original kept for the session; File menu; undoable)
-- [ ] Crash-recovery drafts in IndexedDB (6.2): snapshot full deck HTML every 30 s while unsaved, keep the last 5 per deck
-- [ ] Stable deck id `<meta name="deck-id">`, created on first save
-- [ ] On startup / open: recovery dialog ("Unsaved changes from 27/10 14:32 were found") with slide-1 thumbnail and Recover / Compare / Discard
-- [ ] Drafts only while unsaved: deleted after a successful save and when the tab closes with no unsaved changes; all drafts purged after 1 day (setting: 1–30 days)
+- [x] Crash-recovery drafts in IndexedDB (6.2): snapshot full deck HTML every 30 s while unsaved, keep the last 5 per deck
+- [x] Stable deck id `<meta name="deck-id">`, given when the deck opens, written into the file on the next save *(files without an id yet are matched by file name)*
+- [x] On startup / open: recovery dialog ("Unsaved changes from 27/10 14:32 were found") with slide-1 thumbnail and Recover / Compare / Discard
+- [x] Drafts only while unsaved: deleted after a successful save and when the tab closes with no unsaved changes; all drafts purged after 1 day (setting: 1–30 days) *(also deleted on undo back to the saved state and on Discard; the 1–30 setting arrives with the Settings dialog)*
 - [ ] "Recent files" list (file handles in IndexedDB), **off by default**; choosing one opens the Open window in that file's folder
 - [ ] Privacy settings (6.3): "Keep recovery drafts in this browser" on/off, retention days, "Remember recent files" on/off, "Delete all drafts now" (empties the whole IndexedDB), note that other HTML files opened from disk can read drafts
-- [ ] IndexedDB unavailable → "Recovery unavailable" in the status bar, editor keeps working (every storage call in try/catch)
+- [x] IndexedDB unavailable → "Recovery unavailable" in the status bar, editor keeps working (every storage call in try/catch)
 - [ ] Status indicator (6.4): Saved · Saving… · Unsaved changes · AutoSave off · Draft saved 14:32 · Recovery unavailable
 - [ ] **Done when:** any element can be moved and resized precisely, every action undoes, and killing the browser mid-edit loses at most 30 seconds of work. Autosave (section 6): (1) with AutoSave on, closing the tab after an edit and reopening the file shows the edit; (2) with AutoSave off, killing the browser mid-edit and reopening offers to recover changes no older than 30 seconds; (3) "Delete all drafts now" leaves nothing in IndexedDB (DevTools > Application).
   - [ ] In Edge: open a deck with File > Open, press Ctrl+S once (confirm the file as in Phase 1): the AutoSave switch at the top left turns On
   - [ ] With AutoSave On: move an element, wait 5 seconds, close the tab, open the file again: the element is in its new place
   - [ ] With AutoSave On: open the same file in Notepad, add a space and save it there; then move an element in the editor: the editor asks Reload / Save as copy / Overwrite; try Save as copy (a new file is written and AutoSave continues on it)
   - [ ] File > Revert to version opened brings back the deck as opened, and Ctrl+Z undoes the revert
+  - [ ] With AutoSave Off: move an element, wait 30 seconds (status "Draft saved hh:mm"), end Edge in Task Manager, start Edge and open editor.html: "Recover unsaved changes?" appears with slide 1; choose Decide later, open the deck: the question comes back; Compare shows the moved slide; Recover brings the move back, Ctrl+Z undoes it
+  - [ ] Save the recovered deck, then in Edge DevTools (F12) > Application > IndexedDB > deck-editor > drafts: empty
 
 ## Phase 3: Text
 

@@ -53,6 +53,40 @@
         });
     };
 
+    /*
+     * A stand-alone miniature of `slide` (from document `sourceDoc`, whose
+     * <head> brings the CSS), `width` pixels wide. Used by the recovery and
+     * compare dialogs (drafts.js). slide = null gives an empty box.
+     */
+    App.thumbnails.miniature = function miniature(sourceDoc, slide, width) {
+        const frame = App.util.el('iframe', {
+            class: 'thumb-frame', sandbox: 'allow-same-origin', tabindex: '-1', 'aria-hidden': 'true',
+        });
+        const box = App.util.el('div', { class: 'thumb-box miniature' + (slide ? '' : ' miniature-empty') });
+        box.style.setProperty('--thumb-scale', String(width / 1280));
+        box.style.width = width + 'px';
+        box.style.height = (width * 720 / 1280) + 'px';
+        if (!slide) {
+            return box;
+        }
+        box.appendChild(frame);
+        frame.addEventListener('load', () => {
+            const target = frame.contentDocument;
+            target.head.innerHTML = sourceDoc.head.innerHTML;
+            if (!target.head.querySelector('style[data-editor-only]')) {
+                const style = target.createElement('style');
+                style.textContent = App.deck.VIEW_CSS;   // shows the one slide marked data-editor-current
+                target.head.appendChild(style);
+            }
+            const copy = target.importNode(slide, true);
+            copy.setAttribute('data-editor-current', '');
+            target.body.replaceChildren(copy);
+            box.setAttribute('data-drawn', 'true');
+        }, { once: true });
+        frame.srcdoc = '<!DOCTYPE html><html><head></head><body></body></html>';
+        return box;
+    };
+
     function rebuild() {
         observer.disconnect();
         rail.innerHTML = '';

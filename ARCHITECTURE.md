@@ -43,6 +43,8 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `thumbnails.js` | Slide rail; one small sandboxed iframe per slide, drawn lazily, refreshed debounced | deck, history events |
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |
 | `autosave.js` | AutoSave to the file (SPEC 6.1): the title-bar switch, a scheduler (5 s after the last change, max 30 s, never during a drag/IME, never two writes), the changed-on-disk question | fileio, history, dialogs |
+| `storage.js` | The editor's IndexedDB (drafts, draft HTML, recent files); never throws: blocked storage gives false/null/[] | — |
+| `drafts.js` | Crash-recovery drafts (SPEC 6.2): a draft 30 s after unsaved changes (last 5 per deck), deleted on save/clean state/discard/after 1 day; Recover / Compare / Discard dialogs | storage, autosave (scheduler), fileio, importer, deck, thumbnails |
 | `commands.js` | Every user action by name; one place that reports errors | fileio, history, deck |
 | `ribbon.js` | File menu and tabs; buttons only name commands | commands |
 | `ui.js` | Title bar, status bar, notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events |
@@ -93,6 +95,17 @@ first manual Save into a file → 'saved' {toHandle} → autosave.js switches On
 every change → 'history-changed' → scheduler.notifyChange()  (5 s after the last change, at most every 30 s)
   → fileio.autoSave(): file date changed on disk? → ask Reload / Save as copy / Overwrite
                        else → serialize → createWritable → write → close → history.markSaved(stateId)
+```
+
+**Crash-recovery drafts** (Phase 2)
+
+```text
+every change while unsaved → 'history-changed' → drafts scheduler (30 s, same engine as AutoSave)
+  → storage.addDraft({deckId, session, fileName, savedAt}, serialized deck) → keep the last 5 → "Draft saved 14:32"
+saved / undo back to saved / tab closed clean / Discard → drafts of that deck deleted
+editor start → storage.open (blocked → "Recovery unavailable") → purge older than 1 day → drafts left? → Recover / Compare… / Discard
+file opened → 'file-opened' {lastModified} → drafts of this deck (by deck id, or by file name if the file has no id yet)
+  newer than the file? → Recover (history.change + deck.replaceContent, undoable) / Compare (changed slides, miniatures) / Discard
 ```
 
 **Saving** (Ctrl+S)

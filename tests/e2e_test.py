@@ -20,6 +20,7 @@ Usage:  python build.py && python tests/e2e_test.py
 """
 
 import re
+import shutil
 import sys
 import time
 import traceback
@@ -71,8 +72,9 @@ def wait_until(page, expression, arg=None, timeout=30000):
 class Editor:
     """One browser tab with the editor open, plus everything it logged."""
 
-    def __init__(self, browser):
-        self.context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    def __init__(self, browser, context=None):
+        # context: pass a persistent context to keep the browser's storage between launches.
+        self.context = context or browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
         self.remote_requests = []
         # Any http(s) request is recorded and aborted. The CSP should stop them
         # before they get here, so this list must stay empty.
@@ -831,6 +833,132 @@ def test_autosave_to_file(browser):
     editor.close()
 
 
+def launch_profile(profile):
+    """A browser with a real profile folder, so IndexedDB survives a restart (like Edge after a crash)."""
+    return PLAYWRIGHT.chromium.launch_persistent_context(
+        str(profile), viewport={"width": 1440, "height": 900}, accept_downloads=True)
+
+
+DRAFTS_JS = "App.storage.listDrafts()"
+
+
+def test_crash_recovery_drafts(browser):
+    profile = OUTPUT / "profile-drafts"
+    shutil.rmtree(profile, ignore_errors=True)
+
+    # 1. Edit without saving; a draft is stored shortly after (30 s in real use).
+    editor = Editor(browser, launch_profile(profile))
+    page = editor.page
+    wait_until(page, "App.drafts.ready.then(() => App.drafts.isAvailable())")
+    page.evaluate("App.drafts.setInterval(300)")
+    editor.open(CONTRACT)
+    editor.close_dialog_if_open()
+    check(page.evaluate("App.deck.getDeckId()"), "the deck got an id as soon as it opened")
+    check(page.is_hidden("#title-dirty"), "giving the deck an id is not a change")
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    for _ in range(10):
+        page.keyboard.press("ArrowRight")
+    moved_left = element_rect(page, "e2")["left"]
+    wait_until(page, f"{DRAFTS_JS}.then(d => d.length === 1)")
+    check(page.inner_text("#status-message").startswith("Draft saved "), "status shows the draft time")
+
+    # Undo back to the saved state: nothing left to protect, the draft goes.
+    for _ in range(10):
+        page.keyboard.press("Control+z")
+    wait_until(page, f"{DRAFTS_JS}.then(d => d.length === 0)")
+    for _ in range(10):
+        page.keyboard.press("Control+y")
+    wait_until(page, f"{DRAFTS_JS}.then(d => d.length === 1)")
+
+    # 2. "Crash": the browser goes away with unsaved changes (no save, no clean close).
+    editor.close()
+
+    # 3. Restart: the editor offers the changes at once.
+    editor = Editor(browser, launch_profile(profile))
+    page = editor.page
+    page.wait_for_selector("dialog[open]")
+    text = editor.report_dialog_text()
+    check("Unsaved changes to \"contract-deck.html\"" in text, f"recovery dialog: {text}")
+    wait_until(page, "document.querySelector('dialog[open] .miniature[data-drawn]')")
+    page.screenshot(path=str(OUTPUT / "17-recovery-dialog.png"))
+    editor.click_dialog_button("Decide later")
+    check(len(page.evaluate(DRAFTS_JS)) == 1, "deciding later keeps the draft")
+
+    # 4. Opening the file offers the newer draft; Compare lists only the changed slide.
+    page.evaluate("App.drafts.setInterval(300)")
+    editor.open(CONTRACT)
+    page.wait_for_selector("dialog[open]")
+    if page.query_selector("dialog[open] .report"):
+        editor.click_dialog_button("OK")   # the import report comes first
+    page.wait_for_selector("dialog[open] .recovery")
+    editor.click_dialog_button("Compare")
+    page.wait_for_selector("dialog[open] .compare")
+    rows = page.eval_on_selector_all("dialog[open] .compare-row", "rows => rows.map(r => r.dataset.status)")
+    check(rows == ["changed"], f"one changed slide, got {rows}")
+    wait_until(page, "document.querySelectorAll('dialog[open] .miniature[data-drawn]').length === 2")
+    page.screenshot(path=str(OUTPUT / "18-compare-dialog.png"))
+    editor.click_dialog_button("Recover")
+    check(element_rect(page, "e2")["left"] == moved_left, "the recovered deck has the edit")
+    check(page.is_visible("#title-dirty"), "recovered changes are unsaved")
+    page.keyboard.press("Control+z")
+    check(element_rect(page, "e2")["left"] == 64, "Ctrl+Z undoes the recovery")
+    page.keyboard.press("Control+y")
+    # The old draft is replaced by a fresh one from this tab.
+    wait_until(page, f"{DRAFTS_JS}.then(d => d.length >= 1)")
+
+    # 5. Saving deletes the drafts.
+    editor.save_as_download("recovered-deck.html")
+    wait_until(page, f"{DRAFTS_JS}.then(d => d.length === 0)")
+    saved = (OUTPUT / "recovered-deck.html").read_text(encoding="utf-8")
+    check('<meta name="deck-id"' in saved, "the deck id is written into the file")
+
+    # 6. Another unsaved edit, then restart: Recover straight from the start-up question.
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("ArrowDown")
+    wait_until(page, f"{DRAFTS_JS}.then(d => d.length === 1)")
+    top = element_rect(page, "e2")["top"]
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+    editor = Editor(browser, launch_profile(profile))
+    page = editor.page
+    page.wait_for_selector("dialog[open] .recovery")
+    editor.click_dialog_button("Recover")
+    wait_until(page, "App.state.hasDeck")
+    check(element_rect(page, "e2")["top"] == top, "recovered at start-up")
+    check(page.is_visible("#title-dirty"), "a recovered deck is unsaved")
+    check(page.evaluate("App.state.fileName") == CONTRACT.name, "keeps the file name for Save As")
+    wait_until(page, f"{DRAFTS_JS}.then(d => d.length === 1)")   # a fresh draft replaces the old one
+
+    # 7. Discard: the drafts are deleted.
+    editor.close()
+    editor = Editor(browser, launch_profile(profile))
+    page = editor.page
+    page.wait_for_selector("dialog[open] .recovery")
+    editor.click_dialog_button("Discard")
+    wait_until(page, f"{DRAFTS_JS}.then(d => d.length === 0)")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+    shutil.rmtree(profile, ignore_errors=True)
+
+
+def test_recovery_unavailable_when_storage_is_blocked(browser):
+    context = browser.new_context(viewport={"width": 1440, "height": 900})
+    # Like a company policy that blocks storage for pages opened from disk.
+    context.add_init_script("""Object.defineProperty(window, 'indexedDB', {
+        get() { throw new DOMException('blocked', 'SecurityError'); } });""")
+    editor = Editor(browser, context)
+    page = editor.page
+    wait_until(page, "document.getElementById('status-message').textContent === 'Recovery unavailable'")
+    editor.open(CONTRACT)
+    editor.close_dialog_if_open()
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("ArrowRight")
+    check(element_rect(page, "e2")["left"] == 65, "editing still works")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_drag_and_drop_opens_a_deck(browser):
     editor = Editor(browser)
     text = CONTRACT.read_text(encoding="utf-8")
@@ -886,6 +1014,8 @@ TESTS = [
     test_format_pane_and_context_menu,
     test_zoom,
     test_autosave_to_file,
+    test_crash_recovery_drafts,
+    test_recovery_unavailable_when_storage_is_blocked,
 ]
 
 

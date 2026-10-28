@@ -53,7 +53,9 @@
             permission = await handle.requestPermission(mode);
         }
         if (permission !== 'granted') {
-            throw new Error('The browser did not get permission to write to "' + handle.name + '".');
+            const error = new Error('The browser did not get permission to write to "' + handle.name + '".');
+            error.name = 'NotAllowedError';
+            throw error;
         }
         const writable = await handle.createWritable();
         try {
@@ -66,6 +68,40 @@
             }
             throw error;
         }
+    };
+
+    // "No permission to write", as opposed to a real failure such as a full disk.
+    function isPermissionError(error) {
+        return !!error && (error.name === 'SecurityError' || error.name === 'NotAllowedError');
+    }
+
+    /*
+     * Write to `handle`; if the browser refuses write permission, call
+     * pickReplacement(handle) to get a writable handle and write there instead.
+     * Returns the handle that was written to (keep it for later saves), or
+     * null when the user cancelled.
+     *
+     * Why: Edge and Chrome refuse requestPermission() on pages opened from disk
+     * ("Not allowed to request permissions in a third-party context"), because
+     * a file:// page has a "null" origin that never matches the origin of the
+     * permission. A handle from the Save As window comes with write access
+     * already, so choosing the same file there once makes later saves work.
+     */
+    App.fileio.writeOrReplaceHandle = async function writeOrReplaceHandle(handle, text, pickReplacement) {
+        try {
+            await App.fileio.writeToHandle(handle, text);
+            return handle;
+        } catch (error) {
+            if (!isPermissionError(error)) {
+                throw error;
+            }
+        }
+        const replacement = await pickReplacement(handle);
+        if (!replacement) {
+            return null;
+        }
+        await App.fileio.writeToHandle(replacement, text);
+        return replacement;
     };
 
     // ---------------------------------------------------------------
@@ -255,9 +291,48 @@
             return;
         }
         App.ui.setStatus('Saving…');
-        await App.fileio.writeToHandle(App.state.fileHandle, App.fileio.currentHtml());
-        afterSave(App.state.fileHandle.name);
+        const used = await App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile);
+        if (!used) {
+            App.ui.setStatus('Save cancelled');
+            return;
+        }
+        App.state.fileHandle = used;
+        afterSave(used.name);
     };
+
+    /*
+     * Edge would not let us write to the opened file (see writeOrReplaceHandle),
+     * so explain, then open Save As in the same folder with the same name.
+     */
+    async function askForWritableFile(readOnlyHandle) {
+        const choice = await App.dialogs.show({
+            title: 'Confirm where to save',
+            body: 'Edge does not let a page opened from disk write to a file it opened. ' +
+                'In the next window, choose "' + readOnlyHandle.name + '" and confirm Replace. ' +
+                'Later saves in this session go straight to that file.',
+            buttons: [{ label: 'Cancel', value: false }, { label: 'Choose file…', value: true, primary: true }],
+        });
+        if (choice !== true) {
+            return null;
+        }
+        return pickSaveHandle(readOnlyHandle.name, readOnlyHandle);
+    }
+
+    /* Show the Save As window. Returns a writable handle, or null if cancelled. */
+    async function pickSaveHandle(suggestedName, startIn) {
+        const options = { suggestedName: suggestedName, types: HTML_TYPES };
+        if (startIn) {
+            options.startIn = startIn;   // a file handle opens the window in that file's folder
+        }
+        try {
+            return await window.showSaveFilePicker(options);
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                return null;   // the user closed the window
+            }
+            throw error;
+        }
+    }
 
     App.fileio.saveAs = async function saveAs() {
         if (!App.state.hasDeck) {
@@ -271,14 +346,9 @@
             afterSave(suggestedName);
             return;
         }
-        let handle;
-        try {
-            handle = await window.showSaveFilePicker({ suggestedName: suggestedName, types: HTML_TYPES });
-        } catch (error) {
-            if (error.name === 'AbortError') {
-                return;
-            }
-            throw error;
+        const handle = await pickSaveHandle(suggestedName, App.state.fileHandle);
+        if (!handle) {
+            return;
         }
         App.ui.setStatus('Saving…');
         await App.fileio.writeToHandle(handle, html);

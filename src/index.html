@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<!--
+  Deck Editor - page skeleton. build.py replaces every INLINE marker below with
+  the file's contents and writes the single file dist/editor.html (SPEC 3.2).
+  The JavaScript load order is listed once, here (tests/run-tests.html copies it).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The browser itself blocks every network request from this page (SPEC 2.3). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'self' blob:; child-src 'self' blob:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck Editor</title>
+<!-- INLINE-CSS: css/editor.css -->
+<!-- INLINE-CSS: css/ribbon.css -->
+<!-- INLINE-CSS: css/panels.css -->
+<!-- INLINE-CSS: css/dialogs.css -->
+</head>
+<body>
+
+<header id="titlebar">
+    <div id="quick-access" aria-label="Quick access"></div>
+    <div id="title-center">
+        <span id="title-file">Deck Editor</span>
+        <span id="title-dirty" title="Unsaved changes" hidden>●</span>
+    </div>
+    <div id="title-right"></div>
+</header>
+
+<nav id="ribbon" aria-label="Ribbon">
+    <div id="ribbon-tabs" role="tablist"></div>
+    <div id="ribbon-panel"></div>
+</nav>
+
+<main id="workspace">
+    <aside id="thumbnail-rail" aria-label="Slides"></aside>
+
+    <section id="center">
+        <div id="canvas-area">
+            <div id="canvas-stage-box" hidden>
+                <div id="canvas-stage">
+                    <!-- The deck: same-origin so the editor can edit it, no scripts so the deck's code never runs (SPEC 3.5). -->
+                    <iframe id="deck-frame" sandbox="allow-same-origin" title="Current slide"></iframe>
+                    <!-- Selection handles are drawn here, never inside the slide (Phase 2). -->
+                    <div id="overlay"></div>
+                </div>
+            </div>
+
+            <div id="welcome" hidden>
+                <h1>Deck Editor</h1>
+                <p>Edit HTML presentations on this computer. Nothing is uploaded: the browser blocks all network access for this page.</p>
+                <div class="welcome-buttons">
+                    <button type="button" class="btn btn-primary" id="welcome-open">Open a deck…</button>
+                    <button type="button" class="btn" id="welcome-new">New blank deck</button>
+                </div>
+                <p class="welcome-hint">Or drop an .html file anywhere on this window.</p>
+            </div>
+        </div>
+
+        <div id="notes-panel">
+            <div class="panel-label">Speaker notes <span class="panel-hint">(editing arrives in Phase 7)</span></div>
+            <div id="notes-text" class="empty"></div>
+        </div>
+    </section>
+
+    <aside id="format-pane" aria-label="Format">
+        <h2>Format</h2>
+        <p class="panel-hint">Select an object on the slide to see its options here. Selection arrives in Phase 2.</p>
+    </aside>
+</main>
+
+<footer id="statusbar">
+    <span id="status-slide"></span>
+    <span id="status-message"></span>
+    <span id="status-zoom"></span>
+</footer>
+
+<input type="file" id="file-input" accept=".html,.htm,text/html" hidden>
+<div id="drop-zone" hidden><div>Drop the .html deck to open it</div></div>
+<div id="busy" hidden><div id="busy-text"></div></div>
+
+<!-- Not run by the editor: copied into every saved deck (SPEC 3.6). -->
+<!-- INLINE-TEXT: player/player.js #deck-player-js -->
+<!-- INLINE-TEXT: player/player.css #deck-player-css -->
+
+<!-- INLINE-VENDOR -->
+
+<!-- INLINE-JS: js/app.js -->
+<!-- INLINE-JS: js/util.js -->
+<!-- INLINE-JS: js/events.js -->
+<!-- INLINE-JS: js/shortcuts.js -->
+<!-- INLINE-JS: js/history.js -->
+<!-- INLINE-JS: js/charts.js -->
+<!-- INLINE-JS: js/template.js -->
+<!-- INLINE-JS: js/importer.js -->
+<!-- INLINE-JS: js/normalize.js -->
+<!-- INLINE-JS: js/serialize.js -->
+<!-- INLINE-JS: js/icons.js -->
+<!-- INLINE-JS: js/dialogs.js -->
+<!-- INLINE-JS: js/deck.js -->
+<!-- INLINE-JS: js/canvas.js -->
+<!-- INLINE-JS: js/thumbnails.js -->
+<!-- INLINE-JS: js/fileio.js -->
+<!-- INLINE-JS: js/commands.js -->
+<!-- INLINE-JS: js/ribbon.js -->
+<!-- INLINE-JS: js/ui.js -->
+<script>
+    App.start();
+</script>
+</body>
+</html>

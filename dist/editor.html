@@ -1,0 +1,4102 @@
+<!DOCTYPE html>
+<!--
+  Deck Editor - page skeleton. build.py replaces every INLINE marker below with
+  the file's contents and writes the single file dist/editor.html (SPEC 3.2).
+  The JavaScript load order is listed once, here (tests/run-tests.html copies it).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- The browser itself blocks every network request from this page (SPEC 2.3). -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'self' blob:; child-src 'self' blob:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deck Editor</title>
+<style>
+/* ---- css/editor.css ---- */
+/*
+ * editor.css - colours, fonts and the overall page layout of the editor.
+ * Only Windows fonts with a generic fallback (SPEC 2.1).
+ * Other files: ribbon.css (title bar, ribbon), panels.css (rail, canvas,
+ * notes, format pane, status bar), dialogs.css.
+ */
+
+:root {
+    --ui-font: "Segoe UI", Calibri, Arial, sans-serif;
+    --accent: #b7472a;            /* PowerPoint-like orange-red */
+    --accent-dark: #8f3720;
+    --accent-soft: #f6e3dd;
+    --text: #252423;
+    --text-muted: #605e5c;
+    --border: #d2d0ce;
+    --surface: #ffffff;
+    --surface-alt: #f3f2f1;
+    --canvas-bg: #e1dfdd;
+    --danger: #a4262c;
+    --focus: #0f6cbd;
+    color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;            /* the editor never scrolls as a page; panels scroll */
+    font-family: var(--ui-font);
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface-alt);
+}
+
+[hidden] { display: none !important; }
+
+button { font: inherit; color: inherit; }
+button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.icon { flex: none; }
+
+/* Generic buttons (dialogs, welcome screen). */
+.btn {
+    min-width: 80px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+}
+.btn:hover { background: var(--surface-alt); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-dark); }
+.btn-danger.btn-primary { background: var(--danger); border-color: var(--danger); }
+
+#workspace {
+    flex: 1;
+    display: flex;
+    min-height: 0;               /* lets the children scroll instead of growing the page */
+}
+
+#center {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* Shown while a file is opened or converted. */
+#busy {
+    position: fixed; inset: 0; z-index: 900;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.6);
+    cursor: progress;
+}
+#busy-text {
+    padding: 12px 20px; border-radius: 6px;
+    background: var(--surface); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    font-size: 14px;
+}
+
+/* Shown while a file is dragged over the window. */
+#drop-zone {
+    position: fixed; inset: 0; z-index: 800;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(183, 71, 42, 0.12);
+    border: 3px dashed var(--accent);
+    pointer-events: none;        /* the drop event goes to the window underneath */
+}
+#drop-zone div {
+    padding: 16px 28px; border-radius: 8px;
+    background: var(--surface); font-size: 16px; font-weight: 600; color: var(--accent);
+}
+
+</style>
+<style>
+/* ---- css/ribbon.css ---- */
+/* ribbon.css - title bar, ribbon tabs, ribbon buttons and the File menu. */
+
+#titlebar {
+    flex: none;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    height: 36px;
+    padding: 0 8px;
+    background: var(--accent);
+    color: #fff;
+}
+#quick-access { display: flex; gap: 2px; }
+.quick-button {
+    display: flex; align-items: center; justify-content: center;
+    width: 30px; height: 28px;
+    border: 0; border-radius: 4px; background: transparent; cursor: pointer;
+}
+.quick-button:hover:not(:disabled) { background: rgba(255, 255, 255, 0.18); }
+.quick-button:disabled { opacity: 0.45; cursor: default; }
+#title-center { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+#title-dirty { font-size: 11px; opacity: 0.9; }
+
+#ribbon {
+    flex: none;
+    background: var(--surface-alt);
+    border-bottom: 1px solid var(--border);
+}
+#ribbon-tabs { display: flex; align-items: flex-end; gap: 2px; padding: 0 8px; height: 32px; }
+.ribbon-file-button {
+    height: 28px; padding: 0 16px; margin-right: 6px;
+    border: 0; border-radius: 4px 4px 0 0;
+    background: var(--accent); color: #fff; cursor: pointer; font-weight: 600;
+}
+.ribbon-file-button:hover { background: var(--accent-dark); }
+.ribbon-tab {
+    height: 28px; padding: 0 12px;
+    border: 0; border-bottom: 3px solid transparent; background: transparent; cursor: pointer;
+}
+.ribbon-tab:hover { background: rgba(0, 0, 0, 0.05); }
+.ribbon-tab.selected { border-bottom-color: var(--accent); font-weight: 600; }
+
+#ribbon-panel {
+    display: flex; align-items: stretch; gap: 0;
+    min-height: 82px; padding: 4px 8px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+}
+.ribbon-group {
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 0 8px; border-right: 1px solid var(--border);
+}
+.ribbon-group-buttons { display: flex; gap: 2px; }
+.ribbon-group-label { text-align: center; font-size: 11px; color: var(--text-muted); padding-top: 2px; }
+.ribbon-button {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    min-width: 54px; padding: 6px 6px 4px;
+    border: 1px solid transparent; border-radius: 4px; background: transparent; cursor: pointer;
+}
+.ribbon-button .icon { width: 24px; height: 24px; }
+.ribbon-button:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--border); }
+.ribbon-button:disabled { opacity: 0.4; cursor: default; }
+.ribbon-button-label { font-size: 12px; white-space: nowrap; }
+.ribbon-note {
+    align-self: center; max-width: 560px; padding: 0 14px;
+    color: var(--text-muted); font-size: 12px; line-height: 1.4;
+}
+
+.file-menu {
+    position: fixed; z-index: 700;
+    min-width: 240px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.file-menu-item {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 7px 10px; border: 0; border-radius: 4px; background: transparent; cursor: pointer; text-align: left;
+}
+.file-menu-item:hover:not(:disabled), .file-menu-item:focus-visible { background: var(--accent-soft); outline: none; }
+.file-menu-item:disabled { opacity: 0.4; cursor: default; }
+.file-menu-label { flex: 1; }
+.file-menu-keys { color: var(--text-muted); font-size: 11px; }
+
+</style>
+<style>
+/* ---- css/panels.css ---- */
+/* panels.css - thumbnail rail, slide canvas, notes area, format pane and status bar. */
+
+/* ---- Thumbnail rail (left) ---- */
+#thumbnail-rail {
+    flex: none;
+    width: 212px;
+    overflow-y: auto;
+    padding: 10px 8px 10px 4px;
+    background: var(--surface-alt);
+    border-right: 1px solid var(--border);
+}
+.thumb {
+    position: relative;
+    display: flex; align-items: flex-start; gap: 6px;
+    margin-bottom: 10px; cursor: pointer;
+}
+.thumb-number { width: 22px; text-align: right; font-size: 12px; color: var(--text-muted); padding-top: 2px; }
+.thumb-box {
+    position: relative;
+    width: 168px; height: 94.5px;        /* 1280x720 x --thumb-scale */
+    overflow: hidden;
+    background: #fff;
+    border: 2px solid transparent;
+    outline: 1px solid var(--border);
+    border-radius: 2px;
+}
+.thumb:hover .thumb-box { outline-color: #a19f9d; }
+.thumb-current .thumb-box { border-color: var(--accent); outline-color: var(--accent); }
+.thumb-current .thumb-number { color: var(--accent); font-weight: 600; }
+.thumb-frame {
+    position: absolute; left: 0; top: 0;
+    width: 1280px; height: 720px; border: 0;
+    transform: scale(var(--thumb-scale));
+    transform-origin: 0 0;
+    pointer-events: none;                  /* clicks go to the .thumb, not into the slide */
+}
+.thumb-hidden .thumb-box { opacity: 0.45; }
+.thumb-hidden-badge {
+    position: absolute; left: 4px; top: 22px;
+    color: var(--text-muted);
+}
+.thumb-hidden-badge .icon { width: 16px; height: 16px; }
+
+/* ---- Canvas (centre) ---- */
+#canvas-area {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--canvas-bg);
+}
+#canvas-stage-box { position: relative; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); background: #fff; }
+#canvas-stage {
+    position: absolute; left: 0; top: 0;
+    width: 1280px; height: 720px;          /* the real slide size; canvas.js scales it */
+    transform-origin: 0 0;
+}
+#deck-frame { display: block; width: 1280px; height: 720px; border: 0; background: #fff; }
+#overlay { position: absolute; inset: 0; pointer-events: none; }
+
+#welcome {
+    max-width: 520px; padding: 32px 36px;
+    background: var(--surface); border-radius: 8px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+    text-align: center;
+}
+#welcome h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; color: var(--accent); }
+#welcome p { margin: 0 0 16px; line-height: 1.5; color: var(--text-muted); }
+.welcome-buttons { display: flex; justify-content: center; gap: 10px; margin-bottom: 14px; }
+.welcome-hint { font-size: 12px; }
+
+/* ---- Notes (below the canvas) ---- */
+#notes-panel {
+    flex: none;
+    height: 88px;
+    padding: 6px 12px;
+    overflow-y: auto;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+}
+.panel-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.panel-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+#notes-text { padding-top: 4px; line-height: 1.45; white-space: pre-wrap; }
+#notes-text.empty { color: var(--text-muted); font-style: italic; }
+
+/* ---- Format pane (right) ---- */
+#format-pane {
+    flex: none;
+    width: 240px;
+    padding: 12px 14px;
+    overflow-y: auto;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+}
+#format-pane h2 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+#format-pane .panel-hint { line-height: 1.5; }
+
+/* ---- Status bar (bottom) ---- */
+#statusbar {
+    flex: none;
+    display: flex; align-items: center; gap: 18px;
+    height: 24px; padding: 0 12px;
+    background: var(--surface-alt);
+    border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text-muted);
+}
+#status-message { flex: 1; }
+
+@media (max-width: 900px) {
+    #format-pane { display: none; }
+}
+
+</style>
+<style>
+/* ---- css/dialogs.css ---- */
+/* dialogs.css - modal dialogs and the import report. */
+
+.dialog {
+    width: min(460px, calc(100vw - 32px));
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+    color: var(--text);
+}
+.dialog-wide { width: min(720px, calc(100vw - 32px)); }
+.dialog::backdrop { background: rgba(0, 0, 0, 0.35); }
+.dialog-title { margin: 0; padding: 16px 20px 6px; font-size: 16px; font-weight: 600; }
+.dialog-body { padding: 4px 20px 12px; max-height: 60vh; overflow-y: auto; line-height: 1.5; }
+.dialog-body p { margin: 0; }
+.dialog-buttons {
+    display: flex; justify-content: flex-end; gap: 8px;
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--surface-alt);
+}
+
+.report-section { margin-bottom: 14px; }
+.report-section h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: 13px; font-weight: 600; }
+.report-icon { display: inline-flex; }
+.report-icon-info { color: var(--focus); }
+.report-icon-check { color: #107c10; }
+.report-icon-warning { color: #c19c00; }
+.report-list { margin: 0; padding-left: 26px; }
+.report-list li { margin: 2px 0; overflow-wrap: anywhere; }
+.report-list li:first-child { list-style: none; margin-left: -14px; color: var(--text-muted); }
+.report-section:first-child .report-list li:first-child { list-style: disc; margin-left: 0; color: inherit; }
+
+</style>
+</head>
+<body>
+
+<header id="titlebar">
+    <div id="quick-access" aria-label="Quick access"></div>
+    <div id="title-center">
+        <span id="title-file">Deck Editor</span>
+        <span id="title-dirty" title="Unsaved changes" hidden>●</span>
+    </div>
+    <div id="title-right"></div>
+</header>
+
+<nav id="ribbon" aria-label="Ribbon">
+    <div id="ribbon-tabs" role="tablist"></div>
+    <div id="ribbon-panel"></div>
+</nav>
+
+<main id="workspace">
+    <aside id="thumbnail-rail" aria-label="Slides"></aside>
+
+    <section id="center">
+        <div id="canvas-area">
+            <div id="canvas-stage-box" hidden>
+                <div id="canvas-stage">
+                    <!-- The deck: same-origin so the editor can edit it, no scripts so the deck's code never runs (SPEC 3.5). -->
+                    <iframe id="deck-frame" sandbox="allow-same-origin" title="Current slide"></iframe>
+                    <!-- Selection handles are drawn here, never inside the slide (Phase 2). -->
+                    <div id="overlay"></div>
+                </div>
+            </div>
+
+            <div id="welcome" hidden>
+                <h1>Deck Editor</h1>
+                <p>Edit HTML presentations on this computer. Nothing is uploaded: the browser blocks all network access for this page.</p>
+                <div class="welcome-buttons">
+                    <button type="button" class="btn btn-primary" id="welcome-open">Open a deck…</button>
+                    <button type="button" class="btn" id="welcome-new">New blank deck</button>
+                </div>
+                <p class="welcome-hint">Or drop an .html file anywhere on this window.</p>
+            </div>
+        </div>
+
+        <div id="notes-panel">
+            <div class="panel-label">Speaker notes <span class="panel-hint">(editing arrives in Phase 7)</span></div>
+            <div id="notes-text" class="empty"></div>
+        </div>
+    </section>
+
+    <aside id="format-pane" aria-label="Format">
+        <h2>Format</h2>
+        <p class="panel-hint">Select an object on the slide to see its options here. Selection arrives in Phase 2.</p>
+    </aside>
+</main>
+
+<footer id="statusbar">
+    <span id="status-slide"></span>
+    <span id="status-message"></span>
+    <span id="status-zoom"></span>
+</footer>
+
+<input type="file" id="file-input" accept=".html,.htm,text/html" hidden>
+<div id="drop-zone" hidden><div>Drop the .html deck to open it</div></div>
+<div id="busy" hidden><div id="busy-text"></div></div>
+
+<!-- Not run by the editor: copied into every saved deck (SPEC 3.6). -->
+<script type="text/plain" id="deck-player-js">
+/*
+ * Deck player - added by the Deck Editor when it saves a deck (SPEC 3.6).
+ * It lets the saved file present on its own in any browser, with no editor.
+ *
+ * Keys: Right / Down / PageDown / Space = next, Left / Up / PageUp = previous,
+ * Home / End = first / last, F = full screen. Hidden slides are skipped.
+ *
+ * Inside the editor this script never runs: the editor shows decks in a
+ * sandboxed iframe without "allow-scripts", and removes it on open.
+ */
+(function () {
+    'use strict';
+
+    var WIDTH = 1280;
+    var HEIGHT = 720;
+    var root = document.documentElement;
+    var slides = Array.prototype.slice.call(document.querySelectorAll('section.slide')).filter(function (slide) {
+        return slide.getAttribute('data-hidden') !== 'true';
+    });
+    if (slides.length === 0) {
+        return;
+    }
+
+    var index = 0;
+    var counter = document.createElement('div');
+    counter.className = 'deck-player-counter';
+    counter.setAttribute('aria-live', 'polite');
+    document.body.appendChild(counter);
+    root.classList.add('deck-player-on');
+
+    function fit() {
+        var scale = Math.min(window.innerWidth / WIDTH, window.innerHeight / HEIGHT);
+        root.style.setProperty('--deck-player-scale', String(scale));
+    }
+
+    function show(newIndex) {
+        index = Math.max(0, Math.min(slides.length - 1, newIndex));
+        slides.forEach(function (slide, i) {
+            slide.classList.toggle('deck-player-current', i === index);
+        });
+        counter.textContent = (index + 1) + ' / ' + slides.length;
+    }
+
+    function toggleFullscreen() {
+        if (document.fullscreenElement) {
+            document.exitFullscreen();
+        } else if (root.requestFullscreen) {
+            root.requestFullscreen().catch(function () { /* refused by the browser: ignore */ });
+        }
+    }
+
+    document.addEventListener('keydown', function (event) {
+        if (event.ctrlKey || event.metaKey || event.altKey) {
+            return;
+        }
+        var key = event.key;
+        if (key === 'ArrowRight' || key === 'ArrowDown' || key === 'PageDown' || (key === ' ' && !event.shiftKey)) {
+            show(index + 1);
+        } else if (key === 'ArrowLeft' || key === 'ArrowUp' || key === 'PageUp' || (key === ' ' && event.shiftKey)) {
+            show(index - 1);
+        } else if (key === 'Home') {
+            show(0);
+        } else if (key === 'End') {
+            show(slides.length - 1);
+        } else if (key === 'f' || key === 'F') {
+            toggleFullscreen();
+        } else {
+            return;
+        }
+        event.preventDefault();
+    });
+
+    window.addEventListener('resize', fit);
+    fit();
+    show(0);
+})();
+
+</script>
+<script type="text/plain" id="deck-player-css">
+/* Deck player styles - added by the Deck Editor on save (SPEC 3.6). */
+
+/* Presenting: one slide at a time, scaled to fit, black letterboxing. */
+html.deck-player-on, html.deck-player-on body {
+    margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000;
+}
+html.deck-player-on .slide { display: none !important; }
+html.deck-player-on .slide.deck-player-current {
+    display: block !important; position: absolute !important; left: 50% !important; top: 50% !important;
+    margin: 0 !important; opacity: 1 !important; visibility: visible !important;
+    transform: translate(-50%, -50%) scale(var(--deck-player-scale, 1)) !important;
+    transform-origin: center center !important;
+}
+html.deck-player-on .master { display: none !important; }
+aside.notes { display: none !important; }
+.deck-player-counter {
+    position: fixed; right: 14px; bottom: 10px; z-index: 2147483647;
+    font: 13px "Segoe UI", Arial, sans-serif; color: #fff; opacity: 0.55;
+    background: rgba(0, 0, 0, 0.4); padding: 2px 8px; border-radius: 10px;
+}
+
+/* Printing: one slide per landscape page, 1280x720 px = 13.333 x 7.5 in at 96 px/in. */
+@page { size: 13.333in 7.5in; margin: 0; }
+@media print {
+    html, body, html.deck-player-on, html.deck-player-on body {
+        width: auto; height: auto; overflow: visible; background: none; margin: 0; padding: 0;
+    }
+    .slide, html.deck-player-on .slide, html.deck-player-on .slide.deck-player-current {
+        display: block !important; position: relative !important; left: auto !important; top: auto !important;
+        margin: 0 !important; transform: none !important; opacity: 1 !important; visibility: visible !important;
+        break-after: page; page-break-after: always;
+        -webkit-print-color-adjust: exact; print-color-adjust: exact;
+    }
+    /* As specific as the rules above, so hidden slides stay out of the print. */
+    .slide[data-hidden="true"], html.deck-player-on .slide[data-hidden="true"] { display: none !important; }
+    .deck-player-counter { display: none !important; }
+}
+
+</script>
+
+
+
+<script>
+// ---- js/app.js ----
+/*
+ * app.js - creates the shared `App` object and starts the editor.
+ *
+ * Why a global object: the editor runs from file://, where Chromium blocks
+ * ES module imports between files (SPEC 2.4). So every file adds its part to
+ * one shared object instead:  App.history = ..., App.deck = ..., and so on.
+ * build.py pastes the files into editor.html in the order listed there.
+ *
+ * Rule for every file: define things at load time, but do not touch the page
+ * until App.start() runs. That keeps the files loadable by tests/run-tests.html.
+ *
+ * Talks to: every module (start() wires them together).
+ */
+
+window.App = {
+    // Shared state that several modules read. Kept small on purpose.
+    state: {
+        fileName: null,      // name shown in the title bar, e.g. "deck.html"
+        fileHandle: null,    // FileSystemFileHandle when opened via the File System Access API
+        hasDeck: false,      // false while the welcome screen is shown
+    },
+};
+
+/*
+ * Wire the modules together. Called once from src/index.html after every
+ * script has loaded. Order matters: the UI must exist before the deck loads.
+ */
+App.start = function start() {
+    App.events = App.createEventBus();
+    App.history = App.createHistory({
+        getDoc: () => App.deck.getDocument(),
+        onChange: (info) => App.events.emit('history-changed', info),
+    });
+
+    App.commands.init();   // first: the ribbon and menus read command labels
+    App.ui.init();
+    App.ribbon.init();
+    App.canvas.init();
+    App.thumbnails.init();
+    App.deck.init();
+    App.fileio.init();
+    App.shortcuts.init();
+
+    App.ui.showWelcome();
+};
+
+</script>
+<script>
+// ---- js/util.js ----
+/*
+ * util.js - small helper functions used across the editor.
+ *
+ * Everything here is "pure": same input, same output, no page access.
+ * Tested in tests/unit/util.test.js.
+ *
+ * Talks to: nothing (other files call it).
+ */
+
+App.util = {};
+
+// Screen pixels per inch. PowerPoint and print both use 96 px = 1 inch,
+// so a 1280x720 slide is exactly 13.333 x 7.5 inches (SPEC 7.2, 7.4).
+App.util.PX_PER_INCH = 96;
+
+App.util.pxToInches = function pxToInches(px) {
+    return px / App.util.PX_PER_INCH;
+};
+
+App.util.inchesToPx = function inchesToPx(inches) {
+    return inches * App.util.PX_PER_INCH;
+};
+
+// Round to at most two decimals and drop trailing zeros: 6.6666 -> 6.67, 5.00 -> 5.
+App.util.round2 = function round2(value) {
+    return Math.round(value * 100) / 100;
+};
+
+/*
+ * Multiply every "<number>px" inside a CSS value by `factor`.
+ *   scalePxValues('10px 20px', 0.5)  ->  '5px 10px'
+ * Used when a 1920x1080 deck is scaled down to 1280x720.
+ * Values containing url(...) are returned unchanged, because base64 image
+ * data can contain letters like "3px" that are not lengths at all.
+ */
+App.util.scalePxValues = function scalePxValues(value, factor) {
+    if (value.indexOf('url(') !== -1) {
+        return value;
+    }
+    return value.replace(/(-?\d*\.?\d+)px/g, (match, number) => {
+        return App.util.round2(parseFloat(number) * factor) + 'px';
+    });
+};
+
+App.util.formatBytes = function formatBytes(bytes) {
+    if (bytes < 1024) {
+        return bytes + ' B';
+    }
+    if (bytes < 1024 * 1024) {
+        return (bytes / 1024).toFixed(1) + ' KB';
+    }
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+};
+
+// Make text safe to put inside HTML (so "<b>" shows as text, not as bold).
+App.util.escapeHtml = function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+};
+
+/*
+ * Return the first id "<prefix><n>" (n = 1, 2, 3 ...) that is not in `usedIds`,
+ * and add it to the set so the next call gets a different one.
+ */
+App.util.uniqueId = function uniqueId(prefix, usedIds) {
+    let n = 1;
+    while (usedIds.has(prefix + n)) {
+        n += 1;
+    }
+    const id = prefix + n;
+    usedIds.add(id);
+    return id;
+};
+
+/*
+ * Wrap `fn` so it only runs once calls stop for `waitMs` milliseconds.
+ * Used for things like re-drawing thumbnails while the user keeps editing.
+ */
+App.util.debounce = function debounce(fn, waitMs) {
+    let timer = null;
+    return function debounced(...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), waitMs);
+    };
+};
+
+/*
+ * Create a DOM element in one call:
+ *   App.util.el('button', { class: 'btn', title: 'Save' }, ['Save'])
+ * Attributes whose name starts with "on" are added as event listeners.
+ */
+App.util.el = function el(tag, attributes, children) {
+    const element = document.createElement(tag);
+    Object.entries(attributes || {}).forEach(([name, value]) => {
+        if (name.startsWith('on') && typeof value === 'function') {
+            element.addEventListener(name.slice(2), value);
+        } else if (value !== null && value !== undefined && value !== false) {
+            element.setAttribute(name, value === true ? '' : value);
+        }
+    });
+    (children || []).forEach((child) => {
+        element.append(child instanceof Node ? child : String(child));
+    });
+    return element;
+};
+
+</script>
+<script>
+// ---- js/events.js ----
+/*
+ * events.js - a tiny publish/subscribe "event bus".
+ *
+ * Modules announce that something happened (App.events.emit('deck-loaded'))
+ * without knowing who cares. Other modules listen (App.events.on(...)).
+ * This keeps, for example, history.js from having to know about thumbnails.
+ *
+ * Events used in Phase 1:
+ *   'deck-loaded'      a deck was opened or created          (deck.js)
+ *   'slide-changed'    the current slide changed             (deck.js)
+ *   'history-changed'  a change, undo or redo happened       (history.js via app.js)
+ *   'saved'            the deck was written to disk          (fileio.js)
+ *
+ * Talks to: nothing (others call it). Created in app.js as App.events.
+ */
+
+App.createEventBus = function createEventBus() {
+    const listeners = new Map();   // event name -> array of functions
+
+    function on(name, fn) {
+        if (!listeners.has(name)) {
+            listeners.set(name, []);
+        }
+        listeners.get(name).push(fn);
+    }
+
+    function off(name, fn) {
+        const list = listeners.get(name) || [];
+        listeners.set(name, list.filter((item) => item !== fn));
+    }
+
+    function emit(name, data) {
+        // Copy the list so a listener that calls off() does not disturb the loop.
+        const list = (listeners.get(name) || []).slice();
+        list.forEach((fn) => {
+            // One broken listener must not stop the others (e.g. thumbnails failing
+            // should not stop the title bar from updating).
+            try {
+                fn(data);
+            } catch (error) {
+                console.error('Listener for "' + name + '" failed:', error);
+            }
+        });
+    }
+
+    return { on: on, off: off, emit: emit };
+};
+
+</script>
+<script>
+// ---- js/shortcuts.js ----
+/*
+ * shortcuts.js - the one place that maps keys to actions (SPEC 4, Phase 1).
+ *
+ * A shortcut maps a key combination such as "Ctrl+S" to a command name such
+ * as "save". The command itself lives in commands.js, so the same command can
+ * be run from the ribbon, a menu or the keyboard.
+ *
+ * Rule: shortcuts are ignored while the user types in a text field, unless the
+ * shortcut is registered with { whileTyping: true } (formatting keys like
+ * Ctrl+B in Phase 3, and Save, which should work even mid-sentence).
+ *
+ * Talks to: commands.js (runs commands), deck.js (listens to the deck iframe,
+ * because key presses inside an iframe do not reach the main window).
+ */
+
+(function () {
+    'use strict';
+
+    App.shortcuts = {};
+
+    const MODIFIER_ORDER = ['Ctrl', 'Alt', 'Shift'];
+
+    // Friendly names for keys whose `event.key` value is awkward to type.
+    const KEY_ALIASES = {
+        ' ': 'Space', space: 'Space', spacebar: 'Space',
+        esc: 'Escape', escape: 'Escape', del: 'Delete', delete: 'Delete',
+        pageup: 'PageUp', pagedown: 'PageDown', home: 'Home', end: 'End',
+        arrowleft: 'ArrowLeft', arrowright: 'ArrowRight', arrowup: 'ArrowUp', arrowdown: 'ArrowDown',
+        enter: 'Enter', tab: 'Tab', backspace: 'Backspace',
+    };
+
+    function normalizeKeyName(key) {
+        const alias = KEY_ALIASES[key.toLowerCase()] || KEY_ALIASES[key];
+        if (alias) {
+            return alias;
+        }
+        if (key.length === 1) {
+            return key.toUpperCase();          // "s" -> "S"
+        }
+        if (/^f\d{1,2}$/i.test(key)) {
+            return key.toUpperCase();          // "f5" -> "F5"
+        }
+        return key;
+    }
+
+    // A printable symbol such as "?" already implies Shift, so "Shift+?" is written "?".
+    function isSymbolKey(keyName) {
+        return keyName.length === 1 && !/[A-Z0-9]/.test(keyName);
+    }
+
+    function buildCombo(modifiers, keyName) {
+        const used = MODIFIER_ORDER.filter((mod) => modifiers.has(mod));
+        const withoutShift = isSymbolKey(keyName) ? used.filter((mod) => mod !== 'Shift') : used;
+        return withoutShift.concat([keyName]).join('+');
+    }
+
+    /* "shift+ctrl+s" -> "Ctrl+Shift+S" (the fixed spelling used as the registry key). */
+    App.shortcuts.normalizeCombo = function normalizeCombo(text) {
+        const parts = text.split('+');
+        const keyName = normalizeKeyName(parts.pop());
+        const modifiers = new Set(parts.map((p) => {
+            const lower = p.toLowerCase();
+            if (lower === 'cmd' || lower === 'meta' || lower === 'control') {
+                return 'Ctrl';
+            }
+            return lower.charAt(0).toUpperCase() + lower.slice(1);
+        }));
+        return buildCombo(modifiers, keyName);
+    };
+
+    /* Turn a KeyboardEvent into the same spelling, e.g. Ctrl+Shift+S. Cmd counts as Ctrl. */
+    App.shortcuts.comboFromEvent = function comboFromEvent(event) {
+        const modifiers = new Set();
+        if (event.ctrlKey || event.metaKey) {
+            modifiers.add('Ctrl');
+        }
+        if (event.altKey) {
+            modifiers.add('Alt');
+        }
+        if (event.shiftKey) {
+            modifiers.add('Shift');
+        }
+        return buildCombo(modifiers, normalizeKeyName(event.key));
+    };
+
+    const TEXT_INPUT_TYPES = ['text', 'search', 'email', 'number', 'password', 'tel', 'url', ''];
+
+    /* True when the element is somewhere the user types text. */
+    App.shortcuts.isTypingTarget = function isTypingTarget(element) {
+        if (!element || !element.tagName) {
+            return false;
+        }
+        const tag = element.tagName.toLowerCase();
+        if (tag === 'textarea' || tag === 'select') {
+            return true;
+        }
+        if (tag === 'input') {
+            return TEXT_INPUT_TYPES.indexOf((element.getAttribute('type') || '').toLowerCase()) !== -1;
+        }
+        return element.isContentEditable === true || element.getAttribute('contenteditable') === 'true';
+    };
+
+    /*
+     * Create a registry. App.shortcuts.registry is the editor's real one; tests
+     * create their own so they do not interfere with it.
+     */
+    App.shortcuts.createRegistry = function createRegistry() {
+        const entries = new Map();   // combo -> { combo, command, whileTyping }
+
+        function register(combo, command, options) {
+            const key = App.shortcuts.normalizeCombo(combo);
+            if (entries.has(key)) {
+                throw new Error('Shortcut ' + key + ' is already used by "' + entries.get(key).command + '"');
+            }
+            entries.set(key, { combo: key, command: command, whileTyping: !!(options && options.whileTyping) });
+        }
+
+        function lookup(combo) {
+            return entries.get(App.shortcuts.normalizeCombo(combo)) || null;
+        }
+
+        /*
+         * Look up the event; if it matches, call runCommand(commandName) and stop
+         * the browser's own action (e.g. Ctrl+S would otherwise save the web page).
+         * Returns true if the key was handled.
+         */
+        function handle(event, runCommand) {
+            if (event.isComposing) {
+                return false;   // the user is composing a character with an IME (e.g. accents)
+            }
+            const entry = entries.get(App.shortcuts.comboFromEvent(event));
+            if (!entry) {
+                return false;
+            }
+            if (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping) {
+                return false;
+            }
+            event.preventDefault();
+            runCommand(entry.command);
+            return true;
+        }
+
+        function list() {
+            return Array.from(entries.values());
+        }
+
+        return { register: register, lookup: lookup, handle: handle, list: list };
+    };
+
+    /*
+     * The editor's shortcuts. Browsers reserve some keys (Ctrl+N, Ctrl+T, Ctrl+W)
+     * and never pass them to the page, so "New deck" is a menu item only.
+     */
+    App.shortcuts.DEFAULTS = [
+        ['Ctrl+O', 'open', { whileTyping: true }],
+        ['Ctrl+S', 'save', { whileTyping: true }],
+        ['Ctrl+Shift+S', 'saveAs', { whileTyping: true }],
+        ['Ctrl+Z', 'undo'],
+        ['Ctrl+Y', 'redo'],
+        ['Ctrl+Shift+Z', 'redo'],
+        ['PageDown', 'nextSlide'],
+        ['PageUp', 'previousSlide'],
+        ['Home', 'firstSlide'],
+        ['End', 'lastSlide'],
+    ];
+
+    App.shortcuts.init = function init() {
+        App.shortcuts.registry = App.shortcuts.createRegistry();
+        App.shortcuts.DEFAULTS.forEach(([combo, command, options]) => {
+            App.shortcuts.registry.register(combo, command, options);
+        });
+        App.shortcuts.listenTo(window);
+    };
+
+    /*
+     * Listen for keys on a window. Called for the editor window here, and by
+     * deck.js for the deck iframe every time a deck loads.
+     */
+    App.shortcuts.listenTo = function listenTo(targetWindow) {
+        targetWindow.addEventListener('keydown', (event) => {
+            App.shortcuts.registry.handle(event, (command) => App.commands.run(command));
+        });
+    };
+})();
+
+</script>
+<script>
+// ---- js/history.js ----
+/*
+ * history.js - undo / redo for every change to the deck (SPEC 4, Phase 1).
+ *
+ * Approach (from the spec): before each change, take a snapshot (a copy of
+ * the HTML) of the part that is about to change, usually one slide. Undo puts
+ * the snapshot back. Snapshots are plain strings, so they are cheap to keep
+ * and impossible to get "half restored". At most `limit` (100) steps are kept.
+ *
+ * Every later feature records its changes through this module:
+ *
+ *     App.history.change('Move element', { slideId: 's3' }, () => {
+ *         element.style.left = '100px';
+ *     });
+ *
+ * For long interactions such as a drag (Phase 2), call begin() when the drag
+ * starts and commit() when it ends, so the whole drag is one undo step.
+ *
+ * Scope of a change:
+ *   { slideId: 's3' }  -> snapshot of that slide only (fast, the common case)
+ *   'deck'             -> snapshot of the whole <head> and <body> (theme,
+ *                         adding/removing slides, removing blocked fonts ...)
+ *
+ * Dirty tracking: every state gets a number. The state saved to disk is
+ * remembered; the deck is "dirty" (has unsaved changes) when the current
+ * state number differs from the saved one. So undoing back to the saved
+ * state makes it clean again.
+ *
+ * Talks to: deck.js (through getDoc), app.js (onChange -> 'history-changed').
+ */
+
+App.createHistory = function createHistory(options) {
+    const getDoc = options.getDoc;
+    const limit = options.limit || 100;
+    const onChange = options.onChange || function () {};
+
+    let undoStack = [];      // entries: { label, scope, before, after, stateBefore, stateAfter }
+    let redoStack = [];
+    let nextStateNumber = 1;
+    let currentState = 0;    // 0 = the state the deck had when it was opened
+    let savedState = 0;
+    let pending = null;      // an interaction started with begin() and not yet committed
+
+    // ---- Snapshots ----
+
+    function findSlide(doc, slideId) {
+        const slide = doc.querySelector('[data-slide-id="' + CSS.escape(slideId) + '"]');
+        if (!slide) {
+            throw new Error('Undo: slide "' + slideId + '" not found');
+        }
+        return slide;
+    }
+
+    function takeSnapshot(scope) {
+        const doc = getDoc();
+        if (scope === 'deck') {
+            return { head: doc.head.innerHTML, body: doc.body.innerHTML };
+        }
+        return findSlide(doc, scope.slideId).outerHTML;
+    }
+
+    function restoreSnapshot(scope, snapshot) {
+        const doc = getDoc();
+        if (scope === 'deck') {
+            doc.head.innerHTML = snapshot.head;
+            doc.body.innerHTML = snapshot.body;
+            return;
+        }
+        // Setting outerHTML replaces the slide element with one parsed from the string.
+        findSlide(doc, scope.slideId).outerHTML = snapshot;
+    }
+
+    function validateScope(scope) {
+        if (scope !== 'deck' && !(scope && scope.slideId)) {
+            throw new Error("History scope must be 'deck' or { slideId: '...' }");
+        }
+    }
+
+    // ---- Recording ----
+
+    function push(label, scope, before) {
+        const entry = {
+            label: label, scope: scope, before: before, after: null,
+            stateBefore: currentState, stateAfter: nextStateNumber,
+        };
+        nextStateNumber += 1;
+        currentState = entry.stateAfter;
+        undoStack.push(entry);
+        if (undoStack.length > limit) {
+            undoStack.shift();   // forget the oldest step
+        }
+        redoStack = [];
+        onChange({ action: 'change', label: label, scope: scope });
+    }
+
+    /*
+     * Run `fn`, which changes the deck, as one undoable step.
+     * If `fn` throws, the deck is put back as it was and nothing is recorded.
+     */
+    function change(label, scope, fn) {
+        validateScope(scope);
+        const before = takeSnapshot(scope);
+        try {
+            fn();
+        } catch (error) {
+            restoreSnapshot(scope, before);
+            throw error;
+        }
+        push(label, scope, before);
+    }
+
+    function begin(label, scope) {
+        validateScope(scope);
+        pending = { label: label, scope: scope, before: takeSnapshot(scope) };
+    }
+
+    function commit() {
+        if (!pending) {
+            return;
+        }
+        const p = pending;
+        pending = null;
+        push(p.label, p.scope, p.before);
+    }
+
+    function cancel() {
+        if (!pending) {
+            return;
+        }
+        restoreSnapshot(pending.scope, pending.before);
+        pending = null;
+    }
+
+    // ---- Undo / redo ----
+
+    function undo() {
+        const entry = undoStack.pop();
+        if (!entry) {
+            return false;
+        }
+        entry.after = takeSnapshot(entry.scope);   // remember the state so redo can return to it
+        restoreSnapshot(entry.scope, entry.before);
+        currentState = entry.stateBefore;
+        redoStack.push(entry);
+        onChange({ action: 'undo', label: entry.label, scope: entry.scope });
+        return true;
+    }
+
+    function redo() {
+        const entry = redoStack.pop();
+        if (!entry) {
+            return false;
+        }
+        restoreSnapshot(entry.scope, entry.after);
+        currentState = entry.stateAfter;
+        undoStack.push(entry);
+        onChange({ action: 'redo', label: entry.label, scope: entry.scope });
+        return true;
+    }
+
+    // ---- Saved state ----
+
+    function markSaved() {
+        savedState = currentState;
+        onChange({ action: 'saved' });
+    }
+
+    // The deck differs from the file even without an undoable step,
+    // e.g. right after a messy deck was normalized on import.
+    function markDirty() {
+        savedState = -1;
+        onChange({ action: 'dirty' });
+    }
+
+    function reset() {
+        undoStack = [];
+        redoStack = [];
+        pending = null;
+        nextStateNumber = 1;
+        currentState = 0;
+        savedState = 0;
+        onChange({ action: 'reset' });
+    }
+
+    return {
+        change: change, begin: begin, commit: commit, cancel: cancel,
+        undo: undo, redo: redo, reset: reset, markSaved: markSaved, markDirty: markDirty,
+        canUndo: () => undoStack.length > 0,
+        canRedo: () => redoStack.length > 0,
+        isDirty: () => currentState !== savedState,
+        undoLabel: () => (undoStack.length ? undoStack[undoStack.length - 1].label : null),
+        redoLabel: () => (redoStack.length ? redoStack[redoStack.length - 1].label : null),
+    };
+};
+
+</script>
+<script>
+// ---- js/charts.js ----
+/*
+ * charts.js - turns chart JSON into a static SVG (SPEC 5).
+ *
+ * PHASE 1 STATUS: only a placeholder is drawn. It is a light grey frame with
+ * the chart's title and type, so a Copilot deck whose charts carry JSON but no
+ * SVG (Appendix A) still shows where each chart is. The real renderer
+ * (columns, lines, waterfalls ...) replaces render() in Phase 6, keeping
+ * the same signature, and placeholders are marked data-chart-placeholder so
+ * Phase 6 can re-render them automatically.
+ *
+ * render() is a pure function: same input, same output, no randomness (SPEC 5.6).
+ *
+ * Talks to: importer.js (calls renderMissing during import), util.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.charts = {};
+
+    const FONT = 'Segoe UI, Calibri, Arial, sans-serif';
+
+    /* Parse the text of a <script class="chart-data">. Returns null instead of throwing. */
+    App.charts.parseChartData = function parseChartData(text) {
+        try {
+            const data = JSON.parse(text);
+            return data && typeof data === 'object' ? data : null;
+        } catch (error) {
+            return null;
+        }
+    };
+
+    function describe(data) {
+        const type = data.type || 'chart';
+        const categories = Array.isArray(data.categories) ? data.categories.length : 0;
+        const series = Array.isArray(data.series) ? data.series.length : 0;
+        return 'Chart: ' + type + ' · ' + categories + ' categories · ' + series + ' series';
+    }
+
+    // A few grey bars so the placeholder reads as "a chart goes here".
+    function silhouetteBars(width, height) {
+        const heights = [0.35, 0.55, 0.45, 0.7, 0.6];
+        const areaTop = height * 0.3;
+        const areaHeight = height * 0.5;
+        const barWidth = width * 0.08;
+        const gap = (width * 0.6 - barWidth * heights.length) / (heights.length - 1);
+        let x = width * 0.2;
+        let bars = '';
+        heights.forEach((h) => {
+            const barHeight = areaHeight * h;
+            const y = areaTop + areaHeight - barHeight;
+            bars += '<rect x="' + x.toFixed(1) + '" y="' + y.toFixed(1) + '" width="' + barWidth.toFixed(1) +
+                '" height="' + barHeight.toFixed(1) + '" fill="#d5d9de"/>';
+            x += barWidth + gap;
+        });
+        return bars;
+    }
+
+    /*
+     * Render chart JSON as an SVG string of exactly width x height pixels.
+     * Phase 1: placeholder only (see the file header).
+     */
+    App.charts.render = function render(data, width, height) {
+        const safe = data && typeof data === 'object' ? data : {};
+        const title = (safe.options && safe.options.title) || 'Chart';
+        const escape = App.util.escapeHtml;
+        const centerX = (width / 2).toFixed(1);
+
+        return '<svg width="' + width + '" height="' + height + '" viewBox="0 0 ' + width + ' ' + height + '"' +
+            ' data-chart-placeholder="true" role="img" aria-label="' + escape(title) + '">' +
+            '<rect x="0.5" y="0.5" width="' + (width - 1) + '" height="' + (height - 1) + '"' +
+            ' fill="#f5f6f7" stroke="#b9bec5" stroke-dasharray="6 4"/>' +
+            silhouetteBars(width, height) +
+            '<text x="' + centerX + '" y="' + (height * 0.18).toFixed(1) + '" text-anchor="middle"' +
+            ' font-family="' + FONT + '" font-size="18" font-weight="600" fill="#444">' + escape(title) + '</text>' +
+            '<text x="' + centerX + '" y="' + (height * 0.92).toFixed(1) + '" text-anchor="middle"' +
+            ' font-family="' + FONT + '" font-size="12" fill="#777">' + escape(describe(safe)) +
+            ' — full rendering arrives in Phase 6</text>' +
+            '</svg>';
+    };
+
+    /*
+     * Find chart elements that have JSON data but no <svg> yet and draw one.
+     * The size comes from the element's inline width/height (contract format).
+     * Returns how many charts were rendered (shown in the import report).
+     */
+    App.charts.renderMissing = function renderMissing(doc) {
+        let count = 0;
+        doc.querySelectorAll('[data-type="chart"]').forEach((figure) => {
+            const dataScript = figure.querySelector('script.chart-data');
+            if (!dataScript || figure.querySelector('svg')) {
+                return;
+            }
+            const width = Math.round(parseFloat(figure.style.width)) || 600;
+            const height = Math.round(parseFloat(figure.style.height)) || 300;
+            const data = App.charts.parseChartData(dataScript.textContent);
+            figure.insertAdjacentHTML('beforeend', App.charts.render(data, width, height));
+            count += 1;
+        });
+        return count;
+    };
+})();
+
+</script>
+<script>
+// ---- js/template.js ----
+/*
+ * template.js - the built-in blank deck used by File > New (SPEC 4, Phase 1).
+ *
+ * It follows the deck contract (SPEC 3.3) exactly: theme in :root CSS
+ * variables, 1280x720 slides, every element absolutely positioned with a
+ * unique data-id and a z-index. Text is in Portuguese because the decks are.
+ *
+ * Talks to: fileio.js (File > New), importer.js (it is imported like any deck).
+ */
+
+App.template = {};
+
+App.template.newDeckHtml = function newDeckHtml() {
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="deck-format" content="1">
+<title>Nova apresentação</title>
+<style>
+  :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
+          --color-primary: #CC092F; --color-accent: #1F2A44; --color-text: #222; --color-bg: #fff; }
+  body  { margin: 0; font-family: var(--font-body); color: var(--color-text); }
+  .slide { position: relative; width: 1280px; height: 720px; overflow: hidden; background: var(--color-bg); }
+  .el    { position: absolute; box-sizing: border-box; }
+  .el h1, .el h2, .el p, .el ul { margin: 0; }
+  .el h1 { font-family: var(--font-heading); font-size: 48px; line-height: 1.15; color: var(--color-accent); }
+  .el h2 { font-family: var(--font-heading); font-size: 34px; line-height: 1.2; color: var(--color-accent); }
+  .el p, .el li { font-size: 22px; line-height: 1.4; }
+  .el ul { padding-left: 28px; }
+  .accent-bar { background: var(--color-primary); }
+</style>
+</head>
+<body>
+<section class="slide" data-slide-id="s1" data-layout="title">
+  <div class="el accent-bar" data-type="shape" data-id="e1" style="left:64px; top:300px; width:120px; height:8px; z-index:1"></div>
+  <div class="el" data-type="text" data-id="e2" style="left:64px; top:180px; width:1152px; height:110px; z-index:2"><h1>Título da apresentação</h1></div>
+  <div class="el" data-type="text" data-id="e3" style="left:64px; top:332px; width:1152px; height:40px; z-index:3"><p>Subtítulo · Data</p></div>
+  <aside class="notes"></aside>
+</section>
+<section class="slide" data-slide-id="s2" data-layout="title-content">
+  <div class="el" data-type="text" data-id="e4" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Título do slide</h2></div>
+  <div class="el accent-bar" data-type="shape" data-id="e5" style="left:64px; top:116px; width:80px; height:6px; z-index:2"></div>
+  <div class="el" data-type="text" data-id="e6" style="left:64px; top:150px; width:1152px; height:500px; z-index:3"><ul><li>Primeiro ponto</li><li>Segundo ponto</li><li>Terceiro ponto</li></ul></div>
+  <aside class="notes"></aside>
+</section>
+</body>
+</html>
+`;
+};
+
+</script>
+<script>
+// ---- js/importer.js ----
+/*
+ * importer.js - turns any HTML file into a deck the editor can work on (SPEC 3.4).
+ *
+ * Steps, in order (importDeck at the bottom runs them):
+ *   1. parse     the text into a Document that is never displayed
+ *   2. sanitize  remove the deck's own scripts, onclick=... handlers, iframes ...
+ *                (Copilot decks often carry navigation code)
+ *   3. collect   remote fonts / images (the CSP blocks them) and local files
+ *                (the editor cannot read them), for the report
+ *   4. detect    which elements are the slides
+ *   5. normalize (normalize.js) measure the real layout and convert it to the
+ *                contract: absolute px positions, 1280x720
+ *   6. render    charts that have JSON but no SVG (charts.js)
+ *
+ * The result is { html, report }. The report lists everything that was found,
+ * converted or removed, and dialogs.js shows it to the user.
+ *
+ * Talks to: normalize.js, charts.js, fileio.js (calls importDeck),
+ *           dialogs.js (shows the report), deck.js (removeRemoteRefs).
+ */
+
+(function () {
+    'use strict';
+
+    App.importer = {};
+
+    // ---------------------------------------------------------------
+    // 1. Parse
+    // ---------------------------------------------------------------
+
+    /* DOMParser builds a Document from text without showing it or running its scripts. */
+    App.importer.parseHtml = function parseHtml(text) {
+        return new DOMParser().parseFromString(text, 'text/html');
+    };
+
+    // ---------------------------------------------------------------
+    // 2. Sanitize
+    // ---------------------------------------------------------------
+
+    function shorten(text, maxLength) {
+        const singleLine = text.replace(/\s+/g, ' ').trim();
+        return singleLine.length > maxLength ? singleLine.slice(0, maxLength) + '…' : singleLine;
+    }
+
+    function describeScript(script) {
+        const src = script.getAttribute('src');
+        if (src) {
+            return 'External script: ' + src;
+        }
+        const code = script.textContent;
+        return 'Inline script (' + App.util.formatBytes(code.length) + '): ' + shorten(code, 60);
+    }
+
+    // JSON data scripts (charts) are data, not code, and never run.
+    function isDataScript(script) {
+        const type = (script.getAttribute('type') || '').toLowerCase();
+        return type === 'application/json' || type === 'application/ld+json';
+    }
+
+    // The player (src/player/player.js) marks the page with "deck-player-*"
+    // classes and a --deck-player-scale variable at runtime.
+    function removePlayerRuntimeMarks(doc) {
+        doc.querySelectorAll('[class*="deck-player-"]').forEach((element) => {
+            const kept = Array.from(element.classList).filter((name) => !name.startsWith('deck-player-'));
+            if (kept.length) {
+                element.setAttribute('class', kept.join(' '));
+            } else {
+                element.removeAttribute('class');
+            }
+        });
+        const root = doc.documentElement;
+        root.style.removeProperty('--deck-player-scale');
+        if (root.getAttribute('style') === '') {
+            root.removeAttribute('style');
+        }
+    }
+
+    /*
+     * Remove everything that could run code or load another page.
+     * Returns { scripts: [{label}], handlers: number, other: [string] }.
+     */
+    App.importer.sanitize = function sanitize(doc) {
+        const result = { scripts: [], handlers: 0, other: [] };
+
+        // Our own player and its style are re-added on save, so drop them silently,
+        // together with anything the player adds while it runs.
+        doc.querySelectorAll('[data-deck-player], .deck-player-counter').forEach((node) => node.remove());
+        removePlayerRuntimeMarks(doc);
+
+        doc.querySelectorAll('script').forEach((script) => {
+            if (isDataScript(script)) {
+                return;
+            }
+            result.scripts.push({ label: describeScript(script) });
+            script.remove();
+        });
+
+        const otherSelectors = [
+            ['base', 'Base URL (<base>)'],
+            ['meta[http-equiv]', 'Meta http-equiv'],
+            ['iframe', 'Embedded page (<iframe>)'],
+            ['frame', 'Embedded page (<frame>)'],
+            ['object', 'Embedded object (<object>)'],
+            ['embed', 'Embedded object (<embed>)'],
+        ];
+        // Harmless http-equiv values (the charset is re-declared on save anyway).
+        const harmlessMeta = ['content-type', 'x-ua-compatible'];
+        otherSelectors.forEach(([selector, label]) => {
+            doc.querySelectorAll(selector).forEach((node) => {
+                const httpEquiv = (node.getAttribute('http-equiv') || '').toLowerCase();
+                if (harmlessMeta.indexOf(httpEquiv) !== -1) {
+                    return;
+                }
+                const detail = node.getAttribute('src') || node.getAttribute('data') ||
+                    node.getAttribute('http-equiv') || node.getAttribute('href') || '';
+                result.other.push(label + (detail ? ': ' + detail : ''));
+                node.remove();
+            });
+        });
+
+        doc.querySelectorAll('*').forEach((element) => {
+            Array.from(element.attributes).forEach((attribute) => {
+                const name = attribute.name.toLowerCase();
+                const isHandler = name.startsWith('on');
+                const isJsLink = (name === 'href' || name === 'src' || name === 'action') &&
+                    /^\s*javascript:/i.test(attribute.value);
+                if (isHandler || isJsLink) {
+                    element.removeAttribute(attribute.name);
+                    result.handlers += 1;
+                }
+            });
+        });
+
+        return result;
+    };
+
+    // ---------------------------------------------------------------
+    // 3. External references
+    // ---------------------------------------------------------------
+
+    const REMOTE_URL_RE = /^\s*(https?:)?\/\//i;
+    const URL_IN_CSS_RE = /url\(\s*(['"]?)([^'")]+)\1\s*\)/gi;
+    const IMPORT_RE = /@import\s+(?:url\(\s*)?(['"]?)([^'")\s;]+)\1\s*\)?[^;]*;/gi;
+    const FONT_FACE_RE = /@font-face\s*\{[^}]*\}/gi;
+
+    function isRemote(url) {
+        return REMOTE_URL_RE.test(url);
+    }
+
+    // data: and blob: are inline; '#...' is a link inside the page; about: is harmless.
+    function isLocalFile(url) {
+        const trimmed = url.trim();
+        return trimmed !== '' && !isRemote(trimmed) && !/^(data:|blob:|#|about:)/i.test(trimmed);
+    }
+
+    function classify(url, kind, lists) {
+        if (isRemote(url)) {
+            lists.remote.push({ kind: kind, url: url.trim() });
+        } else if (isLocalFile(url)) {
+            lists.local.push({ kind: kind, url: url.trim() });
+        }
+    }
+
+    /*
+     * Scan CSS text and return references in the order they appear:
+     * [{ kind: 'import' | 'font' | 'css-url', url, start, end }]
+     */
+    function cssReferences(cssText) {
+        const found = [];
+        const covered = [];   // ranges already reported as @import or @font-face
+
+        cssText.replace(IMPORT_RE, (match, quote, url, offset) => {
+            found.push({ kind: 'import', url: url, start: offset, end: offset + match.length });
+            covered.push([offset, offset + match.length]);
+            return match;
+        });
+        cssText.replace(FONT_FACE_RE, (block, offset) => {
+            covered.push([offset, offset + block.length]);
+            block.replace(URL_IN_CSS_RE, (match, quote, url) => {
+                found.push({ kind: 'font', url: url, start: offset, end: offset + block.length });
+                return match;
+            });
+            return block;
+        });
+        cssText.replace(URL_IN_CSS_RE, (match, quote, url, offset) => {
+            const inside = covered.some(([from, to]) => offset >= from && offset < to);
+            if (!inside) {
+                found.push({ kind: 'css-url', url: url, start: offset, end: offset + match.length });
+            }
+            return match;
+        });
+
+        return found.sort((a, b) => a.start - b.start);
+    }
+
+    /*
+     * List every reference to a file outside the deck.
+     * Returns { remote: [{kind, url}], local: [{kind, url}] }.
+     */
+    App.importer.findExternalRefs = function findExternalRefs(doc) {
+        const lists = { remote: [], local: [] };
+
+        doc.querySelectorAll('link, style, img, [style]').forEach((node) => {
+            const tag = node.tagName.toLowerCase();
+            if (tag === 'link') {
+                const rel = (node.getAttribute('rel') || '').toLowerCase();
+                if (rel.indexOf('stylesheet') !== -1 || rel.indexOf('preload') !== -1) {
+                    classify(node.getAttribute('href') || '', 'stylesheet', lists);
+                }
+            } else if (tag === 'style') {
+                cssReferences(node.textContent).forEach((ref) => classify(ref.url, ref.kind, lists));
+            } else if (tag === 'img') {
+                classify(node.getAttribute('src') || '', 'image', lists);
+            }
+            if (tag !== 'style' && node.hasAttribute('style')) {
+                cssReferences(node.getAttribute('style')).forEach((ref) => classify(ref.url, ref.kind, lists));
+            }
+        });
+
+        return lists;
+    };
+
+    /* A small grey picture used where a blocked remote image used to be. */
+    const BLOCKED_IMAGE_PLACEHOLDER = 'data:image/svg+xml,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90" viewBox="0 0 160 90">' +
+        '<rect width="160" height="90" fill="#eceef1"/>' +
+        '<text x="80" y="50" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="12" fill="#666">' +
+        'image removed</text></svg>'
+    );
+
+    // Remove remote @import / @font-face rules and turn remote url(...) into "none".
+    function stripRemoteCss(cssText, counter) {
+        let text = cssText.replace(IMPORT_RE, (match, quote, url) => {
+            if (!isRemote(url)) {
+                return match;
+            }
+            counter.count += 1;
+            return '';
+        });
+        text = text.replace(FONT_FACE_RE, (block) => {
+            const hasRemote = cssReferences(block).some((ref) => isRemote(ref.url));
+            if (!hasRemote) {
+                return block;
+            }
+            counter.count += 1;
+            return '';
+        });
+        return text.replace(URL_IN_CSS_RE, (match, quote, url) => {
+            if (!isRemote(url)) {
+                return match;
+            }
+            counter.count += 1;
+            return 'none';
+        });
+    }
+
+    /*
+     * Remove what findExternalRefs(doc).remote lists. Remote images are replaced
+     * by a placeholder picture, so the slide keeps its layout.
+     * Returns how many references were removed.
+     */
+    App.importer.removeRemoteRefs = function removeRemoteRefs(doc) {
+        const counter = { count: 0 };
+
+        doc.querySelectorAll('link').forEach((link) => {
+            if (isRemote(link.getAttribute('href') || '')) {
+                link.remove();
+                counter.count += 1;
+            }
+        });
+        doc.querySelectorAll('style').forEach((style) => {
+            const cleaned = stripRemoteCss(style.textContent, counter);
+            if (cleaned !== style.textContent) {
+                style.textContent = cleaned;
+            }
+        });
+        doc.querySelectorAll('img').forEach((img) => {
+            if (isRemote(img.getAttribute('src') || '')) {
+                img.setAttribute('src', BLOCKED_IMAGE_PLACEHOLDER);
+                counter.count += 1;
+            }
+        });
+        doc.querySelectorAll('[style]').forEach((node) => {
+            const before = node.getAttribute('style');
+            const after = stripRemoteCss(before, counter);
+            if (after !== before) {
+                node.setAttribute('style', after);
+            }
+        });
+
+        return counter.count;
+    };
+
+    // ---------------------------------------------------------------
+    // 4. Detect slides
+    // ---------------------------------------------------------------
+
+    function isInsideMasterOrNotes(element) {
+        return !!element.closest('.master, aside.notes, .notes');
+    }
+
+    /*
+     * From a list of candidate elements keep the real slides:
+     *  - drop wrappers that contain two or more other candidates (".slides")
+     *  - then drop candidates inside another kept candidate (".slide-title")
+     */
+    function pickSlides(candidates) {
+        const notWrappers = candidates.filter((candidate) => {
+            const inner = candidates.filter((other) => other !== candidate && candidate.contains(other));
+            return inner.length < 2;
+        });
+        return notWrappers.filter((candidate) => {
+            return !notWrappers.some((other) => other !== candidate && other.contains(candidate));
+        });
+    }
+
+    function hasSlideClass(element) {
+        return /slide/i.test(element.getAttribute('class') || '');
+    }
+
+    /*
+     * Find the slides using the rules from SPEC 3.4, in priority order:
+     * section.slide, then section, then any class containing "slide".
+     * The last rule (large 16:9 blocks) needs real layout, so normalize.js
+     * applies it when this returns no slides.
+     * Returns { slides: Element[], method: string | null }.
+     */
+    App.importer.detectSlides = function detectSlides(doc) {
+        const body = doc.body;
+        const rules = [
+            ['section.slide', () => Array.from(body.querySelectorAll('section.slide'))],
+            ['section', () => Array.from(body.querySelectorAll('section'))],
+            ['class', () => Array.from(body.querySelectorAll('[class]')).filter(hasSlideClass)],
+        ];
+
+        for (const [method, findCandidates] of rules) {
+            const candidates = findCandidates().filter((el) => !isInsideMasterOrNotes(el));
+            const slides = pickSlides(candidates);
+            if (slides.length > 0) {
+                return { slides: slides, method: method };
+            }
+        }
+        return { slides: [], method: null };
+    };
+
+    // ---------------------------------------------------------------
+    // Putting it together
+    // ---------------------------------------------------------------
+
+    function newReport() {
+        return {
+            method: null,             // which slide-detection rule matched
+            slideCount: 0,
+            isContract: false,        // already in the editor's format?
+            elementsConverted: 0,     // elements created by normalization
+            scaledFrom: null,         // e.g. "1920×1080" when the deck was resized
+            scriptsRemoved: [],       // [{ label }]
+            handlersRemoved: 0,       // onclick=..., javascript: links
+            otherRemoved: [],         // iframes, canvases drawn by scripts ...
+            remoteRefs: [],           // [{ kind, url }] blocked by the browser
+            localRefs: [],            // [{ kind, url }] files next to the deck we cannot read
+            chartsRendered: 0,
+            fixes: [],                // small repairs on contract decks (missing ids ...)
+            warnings: [],
+        };
+    }
+
+    function ensureDeckFormatMeta(doc) {
+        let meta = doc.head.querySelector('meta[name="deck-format"]');
+        if (!meta) {
+            meta = doc.createElement('meta');
+            meta.setAttribute('name', 'deck-format');
+            doc.head.prepend(meta);
+        }
+        meta.setAttribute('content', '1');
+    }
+
+    /*
+     * Import a deck from its HTML text. `async` because measuring the layout
+     * means waiting for a hidden iframe to load (see normalize.js).
+     * Returns { html, report }.
+     */
+    App.importer.importDeck = async function importDeck(text) {
+        const report = newReport();
+        const doc = App.importer.parseHtml(text);
+
+        const sanitized = App.importer.sanitize(doc);
+        report.scriptsRemoved = sanitized.scripts;
+        report.handlersRemoved = sanitized.handlers;
+        report.otherRemoved = sanitized.other;
+
+        const refs = App.importer.findExternalRefs(doc);
+        report.remoteRefs = refs.remote;
+        report.localRefs = refs.local;
+
+        const detected = App.importer.detectSlides(doc);
+        const deckDoc = await App.normalize.run(doc, detected, report);
+
+        report.chartsRendered = App.charts.renderMissing(deckDoc);
+        ensureDeckFormatMeta(deckDoc);
+
+        return { html: '<!DOCTYPE html>\n' + deckDoc.documentElement.outerHTML, report: report };
+    };
+
+    /*
+     * True when the import changed something the user should know about
+     * (used to decide whether to show the report and mark the deck unsaved).
+     */
+    App.importer.reportHasChanges = function reportHasChanges(report) {
+        return !report.isContract || report.fixes.length > 0 || report.scriptsRemoved.length > 0 ||
+            report.handlersRemoved > 0 || report.otherRemoved.length > 0 || report.chartsRendered > 0;
+    };
+
+    App.importer.reportHasItems = function reportHasItems(report) {
+        return App.importer.reportHasChanges(report) || report.remoteRefs.length > 0 ||
+            report.localRefs.length > 0 || report.warnings.length > 0;
+    };
+})();
+
+</script>
+<script>
+// ---- js/normalize.js ----
+/*
+ * normalize.js - converts any deck layout into the editor's contract (SPEC 3.3, 3.4).
+ *
+ * The idea: we do not try to understand the deck's CSS. Instead we let the
+ * browser lay the deck out in a hidden 1280x720 iframe, then *measure* where
+ * every visible block ended up (getBoundingClientRect) and write that position
+ * down in px. Styles that came from the deck's CSS rules (fonts, colors,
+ * spacing) are copied inline, so each element looks the same after it is
+ * moved out of its original container.
+ *
+ * What becomes what (option A, agreed with the user):
+ *   heading / paragraph / list / text box  -> <div class="el" data-type="text">
+ *   <img>                                  -> <img class="el" data-type="image">
+ *   <table>                                -> <div class="el" data-type="table">
+ *   <svg> or empty coloured box            -> data-type="shape"
+ *   box with background/border (a "card")  -> a shape behind its contents,
+ *                                             and the contents become their own elements
+ *   chart <figure> with JSON               -> data-type="chart"
+ *   <canvas> (drawn by a script we removed) -> removed, listed in the report
+ *
+ * Decks that already follow the contract are only checked and lightly repaired
+ * (missing ids, missing z-index) - never rebuilt.
+ *
+ * Talks to: importer.js (calls run), util.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.normalize = {};
+
+    const SLIDE_WIDTH = 1280;
+    const SLIDE_HEIGHT = 720;
+    const ELEMENT_TYPES = ['text', 'image', 'table', 'shape', 'chart', 'group'];
+
+    // The measuring iframe gets its own strict policy too, so a deck can never
+    // load anything while we measure it, even when run from the test page.
+    const MEASURE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:";
+
+    // Temporary rules, used only inside the measuring iframe.
+    const MEASURE_STYLE =
+        '[data-import-hide] { display: none !important; }\n' +
+        '[data-import-show] { visibility: visible !important; opacity: 1 !important; transform: none !important; }\n';
+
+    // Class names that decks commonly use to reveal "the current slide".
+    const ACTIVE_CLASSES = ['active', 'current', 'present', 'visible', 'show'];
+
+    const SKIP_TAGS = new Set(['script', 'style', 'link', 'meta', 'template', 'noscript', 'title', 'br', 'wbr']);
+    const REMOVED_TAGS = {
+        canvas: 'Canvas (it was drawn by a script, which was removed)',
+        video: 'Video', audio: 'Audio',
+    };
+    const TEXT_TAGS = new Set([
+        'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'dl', 'pre', 'blockquote', 'li',
+        'span', 'a', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'label', 'button', 'figcaption',
+        'code', 'sup', 'sub', 'mark', 'time', 'address', 'q', 'cite',
+    ]);
+    const INLINE_TAGS = new Set([
+        'span', 'a', 'strong', 'em', 'b', 'i', 'u', 's', 'small', 'sup', 'sub', 'mark', 'code',
+        'br', 'img', 'svg', 'time', 'q', 'cite', 'abbr', 'del', 'ins', 'kbd', 'var', 'wbr', 'label', 'font',
+    ]);
+
+    // Text properties: copied onto every text element, and onto its children when they differ.
+    const TEXT_PROPS = [
+        'font-family', 'font-size', 'font-weight', 'font-style', 'font-variant', 'color', 'line-height',
+        'text-align', 'letter-spacing', 'word-spacing', 'text-transform', 'text-indent', 'text-shadow',
+        'white-space', 'list-style-type', 'list-style-position', 'direction',
+    ];
+    const SIDES = ['top', 'right', 'bottom', 'left'];
+    const CORNERS = ['top-left', 'top-right', 'bottom-right', 'bottom-left'];
+    const FLEX_GRID_PROPS = [
+        'flex-direction', 'flex-wrap', 'justify-content', 'align-items', 'align-content', 'row-gap', 'column-gap',
+        'grid-template-columns', 'grid-template-rows',
+    ];
+
+    // ---------------------------------------------------------------
+    // The measuring iframe
+    // ---------------------------------------------------------------
+
+    function buildMeasureHtml(doc) {
+        const copy = doc.cloneNode(true);
+        const csp = copy.createElement('meta');
+        csp.setAttribute('http-equiv', 'Content-Security-Policy');
+        csp.setAttribute('content', MEASURE_CSP);
+        copy.head.prepend(csp);
+        const style = copy.createElement('style');
+        style.textContent = MEASURE_STYLE;
+        copy.head.appendChild(style);
+        // Keep the deck's original rendering mode: without a doctype the browser uses
+        // "quirks mode", which lays some things out slightly differently.
+        return (doc.doctype ? '<!DOCTYPE html>\n' : '') + copy.documentElement.outerHTML;
+    }
+
+    /*
+     * Load HTML into a hidden iframe and wait until it (and its fonts) are ready.
+     * sandbox="allow-same-origin" without "allow-scripts": we can read its
+     * layout, but nothing inside it can run.
+     */
+    function loadMeasureFrame(html) {
+        const frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-same-origin');
+        frame.setAttribute('aria-hidden', 'true');
+        frame.setAttribute('tabindex', '-1');
+        frame.style.cssText = 'position:fixed; left:-20000px; top:0; width:' + SLIDE_WIDTH + 'px; height:' +
+            SLIDE_HEIGHT + 'px; border:0; visibility:hidden; pointer-events:none';
+
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                frame.remove();
+                reject(new Error('Timed out while measuring the deck layout'));
+            }, 60000);
+            frame.addEventListener('load', async () => {
+                clearTimeout(timer);
+                try {
+                    await frame.contentDocument.fonts.ready;
+                } catch (error) {
+                    // fonts.ready is a nicety; measuring still works without it.
+                }
+                resolve(frame);
+            }, { once: true });
+            frame.srcdoc = html;
+            document.body.appendChild(frame);
+        });
+    }
+
+    // Jump CSS animations and transitions to their end, so we measure the final
+    // look (Copilot decks often fade elements in from opacity 0).
+    function finishAnimations(frameDoc) {
+        if (!frameDoc.getAnimations) {
+            return;
+        }
+        frameDoc.getAnimations().forEach((animation) => {
+            try {
+                animation.finish();
+            } catch (error) {
+                animation.cancel();   // infinite animations cannot finish
+            }
+        });
+    }
+
+    /* Show slide `index` alone, the way the deck's own script would have. */
+    function showOnly(slides, index) {
+        slides.forEach((slide, i) => {
+            if (!slide.hasAttribute('data-import-class')) {
+                slide.setAttribute('data-import-class', slide.getAttribute('class') || '');
+            }
+            slide.setAttribute('class', slide.getAttribute('data-import-class'));
+            slide.style.removeProperty('display');
+            slide.toggleAttribute('data-import-hide', i !== index);
+            slide.toggleAttribute('data-import-show', i === index);
+        });
+
+        const slide = slides[index];
+        if (slide.tagName.toLowerCase() === 'body') {
+            return;
+        }
+        const view = slide.ownerDocument.defaultView;
+        if (view.getComputedStyle(slide).display === 'none') {
+            ACTIVE_CLASSES.forEach((name) => slide.classList.add(name));
+        }
+        if (view.getComputedStyle(slide).display === 'none') {
+            slide.style.setProperty('display', 'block', 'important');
+        }
+        finishAnimations(slide.ownerDocument);
+    }
+
+    // ---------------------------------------------------------------
+    // Size and scale
+    // ---------------------------------------------------------------
+
+    function measureSlideBox(slide) {
+        if (slide.tagName.toLowerCase() === 'body') {
+            const root = slide.ownerDocument.documentElement;
+            return { originX: 0, originY: 0, width: root.scrollWidth, height: root.scrollHeight };
+        }
+        const rect = slide.getBoundingClientRect();
+        return {
+            originX: rect.left + slide.clientLeft,
+            originY: rect.top + slide.clientTop,
+            width: slide.offsetWidth,
+            height: slide.offsetHeight,
+        };
+    }
+
+    /*
+     * How to fit a slide of width x height into 1280x720:
+     *  - already 1280x720 (2 px tolerance)  -> scale 1
+     *  - another 16:9 size (1920x1080 ...)  -> scale proportionally (SPEC 3.4)
+     *  - not 16:9                           -> shrink to fit if too big, centred
+     */
+    App.normalize.scaleFor = function scaleFor(width, height) {
+        if (Math.abs(width - SLIDE_WIDTH) <= 2 && Math.abs(height - SLIDE_HEIGHT) <= 2) {
+            return { scale: 1, offsetX: 0, offsetY: 0, kind: 'exact' };
+        }
+        const ratio = width / height;
+        const wide = SLIDE_WIDTH / SLIDE_HEIGHT;
+        if (height > 0 && Math.abs(ratio - wide) / wide < 0.02) {
+            return { scale: SLIDE_WIDTH / width, offsetX: 0, offsetY: 0, kind: '16:9' };
+        }
+        const scale = Math.min(1, SLIDE_WIDTH / width, SLIDE_HEIGHT / Math.max(height, 1));
+        const offsetX = scale < 1 ? Math.max(0, (SLIDE_WIDTH - width * scale) / 2) : 0;
+        return { scale: scale, offsetX: offsetX, offsetY: 0, kind: 'fit' };
+    };
+
+    // ---------------------------------------------------------------
+    // Contract check and light repairs
+    // ---------------------------------------------------------------
+
+    function isNotes(element, computed) {
+        if (element.matches('aside.notes')) {
+            return true;
+        }
+        // A visible ".notes" box may be a footnote on the slide, so only hidden ones count.
+        return element.matches('.notes, .speaker-notes, [data-notes]') && computed.display === 'none';
+    }
+
+    function isContractSlide(slide) {
+        const view = slide.ownerDocument.defaultView;
+        const hasLooseText = Array.from(slide.childNodes).some((node) => {
+            return node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '';
+        });
+        if (hasLooseText) {
+            return false;
+        }
+        return Array.from(slide.children).every((child) => {
+            const computed = view.getComputedStyle(child);
+            if (isNotes(child, computed) || SKIP_TAGS.has(child.tagName.toLowerCase())) {
+                return true;
+            }
+            return child.classList.contains('el') &&
+                ELEMENT_TYPES.indexOf(child.getAttribute('data-type')) !== -1 &&
+                computed.position === 'absolute';
+        });
+    }
+
+    function plural(count, word) {
+        return count + ' ' + word + (count === 1 ? '' : 's');
+    }
+
+    /* Fill in missing or duplicate ids and missing z-index on a contract deck. */
+    function applyContractFixes(slides, report) {
+        const slideIds = new Set();
+        const elementIds = new Set();
+        let addedSlideIds = 0;
+        let addedElementIds = 0;
+        let addedZ = 0;
+
+        // First pass: remember the ids that are already fine, so new ones never clash.
+        slides.forEach((slide) => {
+            const id = slide.getAttribute('data-slide-id');
+            if (id && !slideIds.has(id)) {
+                slideIds.add(id);
+            } else {
+                slide.removeAttribute('data-slide-id');
+            }
+            slide.querySelectorAll(':scope > .el').forEach((el) => {
+                const elId = el.getAttribute('data-id');
+                if (elId && !elementIds.has(elId)) {
+                    elementIds.add(elId);
+                } else {
+                    el.removeAttribute('data-id');
+                }
+            });
+        });
+
+        slides.forEach((slide) => {
+            if (!slide.getAttribute('data-slide-id')) {
+                slide.setAttribute('data-slide-id', App.util.uniqueId('s', slideIds));
+                addedSlideIds += 1;
+            }
+            slide.querySelectorAll(':scope > .el').forEach((el, index) => {
+                if (!el.getAttribute('data-id')) {
+                    el.setAttribute('data-id', App.util.uniqueId('e', elementIds));
+                    addedElementIds += 1;
+                }
+                if (el.style.zIndex === '') {
+                    el.style.zIndex = String(index + 1);
+                    addedZ += 1;
+                }
+            });
+        });
+
+        if (addedSlideIds) {
+            report.fixes.push('Added ' + plural(addedSlideIds, 'missing slide id'));
+        }
+        if (addedElementIds) {
+            report.fixes.push('Added ' + plural(addedElementIds, 'missing element id'));
+        }
+        if (addedZ) {
+            report.fixes.push('Added a stacking order (z-index) to ' + plural(addedZ, 'element'));
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Classifying what we find on a slide
+    // ---------------------------------------------------------------
+
+    function isTransparent(color) {
+        return !color || color === 'transparent' || /rgba\(.*,\s*0\)$/.test(color);
+    }
+
+    function hasBorder(computed) {
+        return SIDES.some((side) => {
+            return computed.getPropertyValue('border-' + side + '-style') !== 'none' &&
+                parseFloat(computed.getPropertyValue('border-' + side + '-width')) > 0;
+        });
+    }
+
+    /* Does the box itself paint something (background, border or shadow)? */
+    function hasVisibleBox(computed) {
+        return !isTransparent(computed.backgroundColor) || computed.backgroundImage !== 'none' ||
+            hasBorder(computed) || computed.boxShadow !== 'none';
+    }
+
+    function hasDirectText(element) {
+        return Array.from(element.childNodes).some((node) => {
+            return node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '';
+        });
+    }
+
+    function tagOf(element) {
+        return element.tagName.toLowerCase();
+    }
+
+    function visibleChildren(element) {
+        const view = element.ownerDocument.defaultView;
+        return Array.from(element.children).filter((child) => {
+            return !SKIP_TAGS.has(tagOf(child)) && view.getComputedStyle(child).display !== 'none';
+        });
+    }
+
+    function isInlineLevel(element) {
+        const display = element.ownerDocument.defaultView.getComputedStyle(element).display;
+        return INLINE_TAGS.has(tagOf(element)) && ['block', 'flex', 'grid', 'table', 'list-item'].indexOf(display) === -1;
+    }
+
+    function isPicture(element) {
+        return tagOf(element) === 'img' || tagOf(element) === 'svg';
+    }
+
+    /*
+     * Decide what an element on the slide is:
+     *   'existing'  already an editor element (.el with a data-type)
+     *   'image' | 'svg' | 'table' | 'chart' | 'text'
+     *   'box'       empty element that paints something (a coloured bar, a circle)
+     *   'container' holds other blocks: look inside
+     *   'empty'     nothing visible
+     */
+    function classify(element, computed) {
+        const tag = tagOf(element);
+        if (element.classList.contains('el') && ELEMENT_TYPES.indexOf(element.getAttribute('data-type')) !== -1) {
+            return 'existing';
+        }
+        if (tag === 'img') {
+            return 'image';
+        }
+        if (tag === 'svg') {
+            return 'svg';
+        }
+        if (tag === 'table') {
+            return 'table';
+        }
+        if (tag === 'figure' && element.querySelector('script.chart-data')) {
+            return 'chart';
+        }
+        if (TEXT_TAGS.has(tag) || hasDirectText(element)) {
+            return 'text';
+        }
+        const children = visibleChildren(element);
+        if (children.length === 0) {
+            return hasVisibleBox(computed) ? 'box' : 'empty';
+        }
+        // Only inline content (text with <b>, <span> ...) -> one text box. But a
+        // wrapper holding only pictures is a container, so each picture is its own element.
+        if (children.every(isInlineLevel) && !children.every(isPicture)) {
+            return 'text';
+        }
+        return 'container';
+    }
+
+    // ---------------------------------------------------------------
+    // Copying computed styles inline
+    // ---------------------------------------------------------------
+
+    function makeWriter(target, scale) {
+        return function write(property, value) {
+            if (value === '' || value === null || value === undefined) {
+                return;
+            }
+            // Never copy a remote url() inline: it would be blocked anyway.
+            if (/url\(\s*['"]?\s*(https?:)?\/\//i.test(value)) {
+                return;
+            }
+            const scaled = scale === 1 ? value : App.util.scalePxValues(value, scale);
+            target.style.setProperty(property, scaled);
+        };
+    }
+
+    function writeBoxStyles(write, computed, includePadding) {
+        if (includePadding) {
+            SIDES.forEach((side) => {
+                const value = computed.getPropertyValue('padding-' + side);
+                if (value !== '0px') {
+                    write('padding-' + side, value);
+                }
+            });
+        }
+        SIDES.forEach((side) => {
+            const style = computed.getPropertyValue('border-' + side + '-style');
+            const width = computed.getPropertyValue('border-' + side + '-width');
+            if (style !== 'none' && parseFloat(width) > 0) {
+                write('border-' + side + '-width', width);
+                write('border-' + side + '-style', style);
+                write('border-' + side + '-color', computed.getPropertyValue('border-' + side + '-color'));
+            }
+        });
+        CORNERS.forEach((corner) => {
+            const value = computed.getPropertyValue('border-' + corner + '-radius');
+            if (value !== '0px') {
+                write('border-' + corner + '-radius', value);
+            }
+        });
+        if (!isTransparent(computed.backgroundColor)) {
+            write('background-color', computed.backgroundColor);
+        }
+        if (computed.backgroundImage !== 'none') {
+            write('background-image', computed.backgroundImage);
+            write('background-size', computed.backgroundSize);
+            write('background-position', computed.backgroundPosition);
+            write('background-repeat', computed.backgroundRepeat);
+        }
+        if (computed.boxShadow !== 'none') {
+            write('box-shadow', computed.boxShadow);
+        }
+    }
+
+    function writeDecoration(write, computed) {
+        if (computed.textDecorationLine && computed.textDecorationLine !== 'none') {
+            write('text-decoration-line', computed.textDecorationLine);
+            write('text-decoration-style', computed.textDecorationStyle);
+            write('text-decoration-color', computed.textDecorationColor);
+        }
+        if (computed.verticalAlign !== 'baseline') {
+            write('vertical-align', computed.verticalAlign);
+        }
+    }
+
+    function writeFlexGrid(write, computed) {
+        const display = computed.display;
+        if (display.indexOf('flex') !== -1 || display.indexOf('grid') !== -1) {
+            FLEX_GRID_PROPS.forEach((property) => {
+                const value = computed.getPropertyValue(property);
+                if (value && value !== 'normal' && value !== 'none') {
+                    write(property, value);
+                }
+            });
+        }
+    }
+
+    // An inline root must become a block so width/height 100% apply to it.
+    function blockDisplay(display) {
+        const map = { inline: 'block', 'inline-block': 'block', 'inline-flex': 'flex', 'inline-grid': 'grid' };
+        return map[display] || display;
+    }
+
+    function displayIsNoteworthy(element, display) {
+        if (['flex', 'grid', 'inline-flex', 'inline-grid', 'inline-block', 'none'].indexOf(display) !== -1) {
+            return true;
+        }
+        const inlineTag = INLINE_TAGS.has(tagOf(element));
+        return (inlineTag && display === 'block') || (!inlineTag && display === 'inline');
+    }
+
+    function isDecorativeBox(element, computed) {
+        return element.children.length === 0 && element.textContent.trim() === '' && hasVisibleBox(computed);
+    }
+
+    /*
+     * Copy styles from `original` (in the measuring iframe) onto its copy `clone`,
+     * then do the same for every child. `parentComputed` is null for the root.
+     */
+    function copyStyles(clone, original, scale, parentComputed) {
+        const view = original.ownerDocument.defaultView;
+        const computed = view.getComputedStyle(original);
+        const write = makeWriter(clone, scale);
+        const isRoot = parentComputed === null;
+        const tag = tagOf(original);
+
+        if (original.namespaceURI === 'http://www.w3.org/2000/svg' && tag !== 'svg') {
+            copySvgPaint(clone, original, computed, parentComputed);
+            return;
+        }
+
+        TEXT_PROPS.forEach((property) => {
+            const value = computed.getPropertyValue(property);
+            if (isRoot || value !== parentComputed.getPropertyValue(property)) {
+                write(property, value);
+            }
+        });
+        writeBoxStyles(write, computed, true);
+        writeDecoration(write, computed);
+
+        if (!isRoot) {
+            const isBlock = computed.display !== 'inline' && computed.display !== 'none';
+            if (isBlock) {
+                write('margin', SIDES.map((side) => computed.getPropertyValue('margin-' + side)).join(' '));
+            }
+            if (displayIsNoteworthy(original, computed.display)) {
+                write('display', computed.display);
+            }
+            if (isPicture(original) || isDecorativeBox(original, computed)) {
+                write('width', computed.width);
+                write('height', computed.height);
+            }
+        }
+        writeFlexGrid(write, computed);
+
+        if (tag === 'svg' && !isRoot) {
+            return;   // pictures keep their own internal styling
+        }
+        const cloneChildren = Array.from(clone.children);
+        Array.from(original.children).forEach((child, index) => {
+            if (cloneChildren[index]) {
+                copyStyles(cloneChildren[index], child, scale, computed);
+            }
+        });
+    }
+
+    // Inside an SVG, keep only colours that came from CSS rules (attributes stay as they are).
+    function copySvgPaint(clone, original, computed, parentComputed) {
+        ['fill', 'stroke'].forEach((property) => {
+            const value = computed.getPropertyValue(property);
+            if (!original.hasAttribute(property) && parentComputed && value !== parentComputed.getPropertyValue(property)) {
+                clone.style.setProperty(property, value);
+            }
+        });
+        const cloneChildren = Array.from(clone.children);
+        Array.from(original.children).forEach((child, index) => {
+            if (cloneChildren[index]) {
+                copySvgPaint(cloneChildren[index], child, child.ownerDocument.defaultView.getComputedStyle(child), computed);
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------
+    // Building editor elements
+    // ---------------------------------------------------------------
+
+    function effectiveOpacity(element, slide) {
+        const view = element.ownerDocument.defaultView;
+        let opacity = 1;
+        for (let node = element; node && node !== slide; node = node.parentElement) {
+            opacity *= parseFloat(view.getComputedStyle(node).opacity);
+        }
+        return App.util.round2(opacity);
+    }
+
+    // The stacking level an element inherits from its nearest positioned ancestor with a z-index.
+    function stackLevel(element, slide) {
+        const view = element.ownerDocument.defaultView;
+        for (let node = element; node && node !== slide; node = node.parentElement) {
+            const computed = view.getComputedStyle(node);
+            if (computed.position !== 'static' && computed.zIndex !== 'auto') {
+                return parseInt(computed.zIndex, 10) || 0;
+            }
+        }
+        return 0;
+    }
+
+    function placement(element, ctx) {
+        const rect = element.getBoundingClientRect();
+        const s = ctx.fit.scale;
+        return {
+            left: Math.round((rect.left - ctx.box.originX) * s + ctx.fit.offsetX),
+            top: Math.round((rect.top - ctx.box.originY) * s + ctx.fit.offsetY),
+            width: Math.ceil(rect.width * s - 0.01),
+            height: Math.ceil(rect.height * s - 0.01),
+        };
+    }
+
+    function setPosition(node, box) {
+        node.style.setProperty('left', box.left + 'px');
+        node.style.setProperty('top', box.top + 'px');
+        node.style.setProperty('width', box.width + 'px');
+        node.style.setProperty('height', box.height + 'px');
+    }
+
+    // Root of a copied block: no margin or own positioning, and it fills its wrapper exactly.
+    function resetRoot(clone, computed, opacity) {
+        clone.style.setProperty('position', 'static');
+        clone.style.setProperty('margin', '0');
+        clone.style.setProperty('width', '100%');
+        clone.style.setProperty('height', '100%');
+        clone.style.setProperty('box-sizing', 'border-box');
+        clone.style.setProperty('transform', 'none');
+        clone.style.setProperty('float', 'none');
+        clone.style.setProperty('max-width', 'none');
+        clone.style.setProperty('max-height', 'none');
+        clone.style.setProperty('display', blockDisplay(computed.display));
+        clone.style.setProperty('opacity', String(opacity));
+    }
+
+    function wrapperElement(out, type, box) {
+        const wrapper = out.createElement('div');
+        wrapper.setAttribute('class', 'el');
+        wrapper.setAttribute('data-type', type);
+        setPosition(wrapper, box);
+        return wrapper;
+    }
+
+    /* text and table: an .el wrapper holding a styled copy of the block. */
+    function buildWrapped(out, element, type, box, ctx) {
+        const computed = element.ownerDocument.defaultView.getComputedStyle(element);
+        const wrapper = wrapperElement(out, type, box);
+        const clone = out.importNode(element, true);
+        copyStyles(clone, element, ctx.fit.scale, null);
+        resetRoot(clone, computed, effectiveOpacity(element, ctx.slide));
+        wrapper.appendChild(clone);
+        return wrapper;
+    }
+
+    /* image, svg, chart and existing elements: the element itself becomes the .el. */
+    function buildSelf(out, element, type, box, ctx) {
+        const view = element.ownerDocument.defaultView;
+        const computed = view.getComputedStyle(element);
+        const clone = out.importNode(element, true);
+        clone.classList.add('el');
+        clone.setAttribute('data-type', type);
+        // Remove the old inline position first so ours comes first in the style attribute.
+        ['left', 'top', 'right', 'bottom', 'width', 'height', 'z-index', 'position', 'inset'].forEach((property) => {
+            clone.style.removeProperty(property);
+        });
+        setPosition(clone, box);
+
+        const write = makeWriter(clone, ctx.fit.scale);
+        writeBoxStyles(write, computed, type !== 'image');
+        if (type === 'image') {
+            write('object-fit', computed.objectFit);
+            write('object-position', computed.objectPosition);
+        } else {
+            TEXT_PROPS.forEach((property) => write(property, computed.getPropertyValue(property)));
+            const cloneChildren = Array.from(clone.children);
+            Array.from(element.children).forEach((child, index) => {
+                if (cloneChildren[index]) {
+                    copyStyles(cloneChildren[index], child, ctx.fit.scale, computed);
+                }
+            });
+        }
+        clone.style.setProperty('box-sizing', 'border-box');
+        clone.style.setProperty('margin', '0');
+        clone.style.setProperty('transform', 'none');
+        clone.style.setProperty('max-width', 'none');
+        const opacity = effectiveOpacity(element, ctx.slide);
+        if (opacity < 1) {
+            clone.style.setProperty('opacity', String(opacity));
+        }
+        return clone;
+    }
+
+    /* A coloured box (card background, bar, circle) without its contents. */
+    function buildShape(out, element, box, ctx) {
+        const computed = element.ownerDocument.defaultView.getComputedStyle(element);
+        const shape = wrapperElement(out, 'shape', box);
+        writeBoxStyles(makeWriter(shape, ctx.fit.scale), computed, false);
+        const opacity = effectiveOpacity(element, ctx.slide);
+        if (opacity < 1) {
+            shape.style.setProperty('opacity', String(opacity));
+        }
+        return shape;
+    }
+
+    function hasArea(box) {
+        return box.width > 0 && box.height > 0;
+    }
+
+    function describeElement(element) {
+        const id = element.id ? '#' + element.id : '';
+        return '<' + tagOf(element) + id + '>';
+    }
+
+    /*
+     * Walk through a slide and turn everything visible into editor elements.
+     * Results go into ctx.items ({ node, z, order }), ctx.notes and ctx.removed.
+     */
+    function collect(parent, ctx) {
+        const view = parent.ownerDocument.defaultView;
+        Array.from(parent.children).forEach((element) => {
+            const tag = tagOf(element);
+            if (SKIP_TAGS.has(tag)) {
+                return;
+            }
+            const computed = view.getComputedStyle(element);
+            if (isNotes(element, computed)) {
+                ctx.notes.push(element.innerHTML.trim());
+                return;
+            }
+            if (computed.display === 'none' || element.closest('.master')) {
+                return;
+            }
+            if (REMOVED_TAGS[tag]) {
+                ctx.removed.push(REMOVED_TAGS[tag] + ' ' + describeElement(element) + ' on slide ' + ctx.slideNumber);
+                return;
+            }
+
+            const kind = classify(element, computed);
+            if (kind === 'empty') {
+                return;
+            }
+            if (kind === 'container') {
+                if (hasVisibleBox(computed)) {
+                    addItem(ctx, element, buildShape(ctx.out, element, placement(element, ctx), ctx));
+                }
+                collect(element, ctx);
+                return;
+            }
+            if (computed.visibility === 'hidden') {
+                return;
+            }
+            const box = placement(element, ctx);
+            if (!hasArea(box)) {
+                return;
+            }
+            addItem(ctx, element, buildElement(kind, element, box, ctx));
+        });
+    }
+
+    function buildElement(kind, element, box, ctx) {
+        const out = ctx.out;
+        switch (kind) {
+            case 'text': return buildWrapped(out, element, 'text', box, ctx);
+            case 'table': return buildWrapped(out, element, 'table', box, ctx);
+            case 'image': return buildSelf(out, element, 'image', box, ctx);
+            case 'svg': return buildSelf(out, element, 'shape', box, ctx);
+            case 'chart': return buildSelf(out, element, 'chart', box, ctx);
+            case 'existing': return buildSelf(out, element, element.getAttribute('data-type'), box, ctx);
+            default: return buildShape(out, element, box, ctx);   // 'box'
+        }
+    }
+
+    function addItem(ctx, original, node) {
+        ctx.items.push({ node: node, z: stackLevel(original, ctx.slide), order: ctx.items.length });
+    }
+
+    // ---------------------------------------------------------------
+    // Building the normalized deck
+    // ---------------------------------------------------------------
+
+    const BASE_CSS =
+        'section.slide { position: relative !important; width: 1280px !important; height: 720px !important;' +
+        ' overflow: hidden !important; box-sizing: border-box; }\n' +
+        'section.slide > .el { position: absolute; box-sizing: border-box; }\n';
+
+    function nearestBackground(slide) {
+        const view = slide.ownerDocument.defaultView;
+        for (let node = slide; node; node = node.parentElement) {
+            const computed = view.getComputedStyle(node);
+            if (!isTransparent(computed.backgroundColor) || computed.backgroundImage !== 'none') {
+                return computed;
+            }
+        }
+        return null;
+    }
+
+    /*
+     * Write the full background inline, including "background-image: none":
+     * the new <section class="slide"> still matches the deck's shared .slide
+     * rule, and its gradient must not come back on a slide that had none.
+     */
+    function writeSlideBackground(section, frameSlide, scale) {
+        const write = makeWriter(section, scale);
+        const computed = nearestBackground(frameSlide);
+        if (!computed) {
+            write('background-color', '#ffffff');
+            write('background-image', 'none');
+            return;
+        }
+        write('background-color', computed.backgroundColor);
+        write('background-image', computed.backgroundImage);
+        if (computed.backgroundImage !== 'none') {
+            write('background-image', computed.backgroundImage);
+            write('background-size', computed.backgroundSize);
+            write('background-position', computed.backgroundPosition);
+            write('background-repeat', computed.backgroundRepeat);
+        }
+    }
+
+    function buildHead(out, doc) {
+        const charset = out.createElement('meta');
+        charset.setAttribute('charset', 'utf-8');
+        out.head.appendChild(charset);
+        const format = out.createElement('meta');
+        format.setAttribute('name', 'deck-format');
+        format.setAttribute('content', '1');
+        out.head.appendChild(format);
+        if (doc.title) {
+            const title = out.createElement('title');
+            title.textContent = doc.title;
+            out.head.appendChild(title);
+        }
+        // Keep the deck's own CSS (theme variables, fonts, ::before decorations ...).
+        doc.querySelectorAll('style, link[rel~="stylesheet"]').forEach((node) => {
+            out.head.appendChild(out.importNode(node, true));
+        });
+        const base = out.createElement('style');
+        base.setAttribute('data-deck-base', '');
+        base.textContent = BASE_CSS;
+        out.head.appendChild(base);
+    }
+
+    function buildNormalizedDeck(doc, slides, report) {
+        const out = document.implementation.createHTMLDocument('');
+        out.documentElement.setAttribute('lang', doc.documentElement.getAttribute('lang') || 'pt-BR');
+        out.title = '';
+        out.head.innerHTML = '';
+        buildHead(out, doc);
+
+        const usedIds = new Set();
+        slides.forEach((frameSlide, index) => {
+            showOnly(slides, index);
+            const box = measureSlideBox(frameSlide);
+            const fit = App.normalize.scaleFor(box.width, box.height);
+            describeFit(fit, box, index, report);
+
+            const section = out.createElement('section');
+            section.setAttribute('class', 'slide');
+            section.setAttribute('data-slide-id', 's' + (index + 1));
+            if (frameSlide.getAttribute('data-hidden') === 'true') {
+                section.setAttribute('data-hidden', 'true');
+            }
+            writeSlideBackground(section, frameSlide, fit.scale);
+
+            const ctx = {
+                out: out, slide: frameSlide, box: box, fit: fit, slideNumber: index + 1,
+                items: [], notes: [], removed: report.otherRemoved,
+            };
+            collect(frameSlide, ctx);
+
+            // Stable sort by stacking level, keeping page order for equal levels.
+            ctx.items.sort((a, b) => (a.z - b.z) || (a.order - b.order));
+            ctx.items.forEach((item, position) => {
+                const existingId = item.node.getAttribute('data-id');
+                const id = existingId && !usedIds.has(existingId) ? existingId : App.util.uniqueId('e', usedIds);
+                usedIds.add(id);
+                item.node.setAttribute('data-id', id);
+                item.node.style.setProperty('z-index', String(position + 1));
+                section.appendChild(item.node);
+            });
+            report.elementsConverted += ctx.items.length;
+
+            const notes = out.createElement('aside');
+            notes.setAttribute('class', 'notes');
+            notes.innerHTML = ctx.notes.join('\n');
+            section.appendChild(notes);
+            out.body.appendChild(section);
+        });
+
+        const master = doc.querySelector('.master');
+        if (master) {
+            out.body.appendChild(out.importNode(master, true));
+        }
+        reportContentOutsideSlides(slides, report);
+        return out;
+    }
+
+    function describeTag(element) {
+        const className = element.getAttribute('class');
+        return '<' + tagOf(element) + (className ? ' class="' + className + '"' : '') + '>';
+    }
+
+    /*
+     * Normalization keeps only the slides, so list visible things that sit
+     * outside every slide (a deck's own navigation bar, a page header ...).
+     */
+    function findContentOutsideSlides(parent, slides, found) {
+        const view = parent.ownerDocument.defaultView;
+        Array.from(parent.children).forEach((element) => {
+            if (SKIP_TAGS.has(tagOf(element)) || slides.indexOf(element) !== -1 || element.closest('.master')) {
+                return;
+            }
+            if (slides.some((slide) => element.contains(slide))) {
+                findContentOutsideSlides(element, slides, found);   // a wrapper around slides: look inside
+                return;
+            }
+            const rect = element.getBoundingClientRect();
+            if (view.getComputedStyle(element).display !== 'none' && rect.width > 0 && rect.height > 0) {
+                found.push(describeTag(element));
+            }
+        });
+        return found;
+    }
+
+    function reportContentOutsideSlides(slides, report) {
+        if (slides.length === 1 && tagOf(slides[0]) === 'body') {
+            return;
+        }
+        const leftOut = findContentOutsideSlides(slides[0].ownerDocument.body, slides, []);
+        if (leftOut.length) {
+            const shown = leftOut.slice(0, 5).join(', ') + (leftOut.length > 5 ? ' …' : '');
+            report.warnings.push(plural(leftOut.length, 'item') + ' outside the slides ' +
+                (leftOut.length === 1 ? 'was' : 'were') + ' left out: ' + shown);
+        }
+    }
+
+    function describeFit(fit, box, index, report) {
+        const size = Math.round(box.width) + '×' + Math.round(box.height);
+        if (fit.kind === '16:9' && !report.scaledFrom) {
+            report.scaledFrom = size;
+        } else if (fit.kind === 'fit') {
+            report.warnings.push('Slide ' + (index + 1) + ' was ' + size + ' (not 16:9)' +
+                (fit.scale < 1 ? '; it was shrunk to fit 1280×720.' : '; it was placed at the top left.'));
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Finding slides by size (the last rule of SPEC 3.4)
+    // ---------------------------------------------------------------
+
+    function findLargeBlocks(frameDoc) {
+        const candidates = Array.from(frameDoc.body.querySelectorAll('*')).filter((element) => {
+            const width = element.offsetWidth;
+            const height = element.offsetHeight;
+            return width >= 640 && height > 0 && Math.abs(width / height - 16 / 9) < 0.05;
+        });
+        return candidates.filter((candidate) => {
+            return !candidates.some((other) => other !== candidate && other.contains(candidate));
+        });
+    }
+
+    // ---------------------------------------------------------------
+    // Entry point
+    // ---------------------------------------------------------------
+
+    /*
+     * Measure the deck and return a Document in contract format.
+     * `detected` comes from importer.detectSlides(doc); `report` is filled in.
+     */
+    App.normalize.run = async function run(doc, detected, report) {
+        detected.slides.forEach((slide, index) => slide.setAttribute('data-import-slide', String(index)));
+        const frame = await loadMeasureFrame(buildMeasureHtml(doc));
+
+        try {
+            const frameDoc = frame.contentDocument;
+            let slides = detected.slides.map((slide, index) => {
+                return frameDoc.querySelector('[data-import-slide="' + index + '"]');
+            });
+            let method = detected.method;
+
+            if (slides.length === 0) {
+                slides = findLargeBlocks(frameDoc);
+                method = slides.length ? 'size' : null;
+            }
+            if (slides.length === 0) {
+                slides = [frameDoc.body];
+                method = 'whole-page';
+                report.warnings.push('No slides were found, so the whole page was imported as one slide.');
+            }
+            report.method = method;
+            report.slideCount = slides.length;
+
+            if (method === 'section.slide' && allSlidesFollowContract(slides)) {
+                report.isContract = true;
+                applyContractFixes(detected.slides, report);
+                return doc;
+            }
+            return buildNormalizedDeck(doc, slides, report);
+        } finally {
+            detected.slides.forEach((slide) => slide.removeAttribute('data-import-slide'));
+            frame.remove();
+        }
+    };
+
+    function allSlidesFollowContract(slides) {
+        return slides.every((slide, index) => {
+            showOnly(slides, index);
+            const box = measureSlideBox(slide);
+            return App.normalize.scaleFor(box.width, box.height).kind === 'exact' && isContractSlide(slide);
+        });
+    }
+})();
+
+</script>
+<script>
+// ---- js/serialize.js ----
+/*
+ * serialize.js - turns the live deck into the HTML text that is saved (SPEC 3.6).
+ *
+ * The editor marks everything it adds to the deck with one naming rule, so
+ * it can all be stripped on save without a list of special cases:
+ *   - elements with the attribute  data-editor-only        (editor CSS, overlays)
+ *   - attributes starting with     data-editor-            (current slide, temp ids)
+ *   - classes starting with        editor-                 (selection, hover)
+ *   - the attribute contenteditable                        (text editing, Phase 3)
+ *
+ * Then the small player (src/player/) is added, so the saved file presents on
+ * its own in any browser, and prints one slide per page.
+ *
+ * Works on a copy: the live deck in the canvas is never touched.
+ *
+ * Talks to: fileio.js (calls toHtml when saving), deck.js (provides the document).
+ */
+
+(function () {
+    'use strict';
+
+    App.serialize = {};
+
+    const EDITOR_ATTRIBUTE_PREFIX = 'data-editor-';
+    const EDITOR_CLASS_PREFIX = 'editor-';
+    const EDITOR_ONLY_ATTRIBUTES = ['contenteditable'];
+
+    function stripEditorMarks(root) {
+        root.querySelectorAll('[data-editor-only]').forEach((node) => node.remove());
+
+        [root].concat(Array.from(root.querySelectorAll('*'))).forEach((element) => {
+            Array.from(element.attributes).forEach((attribute) => {
+                if (attribute.name.startsWith(EDITOR_ATTRIBUTE_PREFIX) ||
+                    EDITOR_ONLY_ATTRIBUTES.indexOf(attribute.name) !== -1) {
+                    element.removeAttribute(attribute.name);
+                }
+            });
+            if (element.hasAttribute('class')) {
+                const kept = Array.from(element.classList).filter((name) => !name.startsWith(EDITOR_CLASS_PREFIX));
+                if (kept.length === 0) {
+                    element.removeAttribute('class');
+                } else if (kept.length !== element.classList.length) {
+                    element.setAttribute('class', kept.join(' '));
+                }
+            }
+        });
+    }
+
+    // Whitespace left at the end of <head>/<body> would pile up on every save.
+    function trimTrailingWhitespace(parent) {
+        while (parent.lastChild && parent.lastChild.nodeType === Node.TEXT_NODE &&
+               parent.lastChild.textContent.trim() === '') {
+            parent.lastChild.remove();
+        }
+    }
+
+    function ensureMetaTags(doc, head) {
+        let charset = head.querySelector('meta[charset]');
+        if (!charset) {
+            charset = doc.createElement('meta');
+            charset.setAttribute('charset', 'utf-8');
+        }
+        head.prepend(charset);   // the charset must come first
+
+        let format = head.querySelector('meta[name="deck-format"]');
+        if (!format) {
+            format = doc.createElement('meta');
+            format.setAttribute('name', 'deck-format');
+            charset.after(format);
+        }
+        format.setAttribute('content', '1');
+    }
+
+    /*
+     * Return a cleaned copy of the deck's <html> element.
+     * Exposed for tests; normal callers use toHtml.
+     */
+    App.serialize.cleanCopy = function cleanCopy(doc) {
+        const root = doc.documentElement.cloneNode(true);
+        stripEditorMarks(root);
+        root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
+        return root;
+    };
+
+    /*
+     * The complete file text to save.
+     * player = { playerJs, playerCss } - the contents of src/player/*.
+     */
+    App.serialize.toHtml = function toHtml(doc, player) {
+        const root = App.serialize.cleanCopy(doc);
+        const head = root.querySelector('head');
+        const body = root.querySelector('body');
+
+        ensureMetaTags(doc, head);
+
+        trimTrailingWhitespace(head);
+        const style = doc.createElement('style');
+        style.setAttribute('data-deck-player', '');
+        style.textContent = player.playerCss;
+        head.appendChild(style);
+
+        trimTrailingWhitespace(body);
+        const script = doc.createElement('script');
+        script.setAttribute('data-deck-player', '');
+        script.textContent = player.playerJs;
+        body.appendChild(script);
+
+        return '<!DOCTYPE html>\n' + root.outerHTML;
+    };
+})();
+
+</script>
+<script>
+// ---- js/icons.js ----
+/*
+ * icons.js - the editor's icons as inline SVG text (SPEC 2.1: no icon fonts,
+ * no remote images). Drawn for this project, so there is no license to track.
+ *
+ * Each icon is a 20x20 drawing that uses "currentColor", so it takes the text
+ * colour of the button it sits in (and works in light and dark themes).
+ *
+ * Usage:  button.innerHTML = App.icons.get('save');
+ *
+ * Talks to: ribbon.js, ui.js, dialogs.js (they place icons on buttons).
+ */
+
+(function () {
+    'use strict';
+
+    App.icons = {};
+
+    const PATHS = {
+        newDeck: '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/>',
+        open: '<path d="M2.5 5.5V15.5h13l2-7H5.5l-2 7"/><path d="M2.5 5.5V4h5l1.5 1.5h6V8.5"/>',
+        save: '<path d="M3.5 3.5h10l3 3v10h-13z"/><path d="M6.5 3.5v4h6v-4"/><rect x="6" y="11" width="8" height="5.5"/>',
+        saveAs: '<path d="M3.5 3.5h10l3 3v4"/><path d="M3.5 3.5v13h6"/><path d="M6.5 3.5v4h6v-4"/><path d="M12 17.5l1-3 4.5-4.5 2 2-4.5 4.5z"/>',
+        undo: '<path d="M7.5 5L4 8.5 7.5 12"/><path d="M4 8.5h8a4 4 0 0 1 0 8H9"/>',
+        redo: '<path d="M12.5 5L16 8.5 12.5 12"/><path d="M16 8.5H8a4 4 0 0 0 0 8h3"/>',
+        previous: '<path d="M12.5 4.5L7 10l5.5 5.5"/>',
+        next: '<path d="M7.5 4.5L13 10l-5.5 5.5"/>',
+        warning: '<path d="M10 2.5l8 14.5H2z"/><path d="M10 8v4.5"/><circle cx="10" cy="14.8" r="0.4"/>',
+        info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
+        check: '<path d="M4 10.5l4 4 8-9"/>',
+        close: '<path d="M5 5l10 10M15 5L5 15"/>',
+        slides: '<rect x="2.5" y="4" width="15" height="9.5"/><path d="M6 16.5h8"/>',
+        hidden: '<path d="M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z"/><path d="M3.5 16.5l13-13"/>',
+        file: '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M7.5 10h5M7.5 13h5"/>',
+    };
+
+    App.icons.get = function get(name) {
+        const path = PATHS[name];
+        if (!path) {
+            throw new Error('Unknown icon: ' + name);
+        }
+        return '<svg class="icon" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor"' +
+            ' stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + path + '</svg>';
+    };
+})();
+
+</script>
+<script>
+// ---- js/dialogs.js ----
+/*
+ * dialogs.js - modal dialogs: alerts, confirmations and the import report.
+ *
+ * Built on the browser's own <dialog> element, which already handles focus,
+ * the Esc key and the dark backdrop. Every dialog returns a Promise that
+ * resolves with the value of the button the user clicked, so callers can write:
+ *
+ *     const ok = await App.dialogs.confirm({ title: 'Discard changes?', ... });
+ *
+ * Talks to: util.js, icons.js, importer.js (report helpers), commands.js
+ *           (the "Remove blocked references" button runs a command).
+ */
+
+(function () {
+    'use strict';
+
+    App.dialogs = {};
+
+    const el = (...args) => App.util.el(...args);
+
+    /*
+     * Show a dialog. options = { title, body (Node or text), buttons, wide }
+     * buttons = [{ label, value, primary, danger }]. Esc resolves with null.
+     */
+    App.dialogs.show = function show(options) {
+        return new Promise((resolve) => {
+            const dialog = el('dialog', { class: 'dialog' + (options.wide ? ' dialog-wide' : '') });
+            const body = options.body instanceof Node ? options.body : el('p', {}, [options.body || '']);
+            const buttonRow = el('div', { class: 'dialog-buttons' });
+
+            // Resolve straight away on a click (the 'close' event arrives a moment
+            // later), and only once, whichever way the dialog is closed.
+            let finished = false;
+            const finish = (value) => {
+                if (finished) {
+                    return;
+                }
+                finished = true;
+                if (dialog.open) {
+                    dialog.close();
+                }
+                dialog.remove();
+                resolve(value);
+            };
+
+            (options.buttons || [{ label: 'OK', value: true, primary: true }]).forEach((button) => {
+                const classes = 'btn' + (button.primary ? ' btn-primary' : '') + (button.danger ? ' btn-danger' : '');
+                buttonRow.appendChild(el('button', {
+                    class: classes, type: 'button', onclick: () => finish(button.value),
+                }, [button.label]));
+            });
+
+            dialog.append(el('h2', { class: 'dialog-title' }, [options.title]), el('div', { class: 'dialog-body' }, [body]), buttonRow);
+            dialog.addEventListener('close', () => finish(null));   // Esc key
+            document.body.appendChild(dialog);
+            dialog.showModal();
+            const primary = buttonRow.querySelector('.btn-primary');
+            if (primary) {
+                primary.focus();
+            }
+        });
+    };
+
+    App.dialogs.alert = function alert(title, message) {
+        return App.dialogs.show({ title: title, body: message });
+    };
+
+    /* Resolves true only if the user clicks the OK button. */
+    App.dialogs.confirm = async function confirm(options) {
+        const value = await App.dialogs.show({
+            title: options.title,
+            body: options.message,
+            buttons: [
+                { label: options.cancel || 'Cancel', value: false },
+                { label: options.ok || 'OK', value: true, primary: true, danger: !!options.danger },
+            ],
+        });
+        return value === true;
+    };
+
+    // ---------------------------------------------------------------
+    // Import report (SPEC 3.4)
+    // ---------------------------------------------------------------
+
+    function section(title, iconName, lines) {
+        const icon = el('span', { class: 'report-icon report-icon-' + iconName });
+        icon.innerHTML = App.icons.get(iconName);
+        const list = el('ul', { class: 'report-list' });
+        lines.forEach((line) => list.appendChild(el('li', {}, [line])));
+        return el('section', { class: 'report-section' }, [el('h3', {}, [icon, title]), list]);
+    }
+
+    const METHOD_NAMES = {
+        'section.slide': '<section class="slide"> elements',
+        section: '<section> elements',
+        class: 'elements with "slide" in their class name',
+        size: 'large 16:9 blocks on the page',
+        'whole-page': 'the whole page (no slides found)',
+    };
+
+    function summaryLines(report) {
+        const lines = [report.slideCount + ' slide' + (report.slideCount === 1 ? '' : 's') +
+            ' found, using ' + (METHOD_NAMES[report.method] || report.method) + '.'];
+        if (report.isContract) {
+            lines.push('The deck already uses the editor\'s format, so its layout was kept exactly as it is.');
+        } else {
+            lines.push(report.elementsConverted + ' blocks were converted into movable elements with exact positions.');
+        }
+        if (report.scaledFrom) {
+            lines.push('Slides were scaled from ' + report.scaledFrom + ' to 1280×720.');
+        }
+        if (report.chartsRendered) {
+            lines.push(report.chartsRendered + ' chart' + (report.chartsRendered === 1 ? '' : 's') +
+                ' had data but no drawing; a placeholder was drawn (full charts arrive in Phase 6).');
+        }
+        report.fixes.forEach((fix) => lines.push(fix + '.'));
+        return lines;
+    }
+
+    function removedLines(report) {
+        const lines = report.scriptsRemoved.map((script) => script.label);
+        if (report.handlersRemoved) {
+            lines.push(report.handlersRemoved + ' inline event handler' + (report.handlersRemoved === 1 ? '' : 's') +
+                ' (onclick=… or javascript: links).');
+        }
+        return lines.concat(report.otherRemoved);
+    }
+
+    function refLine(ref) {
+        const kinds = { stylesheet: 'Stylesheet', import: 'CSS @import', font: 'Web font', 'css-url': 'CSS image', image: 'Image' };
+        return (kinds[ref.kind] || ref.kind) + ': ' + ref.url;
+    }
+
+    /*
+     * Show what the import found and changed. If the deck references remote
+     * files (blocked by the browser), offer to remove them (SPEC 2.3).
+     */
+    App.dialogs.showImportReport = async function showImportReport(report) {
+        const body = el('div', { class: 'report' });
+        body.appendChild(section('Summary', 'info', summaryLines(report)));
+
+        const removed = removedLines(report);
+        if (removed.length) {
+            const note = 'Removed for safety. Scripts never run inside the editor; saved decks get the editor\'s own small slide player instead.';
+            body.appendChild(section('Removed (' + removed.length + ')', 'check', [note].concat(removed)));
+        }
+        if (report.remoteRefs.length) {
+            const note = 'The browser blocked these internet references, so nothing was downloaded. Text falls back to installed Windows fonts.';
+            body.appendChild(section('Blocked (' + report.remoteRefs.length + ')', 'warning',
+                [note].concat(report.remoteRefs.map(refLine))));
+        }
+        if (report.localRefs.length) {
+            const note = 'These files sit next to the deck on disk. The editor cannot read them; images must be embedded in the HTML.';
+            body.appendChild(section('Missing files (' + report.localRefs.length + ')', 'warning',
+                [note].concat(report.localRefs.map(refLine))));
+        }
+        if (report.warnings.length) {
+            body.appendChild(section('Warnings', 'warning', report.warnings));
+        }
+
+        const buttons = [{ label: 'OK', value: 'ok', primary: true }];
+        if (report.remoteRefs.length) {
+            buttons.unshift({ label: 'Remove blocked references', value: 'remove-refs' });
+        }
+        const choice = await App.dialogs.show({ title: 'Import report', body: body, buttons: buttons, wide: true });
+        if (choice === 'remove-refs') {
+            App.commands.run('removeBlockedRefs');
+        }
+        return choice;
+    };
+})();
+
+</script>
+<script>
+// ---- js/deck.js ----
+/*
+ * deck.js - owns the live deck: the iframe in the centre of the screen (SPEC 3.5).
+ *
+ * The deck is shown in <iframe sandbox="allow-same-origin">. "allow-same-origin"
+ * lets the editor's code read and change the deck's DOM; the missing
+ * "allow-scripts" means no script inside the deck can ever run. The deck DOM
+ * in that iframe is the single source of truth: thumbnails, saving and undo
+ * all read from it.
+ *
+ * To show one slide at a time, deck.js adds one <style data-editor-only> to the
+ * deck. serialize.js removes it again on save. The current slide carries the
+ * attribute data-editor-current (also stripped on save).
+ *
+ * Talks to: canvas.js (sizes the iframe), thumbnails.js, ui.js (via events),
+ *           shortcuts.js (key presses inside the iframe), fileio.js (drag & drop).
+ */
+
+(function () {
+    'use strict';
+
+    App.deck = {};
+
+    let frame = null;
+    let doc = null;
+    let currentIndex = 0;
+
+    // Rules that only exist while editing. !important beats the deck's own rules,
+    // e.g. Copilot decks that hide every slide except ".active".
+    App.deck.VIEW_CSS = [
+        'html, body { margin: 0 !important; padding: 0 !important; width: 1280px !important;',
+        '  height: 720px !important; overflow: hidden !important; }',
+        '.slide { display: none !important; }',
+        '.slide[data-editor-current] { display: block !important; position: absolute !important;',
+        '  left: 0 !important; top: 0 !important; margin: 0 !important; transform: none !important;',
+        '  opacity: 1 !important; visibility: visible !important; }',
+        'aside.notes, .master { display: none !important; }',
+        '*, *::before, *::after { animation: none !important; transition: none !important; }',
+    ].join('\n');
+
+    App.deck.init = function init() {
+        frame = document.getElementById('deck-frame');
+        // An undo of a deck-wide change rebuilds the body, so put the current-slide mark back.
+        App.events.on('history-changed', () => {
+            if (doc) {
+                App.deck.goTo(currentIndex);
+            }
+        });
+    };
+
+    function addEditorView(targetDoc) {
+        const style = targetDoc.createElement('style');
+        style.setAttribute('data-editor-only', '');
+        style.textContent = App.deck.VIEW_CSS;
+        targetDoc.head.appendChild(style);
+    }
+
+    /*
+     * Load deck HTML (already imported/normalized) into the canvas iframe.
+     * Returns a Promise that resolves once the deck is ready to use.
+     */
+    App.deck.load = function load(html) {
+        return new Promise((resolve) => {
+            frame.addEventListener('load', () => {
+                doc = frame.contentDocument;
+                addEditorView(doc);
+                App.shortcuts.listenTo(frame.contentWindow);
+                App.fileio.listenForDrops(frame.contentWindow);
+                currentIndex = 0;
+                App.state.hasDeck = true;
+                App.deck.goTo(0, { silent: true });
+                App.events.emit('deck-loaded');
+                resolve();
+            }, { once: true });
+            frame.srcdoc = html;
+        });
+    };
+
+    App.deck.getDocument = function getDocument() {
+        return doc;
+    };
+
+    App.deck.getSlides = function getSlides() {
+        return doc ? Array.from(doc.querySelectorAll('section.slide')) : [];
+    };
+
+    App.deck.getCurrentIndex = function getCurrentIndex() {
+        return currentIndex;
+    };
+
+    App.deck.getCurrentSlide = function getCurrentSlide() {
+        return App.deck.getSlides()[currentIndex] || null;
+    };
+
+    /* Show slide number `index` (0-based) on the canvas. */
+    App.deck.goTo = function goTo(index, options) {
+        const slides = App.deck.getSlides();
+        if (slides.length === 0) {
+            return;
+        }
+        currentIndex = Math.max(0, Math.min(slides.length - 1, index));
+        slides.forEach((slide, i) => slide.toggleAttribute('data-editor-current', i === currentIndex));
+        if (!(options && options.silent)) {
+            App.events.emit('slide-changed', { index: currentIndex });
+        }
+    };
+
+    App.deck.next = () => App.deck.goTo(currentIndex + 1);
+    App.deck.previous = () => App.deck.goTo(currentIndex - 1);
+    App.deck.first = () => App.deck.goTo(0);
+    App.deck.last = () => App.deck.goTo(App.deck.getSlides().length - 1);
+
+    App.deck.notesOf = function notesOf(slide) {
+        const notes = slide && slide.querySelector('aside.notes');
+        return notes ? notes.textContent.trim() : '';
+    };
+})();
+
+</script>
+<script>
+// ---- js/canvas.js ----
+/*
+ * canvas.js - the slide area in the centre, with "fit to window" zoom (SPEC 4, Phase 1).
+ *
+ * The deck iframe is always exactly 1280x720 (the real slide size), so every
+ * measurement inside it is in true slide pixels. To make it fit the window we
+ * scale its container with a CSS transform instead of resizing it.
+ *
+ * The overlay layer (#overlay) sits on top of the iframe inside the same
+ * scaled container. Phase 2 draws selection handles there, never in the slide.
+ *
+ * Talks to: deck.js (the iframe it sizes), ui.js (shows the zoom level).
+ */
+
+(function () {
+    'use strict';
+
+    App.canvas = {};
+
+    const SLIDE_WIDTH = 1280;
+    const SLIDE_HEIGHT = 720;
+    const MARGIN = 32;   // free space around the slide, in screen pixels
+
+    let area = null;
+    let stage = null;
+    let stageBox = null;
+    let zoom = 1;
+
+    App.canvas.init = function init() {
+        area = document.getElementById('canvas-area');
+        stage = document.getElementById('canvas-stage');
+        stageBox = document.getElementById('canvas-stage-box');
+        // ResizeObserver calls fit() whenever the area changes size (window
+        // resized, a panel opened ...), not only when the window resizes.
+        new ResizeObserver(() => App.canvas.fit()).observe(area);
+    };
+
+    App.canvas.fit = function fit() {
+        const availableWidth = area.clientWidth - MARGIN * 2;
+        const availableHeight = area.clientHeight - MARGIN * 2;
+        if (availableWidth <= 0 || availableHeight <= 0) {
+            return;
+        }
+        zoom = Math.min(availableWidth / SLIDE_WIDTH, availableHeight / SLIDE_HEIGHT);
+        stage.style.transform = 'scale(' + zoom + ')';
+        stageBox.style.width = Math.floor(SLIDE_WIDTH * zoom) + 'px';
+        stageBox.style.height = Math.floor(SLIDE_HEIGHT * zoom) + 'px';
+        App.events.emit('zoom-changed', { zoom: zoom });
+    };
+
+    App.canvas.getZoom = function getZoom() {
+        return zoom;
+    };
+})();
+
+</script>
+<script>
+// ---- js/thumbnails.js ----
+/*
+ * thumbnails.js - the rail of slide miniatures on the left (SPEC 4, Phase 1).
+ *
+ * Each thumbnail is a small sandboxed iframe holding a copy of one slide plus
+ * the deck's <head> (its CSS). It is drawn at full size (1280x720) and shrunk
+ * with a CSS transform, so it looks exactly like the slide.
+ *
+ * Performance (SPEC 8.4): a 50-slide deck with 20 MB of images must stay
+ * responsive, so
+ *   - a thumbnail is only drawn once it scrolls into view (IntersectionObserver)
+ *   - after a change, only the affected slide is redrawn, after a short pause
+ *     (debounced), so typing does not redraw on every key press.
+ *
+ * Talks to: deck.js (reads slides, goTo on click), events from history.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.thumbnails = {};
+
+    const THUMB_WIDTH = 168;
+    const SCALE = THUMB_WIDTH / 1280;
+
+    let rail = null;
+    let observer = null;
+    const pendingRefresh = new Set();   // slide indexes waiting to be redrawn
+
+    App.thumbnails.init = function init() {
+        rail = document.getElementById('thumbnail-rail');
+        rail.style.setProperty('--thumb-scale', String(SCALE));
+
+        observer = new IntersectionObserver(onVisibilityChange, { root: rail, rootMargin: '200px 0px' });
+
+        App.events.on('deck-loaded', rebuild);
+        App.events.on('slide-changed', highlightCurrent);
+        App.events.on('history-changed', onHistoryChanged);
+
+        rail.addEventListener('keydown', (event) => {
+            if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                App.deck.next();
+            } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                App.deck.previous();
+            }
+        });
+    };
+
+    function rebuild() {
+        observer.disconnect();
+        rail.innerHTML = '';
+        App.deck.getSlides().forEach((slide, index) => {
+            const item = createItem(slide, index);
+            rail.appendChild(item);
+            observer.observe(item);
+        });
+        highlightCurrent();
+    }
+
+    function createItem(slide, index) {
+        const frame = App.util.el('iframe', {
+            class: 'thumb-frame', sandbox: 'allow-same-origin', tabindex: '-1', 'aria-hidden': 'true',
+        });
+        const hidden = slide.getAttribute('data-hidden') === 'true';
+        const item = App.util.el('div', {
+            class: 'thumb' + (hidden ? ' thumb-hidden' : ''),
+            role: 'button', tabindex: '0',
+            'data-index': String(index),
+            title: 'Slide ' + (index + 1) + (hidden ? ' (hidden)' : ''),
+            onclick: () => App.deck.goTo(index),
+        }, [
+            App.util.el('span', { class: 'thumb-number' }, [String(index + 1)]),
+            App.util.el('div', { class: 'thumb-box' }, [frame]),
+        ]);
+        if (hidden) {
+            const badge = App.util.el('span', { class: 'thumb-hidden-badge', title: 'Hidden slide' });
+            badge.innerHTML = App.icons.get('hidden');
+            item.appendChild(badge);
+        }
+        return item;
+    }
+
+    function onVisibilityChange(entries) {
+        entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+                drawItem(entry.target);
+            }
+        });
+    }
+
+    function isVisible(item) {
+        const railRect = rail.getBoundingClientRect();
+        const rect = item.getBoundingClientRect();
+        return rect.bottom >= railRect.top - 200 && rect.top <= railRect.bottom + 200;
+    }
+
+    /* Draw (or redraw) one thumbnail from the live slide. */
+    function drawItem(item) {
+        const index = Number(item.getAttribute('data-index'));
+        const slide = App.deck.getSlides()[index];
+        const frame = item.querySelector('iframe');
+        if (!slide || !frame) {
+            return;
+        }
+        const fill = () => {
+            const thumbDoc = frame.contentDocument;
+            const deckDoc = App.deck.getDocument();
+            // The deck's <head> brings its CSS, including the editor view rules
+            // that show the slide marked data-editor-current.
+            thumbDoc.head.innerHTML = deckDoc.head.innerHTML;
+            const copy = thumbDoc.importNode(slide, true);
+            copy.setAttribute('data-editor-current', '');
+            thumbDoc.body.replaceChildren(copy);
+            item.setAttribute('data-drawn', 'true');
+        };
+        if (frame.getAttribute('data-ready') === 'true') {
+            fill();
+            return;
+        }
+        frame.addEventListener('load', () => {
+            frame.setAttribute('data-ready', 'true');
+            fill();
+        }, { once: true });
+        frame.srcdoc = '<!DOCTYPE html><html><head></head><body></body></html>';
+    }
+
+    const flushRefresh = App.util.debounce(() => {
+        pendingRefresh.forEach((index) => {
+            const item = rail.querySelector('.thumb[data-index="' + index + '"]');
+            // Off-screen thumbnails are redrawn when they scroll into view.
+            if (item && isVisible(item)) {
+                drawItem(item);
+            } else if (item) {
+                item.removeAttribute('data-drawn');
+                observer.unobserve(item);
+                observer.observe(item);
+            }
+        });
+        pendingRefresh.clear();
+    }, 300);
+
+    function onHistoryChanged(info) {
+        if (!info || !info.scope) {
+            return;
+        }
+        if (info.scope === 'deck') {
+            rebuild();   // slides may have been added, removed or restyled
+            return;
+        }
+        const index = App.deck.getSlides().findIndex((slide) => slide.getAttribute('data-slide-id') === info.scope.slideId);
+        if (index !== -1) {
+            pendingRefresh.add(index);
+            flushRefresh();
+        }
+    }
+
+    function highlightCurrent() {
+        const current = App.deck.getCurrentIndex();
+        rail.querySelectorAll('.thumb').forEach((item) => {
+            const isCurrent = Number(item.getAttribute('data-index')) === current;
+            item.classList.toggle('thumb-current', isCurrent);
+            item.setAttribute('aria-current', isCurrent ? 'true' : 'false');
+            if (isCurrent) {
+                item.scrollIntoView({ block: 'nearest' });
+            }
+        });
+    }
+})();
+
+</script>
+<script>
+// ---- js/fileio.js ----
+/*
+ * fileio.js - opening and saving decks (SPEC 4, Phase 1).
+ *
+ * Opening, three ways:
+ *   1. File > Open (Ctrl+O) uses showOpenFilePicker (File System Access API).
+ *      We keep the returned "file handle" so Save can write back to the same file.
+ *   2. Fallback when that API is missing: a hidden <input type="file">.
+ *   3. Drag and drop an .html file onto the window. Chromium also gives us a
+ *      file handle for dropped files, so Save works for those too.
+ *
+ * Saving:
+ *   Save (Ctrl+S)        -> write through the handle; no handle -> Save As
+ *   Save As (Ctrl+Shift+S) -> showSaveFilePicker; fallback: a normal download
+ *   createWritable() writes to a temporary file and replaces the original only
+ *   when closed, so a crash mid-save cannot corrupt the deck (SPEC 6.1).
+ *
+ * Also: the unsaved-changes dot in the title and the warning on closing the tab.
+ *
+ * Talks to: importer.js, deck.js, serialize.js, history.js, dialogs.js, ui.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.fileio = {};
+
+    const HTML_TYPES = [{ description: 'HTML presentation', accept: { 'text/html': ['.html', '.htm'] } }];
+    const NEW_DECK_NAME = 'Untitled deck.html';
+
+    // ---------------------------------------------------------------
+    // Small pure helpers (tested in tests/unit/fileio.test.js)
+    // ---------------------------------------------------------------
+
+    App.fileio.isHtmlFileName = function isHtmlFileName(name) {
+        return /\.html?$/i.test(name || '');
+    };
+
+    App.fileio.windowTitle = function windowTitle(fileName, dirty) {
+        if (!fileName) {
+            return 'Deck Editor';
+        }
+        return (dirty ? '● ' : '') + fileName + ' — Deck Editor';
+    };
+
+    /*
+     * Write text to a file handle, asking for write permission first if needed
+     * (Chromium asks the user once per session).
+     */
+    App.fileio.writeToHandle = async function writeToHandle(handle, text) {
+        const mode = { mode: 'readwrite' };
+        let permission = await handle.queryPermission(mode);
+        if (permission !== 'granted') {
+            permission = await handle.requestPermission(mode);
+        }
+        if (permission !== 'granted') {
+            throw new Error('The browser did not get permission to write to "' + handle.name + '".');
+        }
+        const writable = await handle.createWritable();
+        try {
+            await writable.write(text);
+            await writable.close();
+        } catch (error) {
+            // abort() throws the temporary file away, leaving the original untouched.
+            if (writable.abort) {
+                await writable.abort();
+            }
+            throw error;
+        }
+    };
+
+    // ---------------------------------------------------------------
+    // Setup
+    // ---------------------------------------------------------------
+
+    let fileInput = null;
+
+    App.fileio.init = function init() {
+        fileInput = document.getElementById('file-input');
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files[0];
+            fileInput.value = '';   // so choosing the same file again still fires "change"
+            if (file) {
+                App.fileio.openFile(file, null).catch(reportError('Could not open the file'));
+            }
+        });
+
+        App.fileio.listenForDrops(window);
+
+        // The browser shows its own "Leave site?" question; custom text is not allowed.
+        window.addEventListener('beforeunload', (event) => {
+            if (App.history.isDirty()) {
+                event.preventDefault();
+                event.returnValue = '';
+            }
+        });
+    };
+
+    function reportError(title) {
+        return (error) => {
+            App.ui.setBusy(null);
+            console.error(error);
+            App.dialogs.alert(title, error && error.message ? error.message : String(error));
+        };
+    }
+
+    // ---------------------------------------------------------------
+    // Opening
+    // ---------------------------------------------------------------
+
+    async function confirmDiscard() {
+        if (!App.state.hasDeck || !App.history.isDirty()) {
+            return true;
+        }
+        return App.dialogs.confirm({
+            title: 'Discard unsaved changes?',
+            message: 'The current deck has changes that are not saved. Open another deck anyway?',
+            ok: 'Discard changes', danger: true,
+        });
+    }
+
+    App.fileio.open = async function open() {
+        if (!(await confirmDiscard())) {
+            return;
+        }
+        if (!window.showOpenFilePicker) {
+            fileInput.click();
+            return;
+        }
+        let handle;
+        try {
+            [handle] = await window.showOpenFilePicker({ types: HTML_TYPES, multiple: false });
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                return;   // the user closed the dialog
+            }
+            throw error;
+        }
+        await App.fileio.openFile(await handle.getFile(), handle);
+    };
+
+    /* Import a File (from any of the three ways) and show it. */
+    App.fileio.openFile = async function openFile(file, handle) {
+        if (!App.fileio.isHtmlFileName(file.name)) {
+            throw new Error('"' + file.name + '" is not an .html file. The editor opens HTML presentations.');
+        }
+        App.ui.setBusy('Opening ' + file.name + '…');
+        const text = await file.text();
+        const result = await App.importer.importDeck(text);
+        await showDeck(result.html, file.name, handle);
+        if (App.importer.reportHasChanges(result.report)) {
+            App.history.markDirty();   // the deck now differs from the file on disk
+        }
+        App.ui.setBusy(null);
+        App.ui.setStatus('Opened ' + file.name);
+        if (App.importer.reportHasItems(result.report)) {
+            await App.dialogs.showImportReport(result.report);
+        }
+        return result.report;
+    };
+
+    async function showDeck(html, fileName, handle) {
+        await App.deck.load(html);
+        App.state.fileName = fileName;
+        App.state.fileHandle = handle || null;
+        App.history.reset();
+        App.ui.showDeck();
+    }
+
+    App.fileio.newDeck = async function newDeck() {
+        if (!(await confirmDiscard())) {
+            return;
+        }
+        // Through the importer like any deck, so there is only one way in.
+        const result = await App.importer.importDeck(App.template.newDeckHtml());
+        await showDeck(result.html, NEW_DECK_NAME, null);
+        App.ui.setStatus('New deck');
+    };
+
+    /*
+     * Drag and drop. getAsFileSystemHandle() must be called straight away in
+     * the drop event (before any "await"), or the browser forgets the data.
+     */
+    App.fileio.listenForDrops = function listenForDrops(targetWindow) {
+        const hasFiles = (event) => event.dataTransfer && Array.from(event.dataTransfer.types).indexOf('Files') !== -1;
+
+        targetWindow.addEventListener('dragover', (event) => {
+            if (hasFiles(event)) {
+                event.preventDefault();   // without this the browser would open the file itself
+                event.dataTransfer.dropEffect = 'copy';
+                App.ui.showDropZone(true);
+            }
+        });
+        targetWindow.addEventListener('dragleave', (event) => {
+            if (event.relatedTarget === null) {
+                App.ui.showDropZone(false);
+            }
+        });
+        targetWindow.addEventListener('drop', (event) => {
+            if (!hasFiles(event)) {
+                return;
+            }
+            event.preventDefault();
+            App.ui.showDropZone(false);
+            const item = Array.from(event.dataTransfer.items).find((entry) => entry.kind === 'file');
+            if (!item) {
+                return;
+            }
+            const handlePromise = item.getAsFileSystemHandle ? item.getAsFileSystemHandle() : Promise.resolve(null);
+            const file = item.getAsFile();
+            openDropped(file, handlePromise).catch(reportError('Could not open the dropped file'));
+        });
+    };
+
+    async function openDropped(file, handlePromise) {
+        if (!(await confirmDiscard())) {
+            return;
+        }
+        let handle = null;
+        try {
+            handle = await handlePromise;
+        } catch (error) {
+            handle = null;   // no handle: Save will ask where to save instead
+        }
+        await App.fileio.openFile(file, handle && handle.kind === 'file' ? handle : null);
+    }
+
+    // ---------------------------------------------------------------
+    // Saving
+    // ---------------------------------------------------------------
+
+    App.fileio.playerSource = function playerSource() {
+        return {
+            playerJs: document.getElementById('deck-player-js').textContent.trim(),
+            playerCss: document.getElementById('deck-player-css').textContent.trim(),
+        };
+    };
+
+    App.fileio.currentHtml = function currentHtml() {
+        return App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource());
+    };
+
+    function afterSave(fileName) {
+        App.state.fileName = fileName;
+        App.history.markSaved();
+        App.ui.setStatus('Saved ' + fileName);
+        App.events.emit('saved', { fileName: fileName });
+    }
+
+    App.fileio.save = async function save() {
+        if (!App.state.hasDeck) {
+            return;
+        }
+        if (!App.state.fileHandle) {
+            await App.fileio.saveAs();
+            return;
+        }
+        App.ui.setStatus('Saving…');
+        await App.fileio.writeToHandle(App.state.fileHandle, App.fileio.currentHtml());
+        afterSave(App.state.fileHandle.name);
+    };
+
+    App.fileio.saveAs = async function saveAs() {
+        if (!App.state.hasDeck) {
+            return;
+        }
+        const html = App.fileio.currentHtml();
+        const suggestedName = App.state.fileName || NEW_DECK_NAME;
+
+        if (!window.showSaveFilePicker) {
+            download(suggestedName, html);
+            afterSave(suggestedName);
+            return;
+        }
+        let handle;
+        try {
+            handle = await window.showSaveFilePicker({ suggestedName: suggestedName, types: HTML_TYPES });
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                return;
+            }
+            throw error;
+        }
+        App.ui.setStatus('Saving…');
+        await App.fileio.writeToHandle(handle, html);
+        App.state.fileHandle = handle;
+        afterSave(handle.name);
+    };
+
+    function download(fileName, html) {
+        const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        const link = App.util.el('a', { href: url, download: fileName });
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+})();
+
+</script>
+<script>
+// ---- js/commands.js ----
+/*
+ * commands.js - every action the user can trigger, in one list.
+ *
+ * A command has a name ('save'), a label for menus and a function. The
+ * ribbon, menus and keyboard shortcuts all call App.commands.run(name), so an
+ * action behaves the same however it is started, and errors are shown in one
+ * consistent way.
+ *
+ * Talks to: fileio.js, history.js, deck.js, importer.js (the actions),
+ *           shortcuts.js and ribbon.js (they run commands), ui.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.commands = {};
+
+    const registry = new Map();   // name -> { label, run, isEnabled }
+
+    App.commands.define = function define(name, definition) {
+        registry.set(name, {
+            label: definition.label,
+            run: definition.run,
+            isEnabled: definition.isEnabled || (() => true),
+        });
+    };
+
+    App.commands.isEnabled = function isEnabled(name) {
+        const command = registry.get(name);
+        return !!command && command.isEnabled();
+    };
+
+    App.commands.label = function label(name) {
+        const command = registry.get(name);
+        return command ? command.label : name;
+    };
+
+    /*
+     * Run a command by name. Commands may be async (open, save); any error
+     * ends up in one dialog instead of failing silently.
+     */
+    App.commands.run = function run(name) {
+        const command = registry.get(name);
+        if (!command) {
+            throw new Error('Unknown command: ' + name);
+        }
+        if (!command.isEnabled()) {
+            return Promise.resolve();
+        }
+        return Promise.resolve()
+            .then(() => command.run())
+            .catch((error) => {
+                App.ui.setBusy(null);
+                console.error(error);
+                App.dialogs.alert(command.label + ' failed', error && error.message ? error.message : String(error));
+            });
+    };
+
+    const hasDeck = () => App.state.hasDeck;
+
+    App.commands.init = function init() {
+        App.commands.define('newDeck', { label: 'New', run: () => App.fileio.newDeck() });
+        App.commands.define('open', { label: 'Open…', run: () => App.fileio.open() });
+        App.commands.define('save', { label: 'Save', run: () => App.fileio.save(), isEnabled: hasDeck });
+        App.commands.define('saveAs', { label: 'Save As…', run: () => App.fileio.saveAs(), isEnabled: hasDeck });
+
+        App.commands.define('undo', {
+            label: 'Undo',
+            isEnabled: () => hasDeck() && App.history.canUndo(),
+            run: () => {
+                const label = App.history.undoLabel();
+                App.history.undo();
+                App.ui.setStatus('Undid: ' + label);
+            },
+        });
+        App.commands.define('redo', {
+            label: 'Redo',
+            isEnabled: () => hasDeck() && App.history.canRedo(),
+            run: () => {
+                const label = App.history.redoLabel();
+                App.history.redo();
+                App.ui.setStatus('Redid: ' + label);
+            },
+        });
+
+        App.commands.define('nextSlide', { label: 'Next slide', run: () => App.deck.next(), isEnabled: hasDeck });
+        App.commands.define('previousSlide', { label: 'Previous slide', run: () => App.deck.previous(), isEnabled: hasDeck });
+        App.commands.define('firstSlide', { label: 'First slide', run: () => App.deck.first(), isEnabled: hasDeck });
+        App.commands.define('lastSlide', { label: 'Last slide', run: () => App.deck.last(), isEnabled: hasDeck });
+
+        App.commands.define('removeBlockedRefs', {
+            label: 'Remove blocked references',
+            isEnabled: hasDeck,
+            run: () => {
+                let count = 0;
+                App.history.change('Remove blocked references', 'deck', () => {
+                    count = App.importer.removeRemoteRefs(App.deck.getDocument());
+                });
+                App.ui.setStatus('Removed ' + count + ' blocked reference' + (count === 1 ? '' : 's'));
+            },
+        });
+    };
+})();
+
+</script>
+<script>
+// ---- js/ribbon.js ----
+/*
+ * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
+ *
+ * Tabs: Home, Insert, Arrange, Slide Show, Export. In Phase 1 only Home has
+ * buttons (undo/redo, slide navigation); the other tabs say which phase
+ * fills them. Buttons only name a command; commands.js does the work.
+ *
+ * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips).
+ */
+
+(function () {
+    'use strict';
+
+    App.ribbon = {};
+
+    const el = (...args) => App.util.el(...args);
+
+    const TABS = [
+        {
+            id: 'home', label: 'Home',
+            groups: [
+                { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
+                { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
+            ],
+            note: 'Selecting, moving and formatting elements arrive in Phases 2 and 3.',
+        },
+        { id: 'insert', label: 'Insert', note: 'Text boxes, tables, images, shapes and charts arrive in Phases 3 to 6.' },
+        { id: 'arrange', label: 'Arrange', note: 'Align, distribute, group and rotate arrive in Phase 7.' },
+        {
+            id: 'slideshow', label: 'Slide Show',
+            note: 'Presenting from the editor arrives in Phase 8. Saved decks already present on their own: open the saved file in the browser and use the arrow keys (F = full screen).',
+        },
+        { id: 'export', label: 'Export', note: 'PDF, PNG and PowerPoint export arrive in Phase 8.' },
+    ];
+
+    const FILE_MENU = [
+        ['newDeck', 'newDeck', ''],
+        ['open', 'open', 'Ctrl+O'],
+        ['save', 'save', 'Ctrl+S'],
+        ['saveAs', 'saveAs', 'Ctrl+Shift+S'],
+    ];
+
+    let panel = null;
+    let fileMenu = null;
+    const buttons = [];   // [{ button, command }] so enabled states can be refreshed
+
+    function shortcutFor(command) {
+        const entry = App.shortcuts.DEFAULTS.find((item) => item[1] === command);
+        return entry ? entry[0] : '';
+    }
+
+    function commandButton(command, iconName, extraClass) {
+        const keys = shortcutFor(command);
+        const button = el('button', {
+            type: 'button', class: 'ribbon-button ' + (extraClass || ''),
+            title: App.commands.label(command) + (keys ? ' (' + keys + ')' : ''),
+            'data-command': command,
+            onclick: () => App.commands.run(command),
+        });
+        button.innerHTML = App.icons.get(iconName);
+        button.appendChild(el('span', { class: 'ribbon-button-label' }, [App.commands.label(command)]));
+        buttons.push({ button: button, command: command });
+        return button;
+    }
+
+    function renderTab(tab) {
+        panel.innerHTML = '';
+        (tab.groups || []).forEach((group) => {
+            const groupNode = el('div', { class: 'ribbon-group' });
+            const row = el('div', { class: 'ribbon-group-buttons' });
+            group.commands.forEach(([command, icon]) => row.appendChild(commandButton(command, icon)));
+            groupNode.append(row, el('div', { class: 'ribbon-group-label' }, [group.label]));
+            panel.appendChild(groupNode);
+        });
+        if (tab.note) {
+            panel.appendChild(el('div', { class: 'ribbon-note' }, [tab.note]));
+        }
+        App.ribbon.refresh();
+    }
+
+    function selectTab(tabId) {
+        document.querySelectorAll('.ribbon-tab').forEach((tabButton) => {
+            const selected = tabButton.getAttribute('data-tab') === tabId;
+            tabButton.classList.toggle('selected', selected);
+            tabButton.setAttribute('aria-selected', selected ? 'true' : 'false');
+        });
+        renderTab(TABS.find((tab) => tab.id === tabId));
+    }
+
+    function buildFileMenu() {
+        fileMenu = el('div', { class: 'file-menu', role: 'menu', hidden: true });
+        FILE_MENU.forEach(([command, icon, keys]) => {
+            const item = el('button', {
+                type: 'button', class: 'file-menu-item', role: 'menuitem', 'data-command': command,
+                onclick: () => {
+                    closeFileMenu();
+                    App.commands.run(command);
+                },
+            });
+            item.innerHTML = App.icons.get(icon);
+            item.append(el('span', { class: 'file-menu-label' }, [App.commands.label(command)]),
+                el('span', { class: 'file-menu-keys' }, [keys]));
+            buttons.push({ button: item, command: command });
+            fileMenu.appendChild(item);
+        });
+        document.body.appendChild(fileMenu);
+    }
+
+    function openFileMenu(anchor) {
+        const rect = anchor.getBoundingClientRect();
+        fileMenu.style.left = rect.left + 'px';
+        fileMenu.style.top = rect.bottom + 'px';
+        fileMenu.hidden = false;
+        App.ribbon.refresh();
+        fileMenu.querySelector('button:not([disabled])').focus();
+    }
+
+    function closeFileMenu() {
+        fileMenu.hidden = true;
+    }
+
+    App.ribbon.init = function init() {
+        const tabRow = document.getElementById('ribbon-tabs');
+        panel = document.getElementById('ribbon-panel');
+
+        buildFileMenu();
+        const fileButton = el('button', {
+            type: 'button', class: 'ribbon-file-button', 'aria-haspopup': 'menu',
+            onclick: (event) => {
+                event.stopPropagation();   // otherwise the document click below closes it again
+                if (fileMenu.hidden) {
+                    openFileMenu(fileButton);
+                } else {
+                    closeFileMenu();
+                }
+            },
+        }, ['File']);
+        tabRow.appendChild(fileButton);
+
+        TABS.forEach((tab) => {
+            tabRow.appendChild(el('button', {
+                type: 'button', class: 'ribbon-tab', role: 'tab', 'data-tab': tab.id,
+                onclick: () => selectTab(tab.id),
+            }, [tab.label]));
+        });
+
+        document.addEventListener('click', (event) => {
+            if (!fileMenu.hidden && !fileMenu.contains(event.target)) {
+                closeFileMenu();
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && !fileMenu.hidden) {
+                closeFileMenu();
+            }
+        });
+
+        ['deck-loaded', 'history-changed', 'saved'].forEach((name) => App.events.on(name, App.ribbon.refresh));
+    };
+
+    App.ribbon.showDefaultTab = function showDefaultTab() {
+        selectTab('home');
+    };
+
+    /* Grey out buttons whose command cannot run right now (e.g. Undo with nothing to undo). */
+    App.ribbon.refresh = function refresh() {
+        buttons.forEach(({ button, command }) => {
+            button.disabled = !App.commands.isEnabled(command);
+        });
+    };
+})();
+
+</script>
+<script>
+// ---- js/ui.js ----
+/*
+ * ui.js - the window frame around the slide: title bar, status bar, notes
+ * area, welcome screen, drop zone and the "busy" overlay.
+ *
+ * It mostly listens to events and updates text; it never changes the deck.
+ *
+ * Talks to: events (deck-loaded, slide-changed, history-changed, saved,
+ *           zoom-changed), deck.js, fileio.js (window title), commands.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.ui = {};
+
+    const nodes = {};
+
+    function byId(id) {
+        return document.getElementById(id);
+    }
+
+    App.ui.init = function init() {
+        ['title-file', 'title-dirty', 'status-slide', 'status-message', 'status-zoom', 'notes-text',
+         'welcome', 'canvas-stage-box', 'drop-zone', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
+            nodes[id] = byId(id);
+        });
+
+        buildQuickAccess();
+        byId('welcome-new').addEventListener('click', () => App.commands.run('newDeck'));
+        byId('welcome-open').addEventListener('click', () => App.commands.run('open'));
+
+        App.events.on('deck-loaded', () => {
+            App.ui.updateTitle();
+            updateSlideInfo();
+        });
+        App.events.on('slide-changed', updateSlideInfo);
+        App.events.on('history-changed', () => {
+            App.ui.updateTitle();
+            updateSlideInfo();
+        });
+        App.events.on('saved', App.ui.updateTitle);
+        App.events.on('zoom-changed', (info) => {
+            nodes['status-zoom'].textContent = App.state.hasDeck ? Math.round(info.zoom * 100) + '%' : '';
+        });
+    };
+
+    // Save / Undo / Redo in the title bar, like PowerPoint's Quick Access Toolbar.
+    function buildQuickAccess() {
+        [['save', 'save', 'Save (Ctrl+S)'], ['undo', 'undo', 'Undo (Ctrl+Z)'], ['redo', 'redo', 'Redo (Ctrl+Y)']]
+            .forEach(([command, icon, title]) => {
+                const button = App.util.el('button', {
+                    type: 'button', class: 'quick-button', title: title, 'data-command': command,
+                    onclick: () => App.commands.run(command),
+                });
+                button.innerHTML = App.icons.get(icon);
+                nodes['quick-access'].appendChild(button);
+            });
+        const refresh = () => {
+            nodes['quick-access'].querySelectorAll('button').forEach((button) => {
+                button.disabled = !App.commands.isEnabled(button.getAttribute('data-command'));
+            });
+        };
+        ['deck-loaded', 'history-changed', 'saved'].forEach((name) => App.events.on(name, refresh));
+        App.ui.refreshQuickAccess = refresh;
+    }
+
+    App.ui.updateTitle = function updateTitle() {
+        const dirty = App.state.hasDeck && App.history.isDirty();
+        document.title = App.fileio.windowTitle(App.state.hasDeck ? App.state.fileName : null, dirty);
+        nodes['title-file'].textContent = App.state.hasDeck ? App.state.fileName : 'Deck Editor';
+        nodes['title-dirty'].hidden = !dirty;
+        if (App.state.hasDeck && !dirty && nodes['status-message'].textContent === 'Unsaved changes') {
+            App.ui.setStatus('Saved');
+        } else if (dirty) {
+            App.ui.setStatus('Unsaved changes');
+        }
+    };
+
+    function updateSlideInfo() {
+        const slides = App.deck.getSlides();
+        const index = App.deck.getCurrentIndex();
+        const slide = slides[index];
+        const hidden = slide && slide.getAttribute('data-hidden') === 'true';
+        nodes['status-slide'].textContent = slides.length
+            ? 'Slide ' + (index + 1) + ' of ' + slides.length + (hidden ? ' (hidden)' : '')
+            : '';
+        const notes = App.deck.notesOf(slide);
+        nodes['notes-text'].textContent = notes || 'No speaker notes on this slide.';
+        nodes['notes-text'].classList.toggle('empty', !notes);
+    }
+
+    App.ui.setStatus = function setStatus(text) {
+        nodes['status-message'].textContent = text;
+    };
+
+    App.ui.showWelcome = function showWelcome() {
+        nodes.welcome.hidden = false;
+        nodes['canvas-stage-box'].hidden = true;
+        App.ribbon.showDefaultTab();
+        App.ui.refreshQuickAccess();
+        App.ui.updateTitle();
+    };
+
+    App.ui.showDeck = function showDeck() {
+        nodes.welcome.hidden = true;
+        nodes['canvas-stage-box'].hidden = false;
+        App.canvas.fit();
+        App.ui.updateTitle();
+        App.ribbon.refresh();
+        App.ui.refreshQuickAccess();
+    };
+
+    App.ui.showDropZone = function showDropZone(visible) {
+        nodes['drop-zone'].hidden = !visible;
+    };
+
+    /* Show a "please wait" layer with a message; pass null to hide it. */
+    App.ui.setBusy = function setBusy(text) {
+        nodes.busy.hidden = !text;
+        nodes['busy-text'].textContent = text || '';
+    };
+})();
+
+</script>
+<script>
+    App.start();
+</script>
+</body>
+</html>

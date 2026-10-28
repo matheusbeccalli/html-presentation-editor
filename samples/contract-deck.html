@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<!-- SAMPLE DECK - FAKE DATA ONLY. Follows the deck contract (SPEC 3.3) exactly. -->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="deck-format" content="1">
+<title>Projeto Atlas — Apresentação ao Comitê</title>
+<style>
+  :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
+          --color-primary: #CC092F; --color-accent: #1F2A44; --color-text: #222; --color-bg: #fff; }
+  body { margin: 0; font-family: var(--font-body); color: var(--color-text); }
+  .slide { position: relative; width: 1280px; height: 720px; overflow: hidden; background: var(--color-bg); }
+  .el    { position: absolute; box-sizing: border-box; }
+  .el h1, .el h2, .el p, .el ul { margin: 0; }
+  .el h1 { font-family: var(--font-heading); font-size: 52px; line-height: 1.1; color: var(--color-accent); }
+  .el h2 { font-family: var(--font-heading); font-size: 34px; line-height: 1.2; color: var(--color-accent); }
+  .el p, .el li { font-size: 22px; line-height: 1.45; }
+  .el ul { padding-left: 28px; }
+  .accent { background: var(--color-primary); }
+  .muted { color: #666; }
+  table.comps { width: 100%; border-collapse: collapse; font-size: 19px; }
+  table.comps th { background: var(--color-accent); color: #fff; text-align: left; padding: 8px 10px; }
+  table.comps td { padding: 7px 10px; border-bottom: 1px solid #ddd; }
+  table.comps td.num, table.comps th.num { text-align: right; }
+  table.comps tr.total td { font-weight: 700; border-top: 2px solid #222; }
+</style>
+</head>
+<body>
+
+<section class="slide" data-slide-id="s1" data-layout="title">
+  <img class="el" data-type="image" data-id="e1" style="left:64px; top:56px; width:120px; height:40px; z-index:1" alt="Logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAAoCAYAAAA16j4lAAABDElEQVR42u3ZOw4CMQxF0WlZBT0Nm2D57CkjWhSYycSf5+heyV0KK6f01r56355Ss9FcrRPAiwMrISPkBKyCjNBkn09URkbIAFgZGSEjYFVkhAyBFZERMgZWQ0bIAVgJGSEnYBVkhByBFZARcgbORj7a//54td7wfgA4ExngIOAsZIADgTOQAQ4GjkYGOAE4EhngJOAoZIATgSOQAU4G9kYGWADYExlgEWAvZICFgD2QARYDtkYGWBDYEhlgUWArZICFgS2QARYHnkXmYh9w8M9ERqgI8FVkhAoBX0FGqBjwKDJCBYFHkBEqCnwWGaHCwGeQESoOfISM0ALA/5ARWgT4FzJCCwH3kBGaaweiLh97x++7BAAAAABJRU5ErkJggg==">
+  <div class="el" data-type="text" data-id="e2" style="left:64px; top:230px; width:1100px; height:120px; z-index:2"><h1>Projeto Atlas</h1></div>
+  <div class="el accent" data-type="shape" data-id="e3" style="left:64px; top:350px; width:140px; height:8px; z-index:3"></div>
+  <div class="el" data-type="text" data-id="e4" style="left:64px; top:378px; width:1100px; height:70px; z-index:4"><p class="muted">Aquisição da Alfa Alimentos S.A. · Comitê de Investimentos · Outubro 2026</p></div>
+  <aside class="notes">Abrir com o contexto da transação. Todos os números deste deck são fictícios.</aside>
+</section>
+
+<section class="slide" data-slide-id="s2" data-layout="title-content">
+  <div class="el" data-type="text" data-id="e5" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Sumário executivo</h2></div>
+  <div class="el accent" data-type="shape" data-id="e6" style="left:64px; top:112px; width:80px; height:6px; z-index:2"></div>
+  <div class="el" data-type="text" data-id="e7" style="left:64px; top:150px; width:1152px; height:480px; z-index:3">
+    <ul>
+      <li>Alfa Alimentos: líder regional em snacks saudáveis, receita de R$ 587 mn em 2024</li>
+      <li>Crescimento de 18% a.a. entre 2022 e 2025E, com expansão de margem</li>
+      <li>Proposta: aquisição de 70% por EV de R$ 1,2 bi (8,5x EBITDA 2025E)</li>
+      <li>Plano de criação de valor: expansão para o Sudeste e ganhos de compras</li>
+    </ul>
+  </div>
+  <aside class="notes">Reforçar o múltiplo de entrada abaixo da média dos comparáveis.</aside>
+</section>
+
+<section class="slide" data-slide-id="s3" data-layout="title-content">
+  <div class="el" data-type="text" data-id="e8" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Comparáveis de mercado</h2></div>
+  <div class="el" data-type="table" data-id="e9" style="left:64px; top:140px; width:1152px; height:330px; z-index:2">
+    <table class="comps">
+      <thead><tr><th>Empresa</th><th class="num">EV (R$ mn)</th><th class="num">EV/EBITDA 2025E</th><th class="num">Margem EBITDA</th></tr></thead>
+      <tbody>
+        <tr><td>Beta Foods</td><td class="num">2.450</td><td class="num">9,8x</td><td class="num">19,5%</td></tr>
+        <tr><td>Gama Nutrição</td><td class="num">1.120</td><td class="num">8,9x</td><td class="num">17,2%</td></tr>
+        <tr><td>Delta Snacks</td><td class="num">780</td><td class="num">10,4x</td><td class="num">21,0%</td></tr>
+        <tr><td>Épsilon Orgânicos</td><td class="num">530</td><td class="num">(1,2x)</td><td class="num">-3,5%</td></tr>
+        <tr class="total"><td>Mediana</td><td class="num">950</td><td class="num">9,4x</td><td class="num">18,4%</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="el" data-type="text" data-id="e10" style="left:64px; top:640px; width:800px; height:30px; z-index:3"><p class="muted" style="font-size:14px">Fonte: estimativas fictícias para teste.</p></div>
+</section>
+
+<section class="slide" data-slide-id="s4" data-layout="title-content">
+  <div class="el" data-type="text" data-id="e11" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Receita e margem EBITDA</h2></div>
+  <figure class="el" data-type="chart" data-id="e12" style="left:64px; top:140px; width:760px; height:420px; z-index:2; margin:0">
+    <script type="application/json" class="chart-data">{"version":1,"type":"combo","categories":["2022","2023","2024","2025E"],"estimates":[false,false,false,true],"series":[{"name":"Receita (R$ mn)","type":"column","axis":"primary","values":[410,498,587,702]},{"name":"Margem EBITDA","type":"line","axis":"secondary","values":[0.18,0.2,0.21,0.23],"format":"percent"}],"options":{"title":"Receita e margem","legend":"bottom","dataLabels":true,"locale":"pt-BR","source":"Fonte: empresa"}}</script>
+    <svg width="760" height="420" viewBox="0 0 760 420" font-family="Calibri, Arial, sans-serif">
+      <line x1="60" y1="360" x2="720" y2="360" stroke="#999"/>
+      <rect x="100" y="186" width="90" height="174" fill="#1F2A44"/><text x="145" y="178" text-anchor="middle" font-size="16">410</text>
+      <rect x="260" y="149" width="90" height="211" fill="#1F2A44"/><text x="305" y="141" text-anchor="middle" font-size="16">498</text>
+      <rect x="420" y="111" width="90" height="249" fill="#1F2A44"/><text x="465" y="103" text-anchor="middle" font-size="16">587</text>
+      <rect x="580" y="62" width="90" height="298" fill="#1F2A44" fill-opacity="0.55"/><text x="625" y="54" text-anchor="middle" font-size="16">702</text>
+      <polyline points="145,250 305,220 465,205 625,175" fill="none" stroke="#CC092F" stroke-width="3"/>
+      <text x="145" y="385" text-anchor="middle" font-size="16">2022</text><text x="305" y="385" text-anchor="middle" font-size="16">2023</text>
+      <text x="465" y="385" text-anchor="middle" font-size="16">2024</text><text x="625" y="385" text-anchor="middle" font-size="16">2025E</text>
+    </svg>
+  </figure>
+  <div class="el" data-type="text" data-id="e13" style="left:860px; top:160px; width:356px; height:300px; z-index:3">
+    <p><b>CAGR 2022–25E: 19,6%</b></p>
+    <p class="muted">Margem EBITDA sobe de 18% para 23% com ganho de escala.</p>
+  </div>
+  <aside class="notes">O gráfico será editável na Fase 6; aqui o SVG estático foi desenhado à mão.</aside>
+</section>
+
+<section class="slide" data-slide-id="s5" data-layout="title-content" data-hidden="true">
+  <div class="el" data-type="text" data-id="e14" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Backup: premissas detalhadas</h2></div>
+  <div class="el" data-type="text" data-id="e15" style="left:64px; top:150px; width:1152px; height:300px; z-index:2"><p>Slide oculto: não aparece na apresentação nem na impressão.</p></div>
+</section>
+
+<section class="slide" data-slide-id="s6" data-layout="two-columns">
+  <div class="el" data-type="text" data-id="e16" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Próximos passos</h2></div>
+  <div class="el" data-type="text" data-id="e17" style="left:64px; top:150px; width:540px; height:400px; z-index:2">
+    <p><b>Até a assinatura</b></p>
+    <ul><li>Due diligence financeira</li><li>Negociação do SPA</li><li>Aprovação do CADE</li></ul>
+  </div>
+  <div class="el" data-type="text" data-id="e18" style="left:676px; top:150px; width:540px; height:400px; z-index:3">
+    <p><b>Primeiros 100 dias</b></p>
+    <ul><li>Novo CFO</li><li>Plano de compras conjuntas</li><li>Abertura do CD em Campinas</li></ul>
+  </div>
+  <aside class="notes">Pedir aprovação para avançar para a fase vinculante.</aside>
+</section>
+
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!--
+  run-tests.html - unit tests for the editor's pure functions (SPEC 8.3).
+
+  Double-click this file to run the tests in Edge or Chrome. It needs nothing but the
+  browser: the editor's source files are loaded straight from ../src/js/ with classic
+  <script src> tags (allowed on file://, unlike ES modules).
+
+  The list of source files below must match the order in src/index.html;
+  tests/test_build.py checks that automatically.
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Deck Editor — unit tests</title>
+    <style>
+        body { font-family: "Segoe UI", Arial, sans-serif; margin: 24px; color: #222; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        #summary { font-size: 16px; font-weight: 600; margin-bottom: 12px; }
+        #results { list-style: none; padding: 0; font-family: Consolas, monospace; font-size: 13px; }
+        #results li { padding: 2px 6px; }
+        .pass { color: #107c10; }
+        .fail { color: #c50f1f; background: #fde7e9; }
+    </style>
+</head>
+<body>
+    <h1>Deck Editor — unit tests</h1>
+    <div id="summary">Running…</div>
+    <ol id="results"></ol>
+
+    <!-- APP-SOURCES-START (same order as src/index.html) -->
+    <script src="../src/js/app.js"></script>
+    <script src="../src/js/util.js"></script>
+    <script src="../src/js/events.js"></script>
+    <script src="../src/js/shortcuts.js"></script>
+    <script src="../src/js/history.js"></script>
+    <script src="../src/js/charts.js"></script>
+    <script src="../src/js/template.js"></script>
+    <script src="../src/js/importer.js"></script>
+    <script src="../src/js/normalize.js"></script>
+    <script src="../src/js/serialize.js"></script>
+    <script src="../src/js/icons.js"></script>
+    <script src="../src/js/dialogs.js"></script>
+    <script src="../src/js/deck.js"></script>
+    <script src="../src/js/canvas.js"></script>
+    <script src="../src/js/thumbnails.js"></script>
+    <script src="../src/js/fileio.js"></script>
+    <script src="../src/js/commands.js"></script>
+    <script src="../src/js/ribbon.js"></script>
+    <script src="../src/js/ui.js"></script>
+    <!-- APP-SOURCES-END -->
+
+    <script src="harness.js"></script>
+    <script src="unit/util.test.js"></script>
+    <script src="unit/shortcuts.test.js"></script>
+    <script src="unit/history.test.js"></script>
+    <script src="unit/importer.test.js"></script>
+    <script src="unit/serialize.test.js"></script>
+    <script src="unit/charts.test.js"></script>
+    <script src="unit/fileio.test.js"></script>
+    <script>
+        runAllTests();
+    </script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<!-- SAMPLE DECK - FAKE DATA ONLY. What Copilot produces with the prompt in SPEC Appendix A:
+     contract-style elements, but no z-index, and charts as JSON only (no SVG). -->
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Projeto Cedro — Visão geral</title>
+<style>
+  :root {
+    --font-heading: Calibri, Arial, sans-serif;
+    --font-body: Segoe UI, Arial, sans-serif;
+    --color-primary: #0B6E4F;
+    --color-accent: #08415C;
+    --color-text: #1b1b1b;
+    --color-bg: #ffffff;
+  }
+  body { margin: 0; font-family: var(--font-body); color: var(--color-text); }
+  .slide { position: relative; width: 1280px; height: 720px; overflow: hidden; background: var(--color-bg); }
+  .el { position: absolute; }
+  .title { font-family: var(--font-heading); font-size: 40px; font-weight: bold; color: var(--color-accent); }
+  .body-text { font-size: 20px; line-height: 1.5; }
+  .placeholder { background: #e5e7eb; color: #6b7280; display: flex; align-items: center; justify-content: center; font-size: 18px; border: 1px dashed #9ca3af; }
+  .bar { background: var(--color-primary); }
+  table { border-collapse: collapse; width: 100%; font-size: 18px; }
+  th { background: var(--color-accent); color: #fff; padding: 8px; text-align: left; }
+  td { padding: 8px; border-bottom: 1px solid #ddd; }
+  td.num { text-align: right; }
+</style>
+</head>
+<body>
+
+<section class="slide" data-slide-id="s1">
+  <div class="el title" data-type="text" data-id="t1" style="left:80px; top:250px; width:1120px; height:70px;">Projeto Cedro</div>
+  <div class="el bar" data-type="shape" data-id="b1" style="left:80px; top:330px; width:160px; height:6px;"></div>
+  <div class="el body-text" data-type="text" data-id="t2" style="left:80px; top:350px; width:1120px; height:40px;">Investimento em energia renovável · Dezembro 2026</div>
+  <div class="el placeholder" data-type="image" data-id="i1" style="left:1040px; top:40px; width:180px; height:60px;">[image]</div>
+  <aside class="notes">Projeto fictício para teste do editor.</aside>
+</section>
+
+<section class="slide" data-slide-id="s2">
+  <div class="el title" data-type="text" data-id="t3" style="left:80px; top:40px; width:1120px; height:60px;">Ponte do EBITDA 2024–2026E</div>
+  <figure class="el" data-type="chart" data-id="c1" style="left:80px; top:130px; width:1120px; height:500px; margin:0;">
+    <script type="application/json" class="chart-data">{"version":1,"type":"waterfall","categories":["EBITDA 2024","Novos parques","Eficiência","Custos corporativos","EBITDA 2026E"],"series":[{"name":"R$ mn","values":[240,95,30,-25,340]}],"options":{"title":"Ponte do EBITDA (R$ mn)"}}</script>
+  </figure>
+  <aside class="notes">Explicar a contribuição dos novos parques.</aside>
+</section>
+
+<section class="slide" data-slide-id="s3">
+  <div class="el title" data-type="text" data-id="t4" style="left:80px; top:40px; width:1120px; height:60px;">Receita e margem</div>
+  <figure class="el" data-type="chart" data-id="c2" style="left:80px; top:130px; width:700px; height:480px; margin:0;">
+    <script type="application/json" class="chart-data">{"version":1,"type":"combo","categories":["2023","2024","2025E","2026E"],"series":[{"name":"Receita (R$ mn)","values":[520,610,730,880]},{"name":"Margem EBITDA","values":[0.38,0.39,0.41,0.42]}],"options":{"title":"Receita e margem EBITDA"}}</script>
+  </figure>
+  <div class="el" data-type="table" data-id="tb1" style="left:820px; top:150px; width:380px; height:200px;">
+    <table>
+      <tr><th>Métrica</th><th>2026E</th></tr>
+      <tr><td>Capacidade (MW)</td><td class="num">1.250</td></tr>
+      <tr><td>Fator de capacidade</td><td class="num">31%</td></tr>
+      <tr><td>Contratos PPA</td><td class="num">85%</td></tr>
+    </table>
+  </div>
+  <aside class="notes"></aside>
+</section>
+
+</body>
+</html>

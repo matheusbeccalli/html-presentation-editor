@@ -1,0 +1,99 @@
+/*
+ * editor.css - colours, fonts and the overall page layout of the editor.
+ * Only Windows fonts with a generic fallback (SPEC 2.1).
+ * Other files: ribbon.css (title bar, ribbon), panels.css (rail, canvas,
+ * notes, format pane, status bar), dialogs.css.
+ */
+
+:root {
+    --ui-font: "Segoe UI", Calibri, Arial, sans-serif;
+    --accent: #b7472a;            /* PowerPoint-like orange-red */
+    --accent-dark: #8f3720;
+    --accent-soft: #f6e3dd;
+    --text: #252423;
+    --text-muted: #605e5c;
+    --border: #d2d0ce;
+    --surface: #ffffff;
+    --surface-alt: #f3f2f1;
+    --canvas-bg: #e1dfdd;
+    --danger: #a4262c;
+    --focus: #0f6cbd;
+    color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+    height: 100%;
+    margin: 0;
+}
+
+body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;            /* the editor never scrolls as a page; panels scroll */
+    font-family: var(--ui-font);
+    font-size: 13px;
+    color: var(--text);
+    background: var(--surface-alt);
+}
+
+[hidden] { display: none !important; }
+
+button { font: inherit; color: inherit; }
+button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.icon { flex: none; }
+
+/* Generic buttons (dialogs, welcome screen). */
+.btn {
+    min-width: 80px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+}
+.btn:hover { background: var(--surface-alt); }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--accent-dark); }
+.btn-danger.btn-primary { background: var(--danger); border-color: var(--danger); }
+
+#workspace {
+    flex: 1;
+    display: flex;
+    min-height: 0;               /* lets the children scroll instead of growing the page */
+}
+
+#center {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+/* Shown while a file is opened or converted. */
+#busy {
+    position: fixed; inset: 0; z-index: 900;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 255, 255, 0.6);
+    cursor: progress;
+}
+#busy-text {
+    padding: 12px 20px; border-radius: 6px;
+    background: var(--surface); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    font-size: 14px;
+}
+
+/* Shown while a file is dragged over the window. */
+#drop-zone {
+    position: fixed; inset: 0; z-index: 800;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(183, 71, 42, 0.12);
+    border: 3px dashed var(--accent);
+    pointer-events: none;        /* the drop event goes to the window underneath */
+}
+#drop-zone div {
+    padding: 16px 28px; border-radius: 8px;
+    background: var(--surface); font-size: 16px; font-weight: 600; color: var(--accent);
+}

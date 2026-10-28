@@ -1,0 +1,110 @@
+/* panels.css - thumbnail rail, slide canvas, notes area, format pane and status bar. */
+
+/* ---- Thumbnail rail (left) ---- */
+#thumbnail-rail {
+    flex: none;
+    width: 212px;
+    overflow-y: auto;
+    padding: 10px 8px 10px 4px;
+    background: var(--surface-alt);
+    border-right: 1px solid var(--border);
+}
+.thumb {
+    position: relative;
+    display: flex; align-items: flex-start; gap: 6px;
+    margin-bottom: 10px; cursor: pointer;
+}
+.thumb-number { width: 22px; text-align: right; font-size: 12px; color: var(--text-muted); padding-top: 2px; }
+.thumb-box {
+    position: relative;
+    width: 168px; height: 94.5px;        /* 1280x720 x --thumb-scale */
+    overflow: hidden;
+    background: #fff;
+    border: 2px solid transparent;
+    outline: 1px solid var(--border);
+    border-radius: 2px;
+}
+.thumb:hover .thumb-box { outline-color: #a19f9d; }
+.thumb-current .thumb-box { border-color: var(--accent); outline-color: var(--accent); }
+.thumb-current .thumb-number { color: var(--accent); font-weight: 600; }
+.thumb-frame {
+    position: absolute; left: 0; top: 0;
+    width: 1280px; height: 720px; border: 0;
+    transform: scale(var(--thumb-scale));
+    transform-origin: 0 0;
+    pointer-events: none;                  /* clicks go to the .thumb, not into the slide */
+}
+.thumb-hidden .thumb-box { opacity: 0.45; }
+.thumb-hidden-badge {
+    position: absolute; left: 4px; top: 22px;
+    color: var(--text-muted);
+}
+.thumb-hidden-badge .icon { width: 16px; height: 16px; }
+
+/* ---- Canvas (centre) ---- */
+#canvas-area {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--canvas-bg);
+}
+#canvas-stage-box { position: relative; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.25); background: #fff; }
+#canvas-stage {
+    position: absolute; left: 0; top: 0;
+    width: 1280px; height: 720px;          /* the real slide size; canvas.js scales it */
+    transform-origin: 0 0;
+}
+#deck-frame { display: block; width: 1280px; height: 720px; border: 0; background: #fff; }
+#overlay { position: absolute; inset: 0; pointer-events: none; }
+
+#welcome {
+    max-width: 520px; padding: 32px 36px;
+    background: var(--surface); border-radius: 8px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
+    text-align: center;
+}
+#welcome h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; color: var(--accent); }
+#welcome p { margin: 0 0 16px; line-height: 1.5; color: var(--text-muted); }
+.welcome-buttons { display: flex; justify-content: center; gap: 10px; margin-bottom: 14px; }
+.welcome-hint { font-size: 12px; }
+
+/* ---- Notes (below the canvas) ---- */
+#notes-panel {
+    flex: none;
+    height: 88px;
+    padding: 6px 12px;
+    overflow-y: auto;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+}
+.panel-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.panel-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
+#notes-text { padding-top: 4px; line-height: 1.45; white-space: pre-wrap; }
+#notes-text.empty { color: var(--text-muted); font-style: italic; }
+
+/* ---- Format pane (right) ---- */
+#format-pane {
+    flex: none;
+    width: 240px;
+    padding: 12px 14px;
+    overflow-y: auto;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+}
+#format-pane h2 { margin: 0 0 8px; font-size: 14px; font-weight: 600; }
+#format-pane .panel-hint { line-height: 1.5; }
+
+/* ---- Status bar (bottom) ---- */
+#statusbar {
+    flex: none;
+    display: flex; align-items: center; gap: 18px;
+    height: 24px; padding: 0 12px;
+    background: var(--surface-alt);
+    border-top: 1px solid var(--border);
+    font-size: 12px; color: var(--text-muted);
+}
+#status-message { flex: 1; }
+
+@media (max-width: 900px) {
+    #format-pane { display: none; }
+}

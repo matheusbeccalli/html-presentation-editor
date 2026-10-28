@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<!-- SAMPLE DECK - FAKE DATA ONLY. Imitates a typical Copilot-generated deck:
+     flow layout, its own navigation script, a CDN chart library, remote fonts and images. -->
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Projeto Boreal — Análise de Investimento</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Inter', 'Segoe UI', sans-serif; background: #0f172a; overflow: hidden; }
+
+  .slide {
+    display: none; width: 100vw; height: 100vh; padding: 60px 80px;
+    flex-direction: column; color: #fff;
+    background: linear-gradient(135deg, #1e3a8a 0%, #0f172a 100%);
+  }
+  .slide.active { display: flex; animation: fadeIn 0.6s ease; }
+  .slide.light { background: #f8fafc; color: #0f172a; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: none; } }
+
+  h1 { font-family: 'Montserrat', 'Segoe UI', sans-serif; font-size: 56px; margin-bottom: 16px; }
+  h2 { font-size: 36px; margin-bottom: 28px; }
+  .subtitle { font-size: 22px; opacity: 0.85; }
+  .badge { display: inline-block; background: #f59e0b; color: #0f172a; font-weight: 700;
+           padding: 6px 14px; border-radius: 999px; font-size: 14px; margin-bottom: 28px; align-self: flex-start; }
+  .logo { position: absolute; top: 40px; right: 60px; height: 48px; }
+  .hero { margin-top: auto; margin-bottom: auto; }
+
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+  .card { background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.18);
+          border-radius: 14px; padding: 28px; }
+  .card .value { font-size: 44px; font-weight: 700; color: #60a5fa; }
+  .card .label { font-size: 16px; opacity: 0.8; margin-top: 6px; }
+  .card p { font-size: 15px; margin-top: 14px; line-height: 1.5; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 18px; }
+  th { text-align: left; background: #1e3a8a; color: #fff; padding: 10px 14px; }
+  td { padding: 10px 14px; border-bottom: 1px solid #cbd5e1; }
+  td.n, th.n { text-align: right; }
+  .light h2 { color: #1e3a8a; }
+
+  .chart-wrap { flex: 1; background: #fff; border-radius: 12px; padding: 20px; }
+  canvas { width: 100% !important; height: 360px !important; }
+
+  .cols { display: flex; gap: 48px; }
+  .col { flex: 1; }
+  .col h3 { font-size: 22px; color: #f59e0b; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+  .col li { font-size: 19px; line-height: 1.6; margin-left: 22px; }
+  .icon { width: 28px; height: 28px; }
+
+  .nav { position: fixed; bottom: 20px; right: 24px; display: flex; gap: 8px; align-items: center; color: #fff; }
+  .nav button { background: #334155; color: #fff; border: 0; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  .notes { display: none; }
+  .fonte { font-size: 13px; opacity: 0.7; margin-top: 18px; }
+</style>
+</head>
+<body>
+
+<div class="slide active">
+  <img class="logo" src="https://example.com/assets/logo-boreal.png" alt="Logo">
+  <div class="hero">
+    <span class="badge">CONFIDENCIAL</span>
+    <h1>Projeto Boreal</h1>
+    <p class="subtitle">Investimento minoritário na Ômega Logística · Novembro 2026</p>
+  </div>
+  <div class="notes">Começar pela tese: consolidação do setor de logística refrigerada.</div>
+</div>
+
+<div class="slide">
+  <h2>Destaques financeiros</h2>
+  <div class="grid">
+    <div class="card"><div class="value">R$ 1,4 bi</div><div class="label">Receita 2025E</div><p>Crescimento de 22% sobre 2024, puxado por novos contratos.</p></div>
+    <div class="card"><div class="value">16,8%</div><div class="label">Margem EBITDA</div><p>Expansão de 2,1 p.p. com otimização de rotas.</p></div>
+    <div class="card"><div class="value">2,1x</div><div class="label">Dívida líq. / EBITDA</div><p>Alavancagem confortável para o plano de expansão.</p></div>
+  </div>
+  <p class="fonte">Fonte: números fictícios para teste.</p>
+  <div class="notes">Destacar a geração de caixa.</div>
+</div>
+
+<div class="slide light">
+  <h2>Estrutura da transação</h2>
+  <table>
+    <tr><th>Item</th><th class="n">R$ mn</th><th class="n">% do total</th></tr>
+    <tr><td>Aumento de capital</td><td class="n">350</td><td class="n">58%</td></tr>
+    <tr><td>Compra de ações secundárias</td><td class="n">220</td><td class="n">37%</td></tr>
+    <tr><td>Custos da transação</td><td class="n">30</td><td class="n">5%</td></tr>
+    <tr><td><b>Total</b></td><td class="n"><b>600</b></td><td class="n"><b>100%</b></td></tr>
+  </table>
+</div>
+
+<div class="slide light">
+  <h2>Evolução da receita</h2>
+  <div class="chart-wrap"><canvas id="revenueChart"></canvas></div>
+</div>
+
+<div class="slide">
+  <h2>Riscos e mitigantes</h2>
+  <div class="cols">
+    <div class="col">
+      <h3><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#ef4444"/></svg>Riscos</h3>
+      <ul><li>Concentração em 3 clientes</li><li>Custo de combustível</li><li>Execução da expansão</li></ul>
+    </div>
+    <div class="col">
+      <h3><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#22c55e"/></svg>Mitigantes</h3>
+      <ul><li>Contratos de 5 anos com reajuste</li><li>Hedge de diesel</li><li>Novo COO com histórico no setor</li></ul>
+    </div>
+  </div>
+</div>
+
+<div class="nav">
+  <button onclick="prev()">‹</button><span id="counter">1 / 5</span><button onclick="next()">›</button>
+</div>
+
+<script>
+  let current = 0;
+  const slides = document.querySelectorAll('.slide');
+  function show(n) {
+    slides[current].classList.remove('active');
+    current = (n + slides.length) % slides.length;
+    slides[current].classList.add('active');
+    document.getElementById('counter').textContent = (current + 1) + ' / ' + slides.length;
+  }
+  function next() { show(current + 1); }
+  function prev() { show(current - 1); }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowRight') next();
+    if (e.key === 'ArrowLeft') prev();
+  });
+  new Chart(document.getElementById('revenueChart'), {
+    type: 'bar',
+    data: { labels: ['2022', '2023', '2024', '2025E'], datasets: [{ label: 'Receita (R$ mn)', data: [780, 950, 1150, 1400] }] }
+  });
+</script>
+</body>
+</html>

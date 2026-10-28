@@ -74,6 +74,24 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .btn-primary:hover { background: var(--accent-dark); }
 .btn-danger.btn-primary { background: var(--danger); border-color: var(--danger); }
 
+/* Warning for browsers that cannot save in place (Firefox). */
+#browser-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 12px;
+    border-bottom: 1px solid #e0c36c;
+    background: #fff4ce;
+}
+#browser-banner span { flex: 1; }
+#browser-banner button {
+    border: none;
+    background: none;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+}
+
 #workspace {
     flex: 1;
     display: flex;
@@ -365,6 +383,13 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     <div id="ribbon-tabs" role="tablist"></div>
     <div id="ribbon-panel"></div>
 </nav>
+
+<!-- Shown only in browsers without the File System Access API, e.g. Firefox (ui.js). -->
+<div id="browser-banner" role="status" hidden>
+    <span>This browser cannot save back into the opened file: Save and Save As download a copy to your
+    Downloads folder, and AutoSave is not available. For the full editor, open this file in Microsoft Edge or Google Chrome.</span>
+    <button type="button" id="browser-banner-close" title="Hide this message">×</button>
+</div>
 
 <main id="workspace">
     <aside id="thumbnail-rail" aria-label="Slides"></aside>
@@ -3425,6 +3450,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         return /\.html?$/i.test(name || '');
     };
 
+    /*
+     * True when the browser can write back into the file it opened (Edge,
+     * Chrome). Firefox and Safari lack the File System Access API, so there
+     * Save and Save As become plain downloads and AutoSave is impossible.
+     */
+    App.fileio.canSaveInPlace = function canSaveInPlace(win) {
+        return typeof win.showSaveFilePicker === 'function' && typeof win.showOpenFilePicker === 'function';
+    };
+
     App.fileio.windowTitle = function windowTitle(fileName, dirty) {
         if (!fileName) {
             return 'Deck Editor';
@@ -4069,6 +4103,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
 
         buildQuickAccess();
+        showBrowserBanner();
         byId('welcome-new').addEventListener('click', () => App.commands.run('newDeck'));
         byId('welcome-open').addEventListener('click', () => App.commands.run('open'));
 
@@ -4105,6 +4140,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         };
         ['deck-loaded', 'history-changed', 'saved'].forEach((name) => App.events.on(name, refresh));
         App.ui.refreshQuickAccess = refresh;
+    }
+
+    // Firefox (and any browser without the File System Access API) gets a warning,
+    // so a Save that turns into a download does not look like a bug. Chromium only (SPEC 2.4).
+    function showBrowserBanner() {
+        const banner = byId('browser-banner');
+        banner.hidden = App.fileio.canSaveInPlace(window);
+        byId('browser-banner-close').addEventListener('click', () => {
+            banner.hidden = true;
+        });
     }
 
     App.ui.updateTitle = function updateTitle() {

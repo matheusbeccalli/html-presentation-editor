@@ -45,6 +45,7 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [x] Central keyboard-shortcut registry; shortcuts ignored while typing in a text field unless they are formatting shortcuts
 - [x] New blank deck from a built-in template
 - [x] Ribbon shell (Home, Insert, Arrange, Slide Show, Export tabs), Format pane and notes area placeholders laid out like PowerPoint
+- [x] Chromium only (SPEC 2.4): browsers without the File System Access API (Firefox) show a banner saying Save downloads a copy and to use Edge or Chrome
 - [x] **Done when:** a Copilot deck opens, shows all slides, saves back unchanged (except normalization), and the saved file presents on its own. *(Automated with the sample decks in `tests/e2e_test.py`; the manual checks below are for you.)*
   - [ ] In Edge: File > Open a **real** Copilot deck (keep it in `private/`), check every slide is there and looks like the original
   - [x] Ctrl+S on a deck opened with File > Open: the first save asks you to confirm the file once (Save As opens on the same file; Edge refuses write permission to pages opened from disk), then the file on disk is overwritten and later saves need no confirmation (open it in Notepad to confirm)

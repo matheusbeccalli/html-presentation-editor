@@ -39,7 +39,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |
 | `commands.js` | Every user action by name; one place that reports errors | fileio, history, deck |
 | `ribbon.js` | File menu and tabs; buttons only name commands | commands |
-| `ui.js` | Title bar, status bar, notes, welcome screen, busy/drop overlays | events |
+| `ui.js` | Title bar, status bar, notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events |
 
 `src/player/player.js` + `player.css` are **not run by the editor**. They are copied into every saved deck
 so it presents (arrow keys, F = full screen, hidden slides skipped) and prints one slide per page on its own.

@@ -32,6 +32,13 @@
     <div id="ribbon-panel"></div>
 </nav>
 
+<!-- Shown only in browsers without the File System Access API, e.g. Firefox (ui.js). -->
+<div id="browser-banner" role="status" hidden>
+    <span>This browser cannot save back into the opened file: Save and Save As download a copy to your
+    Downloads folder, and AutoSave is not available. For the full editor, open this file in Microsoft Edge or Google Chrome.</span>
+    <button type="button" id="browser-banner-close" title="Hide this message">×</button>
+</div>
+
 <main id="workspace">
     <aside id="thumbnail-rail" aria-label="Slides"></aside>
 

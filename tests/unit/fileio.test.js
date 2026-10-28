@@ -126,3 +126,9 @@ test('fileio: windowTitle shows a dot when there are unsaved changes', () => {
     assertEqual(App.fileio.windowTitle('deck.html', false), 'deck.html — Deck Editor');
     assertEqual(App.fileio.windowTitle(null, false), 'Deck Editor');
 });
+
+test('fileio: canSaveInPlace is true only when the browser has the File System Access API (Edge, Chrome)', () => {
+    assert(App.fileio.canSaveInPlace({ showSaveFilePicker: function () {}, showOpenFilePicker: function () {} }), 'Chromium');
+    assert(!App.fileio.canSaveInPlace({}), 'Firefox has neither');
+    assert(!App.fileio.canSaveInPlace({ showSaveFilePicker: undefined }), 'switched off');
+});

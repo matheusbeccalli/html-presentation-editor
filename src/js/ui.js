@@ -26,6 +26,7 @@
         });
 
         buildQuickAccess();
+        showBrowserBanner();
         byId('welcome-new').addEventListener('click', () => App.commands.run('newDeck'));
         byId('welcome-open').addEventListener('click', () => App.commands.run('open'));
 
@@ -62,6 +63,16 @@
         };
         ['deck-loaded', 'history-changed', 'saved'].forEach((name) => App.events.on(name, refresh));
         App.ui.refreshQuickAccess = refresh;
+    }
+
+    // Firefox (and any browser without the File System Access API) gets a warning,
+    // so a Save that turns into a download does not look like a bug. Chromium only (SPEC 2.4).
+    function showBrowserBanner() {
+        const banner = byId('browser-banner');
+        banner.hidden = App.fileio.canSaveInPlace(window);
+        byId('browser-banner-close').addEventListener('click', () => {
+            banner.hidden = true;
+        });
     }
 
     App.ui.updateTitle = function updateTitle() {

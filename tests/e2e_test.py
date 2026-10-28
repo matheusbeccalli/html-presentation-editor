@@ -38,6 +38,15 @@ APPENDIX_A = SAMPLES / "copilot-appendix-a-deck.html"
 WIDE = SAMPLES / "deck-1920x1080.html"
 HEAVY = SAMPLES / "heavy-deck.html"
 
+PLAYWRIGHT = None   # set in main(); one test also launches Firefox through it
+
+
+def firefox_installed():
+    try:
+        return Path(PLAYWRIGHT.firefox.executable_path).exists()
+    except Exception:  # noqa: BLE001 - any failure means "not available"
+        return False
+
 
 # ----------------------------------------------------------------------
 # Helpers
@@ -158,6 +167,26 @@ def test_editor_starts_offline_with_csp(browser):
     editor.page.screenshot(path=str(OUTPUT / "01-welcome.png"))
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
+
+
+def test_browser_banner_only_outside_chromium(browser):
+    editor = Editor(browser)
+    check(editor.page.is_hidden("#browser-banner"), "no banner in Chromium")
+    editor.close()
+    if not firefox_installed():
+        print("    (Firefox part skipped: run `playwright install firefox` to include it)")
+        return
+    firefox = PLAYWRIGHT.firefox.launch()
+    try:
+        editor = Editor(firefox)
+        check(editor.page.is_visible("#browser-banner"), "Firefox shows the banner")
+        check("Edge" in editor.page.inner_text("#browser-banner"), "banner names Edge")
+        editor.page.screenshot(path=str(OUTPUT / "01b-firefox-banner.png"))
+        editor.page.click("#browser-banner-close")
+        check(editor.page.is_hidden("#browser-banner"), "the banner can be closed")
+        editor.close()
+    finally:
+        firefox.close()
 
 
 def test_new_blank_deck(browser):
@@ -386,6 +415,7 @@ def test_heavy_deck_stays_responsive(browser):
 
 TESTS = [
     test_editor_starts_offline_with_csp,
+    test_browser_banner_only_outside_chromium,
     test_new_blank_deck,
     test_contract_deck_round_trip_is_exact,
     test_saved_deck_presents_on_its_own,
@@ -404,7 +434,9 @@ def main():
         return 1
     OUTPUT.mkdir(exist_ok=True)
     failed = 0
+    global PLAYWRIGHT
     with sync_playwright() as p:
+        PLAYWRIGHT = p
         browser = p.chromium.launch()
         for test in TESTS:
             try:

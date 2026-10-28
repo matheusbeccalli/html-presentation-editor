@@ -35,6 +35,15 @@
         return /\.html?$/i.test(name || '');
     };
 
+    /*
+     * True when the browser can write back into the file it opened (Edge,
+     * Chrome). Firefox and Safari lack the File System Access API, so there
+     * Save and Save As become plain downloads and AutoSave is impossible.
+     */
+    App.fileio.canSaveInPlace = function canSaveInPlace(win) {
+        return typeof win.showSaveFilePicker === 'function' && typeof win.showOpenFilePicker === 'function';
+    };
+
     App.fileio.windowTitle = function windowTitle(fileName, dirty) {
         if (!fileName) {
             return 'Deck Editor';

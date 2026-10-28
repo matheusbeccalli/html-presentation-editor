@@ -105,17 +105,30 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="deck-format" content="1">
+  <meta name="deck-format" content="2">
   <style>
     :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
-            --color-primary: #CC092F; --color-accent: #1F2A44; --color-text: #222; --color-bg: #fff; }
+            --color-primary: #CC092F; --color-accent: #1F2A44; --color-text: #222; --color-bg: #fff;
+            /* list style per level (Phase 3 text model); levels 3-5 follow the same pattern */
+            --list-1-bullet: "•"; --list-1-number: decimal;     --list-1-indent: 24px; --list-1-space-before: 6pt;
+            --list-1-bullet-color: currentColor; --list-1-bullet-size: 100%;
+            --list-2-bullet: "–"; --list-2-number: lower-alpha; --list-2-indent: 56px; --list-2-space-before: 3pt;
+            --list-2-bullet-color: currentColor; --list-2-bullet-size: 100%; … }
     .slide { position: relative; width: 1280px; height: 720px; overflow: hidden; }
     .el    { position: absolute; }
   </style>
+  <style data-deck-text>/* list stylesheet written by the editor: bullets, numbers, hanging indents */</style>
 </head>
 <body>
   <section class="slide" data-slide-id="s1">
-    <div class="el" data-type="text"  data-id="e1" style="left:64px; top:48px; width:1152px; height:80px; z-index:1">…</div>
+    <div class="el" data-type="text"  data-id="e1" style="left:64px; top:48px; width:1152px; height:80px; z-index:1">
+      <p data-list="none" data-level="1"><span style="font-size:32pt"><b>Sumário executivo</b></span></p>
+    </div>
+    <div class="el" data-type="text"  data-id="e5" style="left:64px; top:150px; width:1152px; height:400px; z-index:5">
+      <p data-list="bullet" data-level="1">Receita de R$ 480 mi em 2025</p>
+      <p data-list="bullet" data-level="2">Crescimento de 12% a.a.</p>
+      <p data-list="number" data-level="1">Próximo passo</p>
+    </div>
     <img class="el" data-type="image" data-id="e2" style="left:…" src="data:image/png;base64,…">
     <div class="el" data-type="table" data-id="e3" style="left:…"><table>…</table></div>
     <figure class="el" data-type="chart" data-id="e4" style="left:…">
@@ -128,6 +141,8 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
 </html>
 ```
 
+Text inside text elements and shapes follows the **flat-paragraph text model** (Phase 3, "Text model"): one `<p>` per line, list type and indent level as attributes, no `<ul>/<ol>/<li>` and no headings. Format 2 introduced this model; opening a format-1 deck migrates it.
+
 Element types: `text`, `image`, `table`, `shape`, `chart`, `group`. Every element has a unique `data-id`, absolute `left/top/width/height` in px, and a `z-index`. Theme colors and fonts come from the CSS variables in `:root`, so changing a variable restyles the whole deck. Slides may carry `data-hidden="true"` and `data-layout="title|title-content|two-columns|blank"`. A deck-level `<div class="master">` holds elements repeated on every slide (logo, footer, "Confidencial", slide number).
 
 **3.4 Importing decks that do not follow the contract**
@@ -136,6 +151,7 @@ Element types: `text`, `image`, `table`, `shape`, `chart`, `group`. Every elemen
 - Remove the deck's own `<script>` tags (Copilot decks often include navigation code). Warn the user and list what was removed.
 - "Normalize" converts flow-layout content to absolute positioning: measure each visible block with `getBoundingClientRect()` and write its position in px.
 - Decks at another size (e.g. 1920×1080) are scaled proportionally to 1280×720.
+- Text is converted to the flat-paragraph text model (Phase 3): nested `<ul>/<ol>/<li>` become `<p data-list data-level>`, headings become `<p>`, and the look is kept by turning the computed style into allowed inline formatting before tags and classes are removed.
 - Show a short import report: slides found, elements converted, items removed or blocked. Charts that carry JSON data but no SVG (as Copilot produces them, Appendix A) are rendered during import.
 
 **3.5 Editor and deck isolation**
@@ -148,6 +164,12 @@ Element types: `text`, `image`, `table`, `shape`, `chart`, `group`. Every elemen
 - On save, strip everything editor-only: `contenteditable`, selection classes, temporary ids, overlay elements.
 - Inject the small player script: arrow keys / PageUp / PageDown / Space to navigate, F for fullscreen, Home/End, slide counter, hidden slides skipped. The player is inert while the editor has the deck open (sandbox), and runs only when the saved file is opened on its own.
 - Include print CSS so the saved file prints one slide per landscape page (section 7).
+
+**3.7 Text editing behind one interface (escape hatch)**
+
+- All text editing lives in `text.js`, behind one interface: `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`. No other module touches the HTML inside a text element; the ribbon, shortcuts, paste, import and save all go through this interface.
+- Why: `contenteditable` with `document.execCommand` is the cheapest start, but browsers produce messy HTML. Behind one interface, the internals can be replaced without touching the rest of the editor.
+- If bullets or selection behavior remain buggy after Phase 3, propose replacing the internals with ProseMirror or Tiptap (both MIT). Ask the user before adding either library (2.2).
 
 ## 4. Features by phase
 
@@ -162,13 +184,13 @@ The interface follows PowerPoint: a ribbon with tabs (Home, Insert, Arrange, Sli
 - Thumbnail rail (live miniature of each slide), main canvas with "fit to window" zoom.
 - Save (Ctrl+S, overwrite via handle), Save As (`showSaveFilePicker`; fallback: download). Unsaved-changes dot in the title, and a warning before closing the tab with unsaved changes.
 - Undo/redo infrastructure (Ctrl+Z / Ctrl+Y), built now so every later feature records its changes. Approach: snapshot the affected slide's HTML before each change; keep up to 100 steps.
-- Central keyboard-shortcut registry (one place that maps keys to actions; shortcuts are ignored while typing in a text field unless they are formatting shortcuts).
+- Central keyboard-shortcut registry (one place that maps keys to actions; shortcuts are ignored while typing in a text field unless they are formatting shortcuts or Save / Save As / Open).
 - New blank deck from a built-in template.
 - **Done when:** a Copilot deck opens, shows all slides, saves back unchanged (except normalization), and the saved file presents on its own.
 
 **Phase 2: Select, move, resize, autosave**
 
-- Click to select; selection box with 8 resize handles drawn in the overlay layer. Drag to move; Shift while resizing keeps the aspect ratio; Alt disables snapping.
+- Click to select; selection box with 8 resize handles drawn in the overlay layer. Drag to move; Shift while resizing keeps the aspect ratio. (Snapping, and Alt to turn it off, is Phase 7.)
 - Arrow keys nudge 1 px, Shift+arrow 10 px. Delete removes. Ctrl+C / Ctrl+X / Ctrl+V / Ctrl+D (duplicate), also across slides.
 - Bring forward / send backward / to front / to back.
 - Format pane "Size & position": X, Y, W, H in px, editable.
@@ -178,16 +200,79 @@ The interface follows PowerPoint: a ribbon with tabs (Home, Insert, Arrange, Sli
 
 **Phase 3: Text**
 
+Nested bullets are on almost every slide the user makes, so they are the top priority of this phase.
+
 - Double-click a text element to edit (`contenteditable`). Insert text box.
-- Toolbar: bold, italic, underline, strikethrough, superscript, subscript, font family (Windows fonts from 2.1), size, color, highlight, clear formatting, align left/center/right/justify.
-- Bullets and numbering with indent levels (Tab / Shift+Tab), line spacing and paragraph spacing.
+- Toolbar: bold, italic, underline, strikethrough, superscript, subscript, font family (Windows fonts from 2.1), font size (see "Font sizes"), color, highlight, clear formatting, align left/center/right/justify.
+- Bullets and numbering with five indent levels (see "Text model" and "Bullet behavior"), line spacing and paragraph spacing.
 - Format painter (copy the style of one text, apply to another).
 - Autofit: shrink text to fit its box, with an option to resize the box instead.
 - Spell check in Portuguese (`spellcheck="true"`, `lang="pt-BR"`).
-- Paste as clean text by default (strip Word/Outlook styling); Ctrl+Shift+V keeps formatting.
 - Find & replace across all slides.
-- Implementation note: wrap all formatting commands in one module (`text.js`) so the deprecated-but-working `document.execCommand` can later be replaced by Selection/Range code without touching the rest.
-- **Done when:** a slide title and a bulleted paragraph can be fully reformatted without touching code.
+- All of it behind the `text.js` interface (3.7).
+
+*Text model: flat paragraphs with levels.*
+
+- Inside a text element, every line of body text is a `<p>`. List membership and nesting are attributes, not nested HTML: `<p data-list="bullet|number|none" data-level="1..5">…</p>`. Optional `data-start="N"` on a numbered paragraph restarts its numbering at N.
+- No `<ul>/<ol>/<li>` and no headings inside text elements. This mirrors PowerPoint, where each paragraph has an indent level, and maps directly to PptxGenJS `indentLevel` and `bullet` options on export (section 7).
+- Bullets and numbers are drawn with CSS (`::before` and CSS counters) from the `<style data-deck-text>` stylesheet that the editor writes into the deck (it is part of the deck and is saved with it). The paragraph gets a left padding and the bullet hangs in it, so wrapped lines align with the text, not with the bullet.
+- Per-level list style is part of the deck theme (3.3), so a corporate template can define it: CSS variables `--list-N-bullet`, `--list-N-number`, `--list-N-bullet-color`, `--list-N-bullet-size` (relative to the text), `--list-N-indent` and `--list-N-space-before` for N = 1..5. Defaults: bullets level 1 "•", level 2 "–", level 3 "▪", levels 4–5 "·"; numbering 1. / a. / i. by level (then 1. / a. again at levels 4–5); bullet color and size follow the text.
+- Numbering: a numbered paragraph at level N counts on counter `list-N` and resets the deeper counters, so numbers count per level and reset when a higher level appears (1, 2, a, b, 3 …). A bulleted or plain paragraph at the same or a higher level ends the numbered run; the next numbered paragraph starts again at 1 unless "Continue numbering" (which writes `data-start`) is used. `data-start` is mirrored by the normalizer into an inline `counter-set` on the paragraph, because CSS cannot read a number from an attribute in every browser and saved decks must render anywhere (2.5).
+- Import (3.4) and paste: nested `<ul>/<ol>/<li>` (Copilot decks, web pages) and Word/Outlook list paragraphs (`mso-list: … levelN`, with their bullet glyph spans removed) become flat paragraphs with the right list type and level. Headings become `<p>`; before tags and classes are removed, the computed style (size, weight, italic, color, font, alignment, spacing) is turned into allowed inline formatting, so titles keep their look.
+- Copying text out of the editor (Ctrl+C inside a text element) also puts nested `<ul>/<ol>` HTML on the clipboard, so bullets survive a paste into Outlook or Word, which do not understand `data-list`.
+- Deck format: this model is `deck-format` 2 (8.2). Opening a format-1 deck migrates its text with the import conversion, adds the list variables and `<style data-deck-text>`, and says so in the import report.
+
+*Bullet behavior (matches PowerPoint).* Tab, Shift+Tab, Alt+Shift+arrows and the toolbar act on every selected line at once, including mixed selections (bulleted, numbered and plain lines together). Nothing here acts during IME composition.
+
+| Key / action | Where | Result |
+| --- | --- | --- |
+| Tab | at the start of a line, or several lines selected | Demote one level (max 5) |
+| Tab | in the middle of text | Nothing (no tab character is inserted) |
+| Shift+Tab | at the start of a line, or several lines selected | Promote one level (min 1) |
+| Alt+Shift+Right / Alt+Shift+Left | anywhere in the line | Demote / promote one level |
+| Enter | in a non-empty list line | New line, same level and list type |
+| Enter | in an empty list line | Promote one level; at level 1 the line becomes plain text |
+| Shift+Enter | anywhere | Line break inside the same paragraph (no new bullet) |
+| Backspace | at the start of a list line, level > 1 | Promote one level |
+| Backspace | at the start of a list line, level 1 | Remove the bullet/number (the line becomes plain text) |
+| Backspace | at the start of a plain line | Merge with the line above |
+| Type "- " or "* " | at the start of a plain line | Start a bullet (the typed characters are removed) |
+| Type "1. " | at the start of a plain line | Start numbering |
+| Ctrl+Z | right after an autoformat | Undo only the autoformat (the typed "- " stays as text) |
+| Toolbar | Bullets / Numbering | Toggle the list type on every selected line |
+| Toolbar | Increase / Decrease indent | Demote / promote every selected line |
+| Toolbar | Restart numbering / Continue numbering | Restart writes `data-start="1"`; Continue writes `data-start` = the next number of the previous numbered run at that level |
+
+*Font sizes.*
+
+- Sizes in points, like PowerPoint: a dropdown with 8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96, and a field for typed values. Increase / decrease buttons step through that list; shortcuts Ctrl+Shift+> / Ctrl+Shift+<, plus Ctrl+] / Ctrl+[ (same keys on every keyboard layout).
+- Stored as `font-size` in pt on a `<span>` (1 pt = 96/72 px, consistent with the 1280×720 slide and with PPTX export). Never `document.execCommand('fontSize')`, which only knows 7 sizes. Sizes imported in px are shown in pt (px × 0.75, rounded to 0.5).
+- When the selection mixes sizes, the size field is blank, as in PowerPoint.
+
+*Normalizer: the defense against messy browser HTML.*
+
+- One function, `App.text.normalize(element)`, rewrites the HTML inside a text element into an allowed set:
+  - `<p>` with `data-list`, `data-level`, `data-start`, and a style limited to `text-align`, `line-height`, `margin-top`, `margin-bottom` (plus the `counter-set` it derives from `data-start`);
+  - `<b>`, `<i>`, `<u>`, `<s>`, `<sup>`, `<sub>`, `<br>`, `<a href>`;
+  - `<span>` with a style limited to `font-family`, `font-size`, `color`, `background-color`.
+- Conversions: `<strong>`→`<b>`, `<em>`→`<i>`, `<font>`→`<span>`, `<div>`→`<p>`, nested lists→flat paragraphs, text directly inside the element→wrapped in `<p>`. Unknown tags are unwrapped (their text is kept). `class`, `id` and every other attribute or style property are removed. Empty spans are removed and adjacent spans with identical styles are merged. `<a href>` keeps only `http:`, `https:` and `mailto:` links (no `javascript:`).
+- The text element's own style (`.el`: default font, size, color, padding) is not touched; the normalizer only rewrites what is inside it.
+- When it runs: on leaving text-edit mode, after every toolbar command, after paste, after import, and before save. Not on every keystroke, so the cursor never jumps while typing. When it runs during editing, it preserves the user's selection.
+- Running it twice gives the same result as running it once (idempotent); this is tested.
+
+*Paste into text.*
+
+- Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets and levels, links) through the normalizer, but drops fonts, sizes and colors so the pasted text matches the deck's theme (PowerPoint's "Use Destination Theme").
+- Ctrl+Shift+V pastes plain text only. A small paste-options button appears after a paste and switches between the two, like PowerPoint.
+- Must handle paste from Word, Outlook, Copilot's chat window and web pages.
+
+*Undo for text.*
+
+- The browser's own text undo is intercepted (`beforeinput` with `historyUndo` / `historyRedo`) and routed to `history.js`, so there is only one undo stack.
+- Typing is grouped into undo steps: a new step after a 1-second pause or a new paragraph. Every formatting or list command is its own step.
+- Each text step also stores the cursor position, so undo and redo while editing put the cursor back where it was.
+
+- **Done when:** a 3-level bulleted slide imported from a Copilot deck and a 3-level list pasted from Word both become editable flat paragraphs; every behavior in the bullet table works; a slide title and a bulleted paragraph can be fully reformatted without touching code; and the saved deck prints to PDF (Ctrl+P on the saved file) with bullets, numbers and indents as on screen.
 
 **Phase 4: Tables**
 
@@ -214,7 +299,7 @@ The interface follows PowerPoint: a ribbon with tabs (Home, Insert, Arrange, Sli
 **Phase 7: Arrange and slides**
 
 - Multi-select (Shift+click, or drag a rectangle on empty canvas). Align left/center/right/top/middle/bottom; distribute horizontally/vertically.
-- Smart guides and snapping to slide edges, center lines and other elements (5 px threshold). Optional gridlines and rulers.
+- Smart guides and snapping to slide edges, center lines and other elements (5 px threshold); Alt while dragging disables snapping. Optional gridlines and rulers.
 - Group / ungroup (Ctrl+G / Ctrl+Shift+G), rotate (handle and degrees field), lock element.
 - Slides: add (with layout picker), duplicate, delete, reorder by dragging thumbnails, hide slide.
 - Slide master: logo, footer text, "Confidencial" label, automatic slide numbers; shown on every slide, editable in one place.
@@ -320,13 +405,14 @@ Autosave has two independent layers: writing changes back to the deck file itsel
 - Every 30 seconds while there are unsaved changes, store a snapshot of the full deck HTML with a timestamp. Keep the last 5 snapshots per deck.
 - Each deck gets a stable id (`<meta name="deck-id">`, created on first save) so drafts match the right file even if it is renamed.
 - On startup, or when opening a deck that has drafts newer than the file, show a dialog: "Unsaved changes from 27/10 14:32 were found", with a thumbnail of slide 1 and buttons Recover / Compare / Discard.
-- Drafts for a deck are deleted after a successful save to file. All drafts are purged automatically after 7 days (setting: 1–30 days).
-- The file handle is also stored in IndexedDB, enabling a "Recent files" list (Chromium re-asks permission when reopening).
+- Drafts exist only while there are unsaved changes: a deck's drafts are deleted after a successful save to file, and when the tab is closed with no unsaved changes. All drafts are purged automatically after 1 day (setting: 1–30 days).
+- Optional, off by default: a "Recent files" list, which stores file handles (and so file names) in IndexedDB. Pages opened from disk cannot ask for permission again, so choosing a recent file opens the Open window in that file's folder.
 
 **6.3 Privacy controls (decks are confidential)**
 
-- Settings: "Keep recovery drafts in this browser" on/off (on by default), retention days, and a **"Delete all drafts now"** button.
-- A short note in Settings explains that drafts stay only in this browser profile on this computer, are not uploaded or synced, and are deleted on save or after the retention period.
+- Chromium gives every page opened from disk (`file://`) one shared storage area (verified 2026-10-28). Any other HTML file the user opens from disk in the same browser profile, such as an email attachment or a deck previewed on its own, can read the editor's drafts. Encryption cannot fix this, because the key would sit in the same shared storage. Hence the minimal exposure above: drafts only while there are unsaved changes, short retention, Recent files off by default.
+- Settings: "Keep recovery drafts in this browser" on/off (on by default), retention days (default 1), "Remember recent files" on/off (off by default; turning drafts off turns it off too), and a **"Delete all drafts now"** button that empties the editor's whole IndexedDB, Recent files included.
+- A short note in Settings explains, in plain words, that drafts stay only in this browser profile on this computer, are not uploaded or synced, are deleted on save or after the retention period, and can be read by other HTML files opened from disk in this browser.
 - If IndexedDB is unavailable (for example blocked by company policy for `file://` pages), detect it at startup, show "Crash recovery unavailable" in the status bar, and rely on Layer 1. The editor must never fail because storage is blocked; wrap every storage call in `try/catch`.
 
 **6.4 Status indicator**
@@ -407,6 +493,8 @@ The code must stay readable, every feature is tested before it is ticked, and no
 
 - `samples/` holds fake decks only: one that follows the contract, one messy Copilot-style deck (flow layout, its own scripts, remote font links), one at 1920×1080, and one heavy deck (40+ slides, many images) for performance.
 - `tests/run-tests.html`: a self-contained test page that runs unit tests for the pure functions (chart renderer, number formatting, import normalization, px↔inch conversion) and shows pass/fail. It needs nothing but the browser, so tests also run on the company machine.
+- Text (Phase 3): unit tests with HTML fixtures of fake text: messy `execCommand` output, Word paste HTML with `mso-list` levels, a Copilot deck with a 3-level nested `<ul>`, and mixed numbered/bulleted lists. The normalizer is tested for idempotence (running it twice equals running it once).
+- Text (Phase 3): a key-sequence test table for the bullet behavior (starting paragraphs + keys → expected paragraphs, list types and levels), run automatically.
 - Optional, at home only: end-to-end tests with Playwright for Python (open deck, edit, save, reopen, compare).
 - Each phase also gets a short manual checklist in `FEATURES.md` based on its "done when" test.
 - Run `build.py` and its offline check (3.2) before declaring any task done.
@@ -433,6 +521,10 @@ Create the presentation as ONE self-contained HTML file following these rules ex
   with a sans-serif fallback.
 - No external resources: no CDN, no Google Fonts, no remote images, no <script> tags for logic.
   Use a placeholder box with the text "[image]" where an image should go.
+- Text: every line of text is a <p>. Bullets and numbering are attributes, not lists:
+  <p data-list="bullet" data-level="1">, data-list="number" for numbered lines,
+  data-list="none" for plain text, data-level 1 to 5 for the indent level.
+  Do not use <ul>, <ol>, <li> or <h1>-<h6>; make titles larger and bold with style on the text box.
 - Tables are real <table> elements, with numbers right-aligned.
 - Charts: <figure class="el" data-type="chart"> containing only
   <script type="application/json" class="chart-data"> with this structure:

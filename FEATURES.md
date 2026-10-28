@@ -73,29 +73,75 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [ ] Crash-recovery drafts in IndexedDB (6.2): snapshot full deck HTML every 30 s while unsaved, keep the last 5 per deck
 - [ ] Stable deck id `<meta name="deck-id">`, created on first save
 - [ ] On startup / open: recovery dialog ("Unsaved changes from 27/10 14:32 were found") with slide-1 thumbnail and Recover / Compare / Discard
-- [ ] Drafts deleted after a successful save; all drafts purged after 7 days (setting: 1–30 days)
-- [ ] File handles stored in IndexedDB for a "Recent files" list
-- [ ] Privacy settings (6.3): "Keep recovery drafts in this browser" on/off, retention days, "Delete all drafts now", explanatory note
+- [ ] Drafts only while unsaved: deleted after a successful save and when the tab closes with no unsaved changes; all drafts purged after 1 day (setting: 1–30 days)
+- [ ] "Recent files" list (file handles in IndexedDB), **off by default**; choosing one opens the Open window in that file's folder
+- [ ] Privacy settings (6.3): "Keep recovery drafts in this browser" on/off, retention days, "Remember recent files" on/off, "Delete all drafts now" (empties the whole IndexedDB), note that other HTML files opened from disk can read drafts
 - [ ] IndexedDB unavailable → "Recovery unavailable" in the status bar, editor keeps working (every storage call in try/catch)
 - [ ] Status indicator (6.4): Saved · Saving… · Unsaved changes · AutoSave off · Draft saved 14:32 · Recovery unavailable
 - [ ] **Done when:** any element can be moved and resized precisely, every action undoes, and killing the browser mid-edit loses at most 30 seconds of work. Autosave (section 6): (1) with AutoSave on, closing the tab after an edit and reopening the file shows the edit; (2) with AutoSave off, killing the browser mid-edit and reopening offers to recover changes no older than 30 seconds; (3) "Delete all drafts now" leaves nothing in IndexedDB (DevTools > Application).
 
 ## Phase 3: Text
 
+Nested bullets are the top priority of this phase.
+
+*Interface and model*
+- [ ] `text.js` interface (3.7): `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`; no other module touches text internals
+- [ ] Text model: one `<p data-list="bullet|number|none" data-level="1..5">` per line, optional `data-start`; no `<ul>/<ol>/<li>` or headings inside text elements
+- [ ] Bullets and numbers drawn with CSS (`::before` + counters) from `<style data-deck-text>`, with a hanging indent; numbering per level, reset by a higher level (1, 2, a, b, 3)
+- [ ] Per-level list theme variables `--list-N-bullet / -number / -bullet-color / -bullet-size / -indent / -space-before` (defaults • – ▪ · ·, 1. a. i.)
+- [ ] `data-start` mirrored to an inline `counter-set` by the normalizer
+- [ ] `deck-format` bumped to 2; format-1 decks migrated on open (lists and headings converted, list variables and stylesheet added), noted in the import report
+- [ ] Import: nested `<ul>/<ol>/<li>` → flat paragraphs with levels; headings → `<p>` with their computed look kept as inline formatting
+- [ ] Import/paste: Word/Outlook `mso-list` levelN paragraphs → flat paragraphs (glyph spans removed)
+- [ ] Copy out of a text element also puts nested `<ul>/<ol>` HTML on the clipboard (bullets survive in Outlook/Word)
+
+*Editing*
 - [ ] Double-click a text element to edit (`contenteditable`)
 - [ ] Insert text box
 - [ ] Toolbar: bold, italic, underline, strikethrough, superscript, subscript
-- [ ] Toolbar: font family (Windows fonts from 2.1), size, color, highlight, clear formatting
+- [ ] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting
 - [ ] Toolbar: align left / center / right / justify
-- [ ] Bullets and numbering with indent levels (Tab / Shift+Tab)
 - [ ] Line spacing and paragraph spacing
 - [ ] Format painter (copy the style of one text, apply to another)
 - [ ] Autofit: shrink text to fit its box, with an option to resize the box instead
 - [ ] Spell check in Portuguese (`spellcheck="true"`, `lang="pt-BR"`)
-- [ ] Paste as clean text by default (strip Word/Outlook styling); Ctrl+Shift+V keeps formatting
 - [ ] Find & replace across all slides
-- [ ] All formatting commands wrapped in `text.js` (execCommand replaceable later)
-- [ ] **Done when:** a slide title and a bulleted paragraph can be fully reformatted without touching code.
+
+*Bullet behavior (key table in SPEC Phase 3)*
+- [ ] Tab at line start / multi-line selection demotes (max 5); Shift+Tab promotes; Tab mid-text inserts nothing
+- [ ] Alt+Shift+Right / Alt+Shift+Left demote / promote from anywhere in the line
+- [ ] Enter in a non-empty list line: new line, same level and type; in an empty list line: promote, at level 1 becomes plain
+- [ ] Shift+Enter: line break inside the same paragraph
+- [ ] Backspace at line start: level > 1 promotes; level 1 removes the bullet; plain line merges with the line above
+- [ ] Toolbar: bullets toggle, numbering toggle, increase/decrease indent, restart / continue numbering; all act on every selected line, mixed selections included
+- [ ] Autoformat: "- " / "* " starts a bullet, "1. " starts numbering; Ctrl+Z right after undoes only the autoformat
+- [ ] No list behavior during IME composition
+
+*Font sizes*
+- [ ] Size in pt: dropdown (8 … 96) plus a typed-value field; blank when the selection mixes sizes
+- [ ] Increase / decrease size buttons; Ctrl+Shift+> / Ctrl+Shift+< and Ctrl+] / Ctrl+[
+- [ ] Stored as `font-size` in pt on a `<span>`; never `execCommand('fontSize')`; px sizes shown as pt
+
+*Normalizer*
+- [ ] `App.text.normalize(element)` rewrites to the allowed tags/attributes/styles; strong→b, em→i, font→span, div→p, lists→flat paragraphs; unknown tags unwrapped; empty spans removed; identical adjacent spans merged; only http/https/mailto links
+- [ ] Runs on leaving edit mode, after toolbar commands, after paste, after import and before save; never per keystroke; preserves the selection
+- [ ] Idempotent (normalize twice == once), tested
+
+*Paste*
+- [ ] Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets/levels, links), drops fonts, sizes and colors ("Use Destination Theme")
+- [ ] Ctrl+Shift+V pastes plain text; paste-options button after a paste switches between the two
+- [ ] Works for paste from Word, Outlook, Copilot's chat window and web pages
+
+*Undo*
+- [ ] Browser text undo intercepted (`beforeinput` historyUndo / historyRedo) and routed to `history.js`: one undo stack
+- [ ] Typing grouped into steps (1-second pause or new paragraph); every formatting/list command is its own step
+- [ ] Undo/redo while editing restores the cursor position
+
+*Tests*
+- [ ] Unit fixtures (fake text): messy execCommand output, Word paste with `mso-list` levels, Copilot 3-level nested `<ul>`, mixed numbered/bulleted lists
+- [ ] Automated key-sequence table for the bullet behavior (start paragraphs + keys → expected paragraphs, types, levels)
+
+- [ ] **Done when:** a 3-level bulleted slide imported from a Copilot deck and a 3-level list pasted from Word both become editable flat paragraphs; every behavior in the bullet table works; a slide title and a bulleted paragraph can be fully reformatted without touching code; the saved deck prints to PDF (Ctrl+P on the saved file) with bullets, numbers and indents as on screen.
 
 ## Phase 4: Tables
 

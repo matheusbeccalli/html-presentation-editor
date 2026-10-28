@@ -43,6 +43,12 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `ribbon.js` | File menu and tabs; buttons only name commands | commands |
 | `ui.js` | Title bar, status bar, notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events |
 
+**Planned, Phase 3: `text.js`, the only door to text (SPEC 3.7).** Every text action (ribbon, shortcuts, paste,
+import, save) goes through `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`.
+Text is flat paragraphs, `<p data-list data-level>` (SPEC Phase 3, "Text model"); nothing else reads or writes the
+HTML inside a text element. If the `contenteditable` internals stay buggy, they can be swapped for ProseMirror/Tiptap
+(ask first) without touching other modules.
+
 `src/player/player.js` + `player.css` are **not run by the editor**. They are copied into every saved deck
 so it presents (arrow keys, F = full screen, hidden slides skipped) and prints one slide per page on its own.
 

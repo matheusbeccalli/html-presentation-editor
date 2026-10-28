@@ -64,6 +64,25 @@
         App.commands.define('save', { label: 'Save', run: () => App.fileio.save(), isEnabled: hasDeck });
         App.commands.define('saveAs', { label: 'Save As…', run: () => App.fileio.saveAs(), isEnabled: hasDeck });
 
+        App.commands.define('revertToOpened', {
+            label: 'Revert to version opened',
+            isEnabled: () => hasDeck() && !!App.state.openedHtml,
+            run: async () => {
+                const ok = await App.dialogs.confirm({
+                    title: 'Revert to the version opened?',
+                    message: 'The deck goes back to how it was when you opened it in this session, even if ' +
+                        'AutoSave has already written newer changes to the file. You can undo this with Ctrl+Z.',
+                    ok: 'Revert', danger: true,
+                });
+                if (!ok) {
+                    return;
+                }
+                App.selection.clear();
+                App.history.change('Revert to version opened', 'deck', () => App.deck.replaceContent(App.state.openedHtml));
+                App.ui.setStatus('Reverted to the version opened');
+            },
+        });
+
         App.commands.define('undo', {
             label: 'Undo',
             isEnabled: () => hasDeck() && App.history.canUndo(),

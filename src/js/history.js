@@ -187,8 +187,13 @@ App.createHistory = function createHistory(options) {
 
     // ---- Saved state ----
 
-    function markSaved() {
-        savedState = currentState;
+    /*
+     * Remember which state is on disk. Saving is asynchronous: pass the
+     * stateId() taken when the deck was turned into text, so edits made while
+     * the file was being written still count as unsaved.
+     */
+    function markSaved(stateId) {
+        savedState = stateId === undefined ? currentState : stateId;
         onChange({ action: 'saved' });
     }
 
@@ -212,6 +217,8 @@ App.createHistory = function createHistory(options) {
     return {
         change: change, begin: begin, commit: commit, cancel: cancel,
         undo: undo, redo: redo, reset: reset, markSaved: markSaved, markDirty: markDirty,
+        stateId: () => currentState,
+        isPending: () => pending !== null,
         canUndo: () => undoStack.length > 0,
         canRedo: () => redoStack.length > 0,
         isDirty: () => currentState !== savedState,

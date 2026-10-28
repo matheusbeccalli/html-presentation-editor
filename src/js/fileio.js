@@ -14,6 +14,11 @@
  *   createWritable() writes to a temporary file and replaces the original only
  *   when closed, so a crash mid-save cannot corrupt the deck (SPEC 6.1).
  *
+ * AutoSave (autosave.js decides when) writes through autoSave() below, which
+ * first checks that nobody changed the file on disk since we last read or
+ * wrote it (SPEC 6.1). All writes go through one queue, so two saves never
+ * write the same file at the same time.
+ *
  * Also: the unsaved-changes dot in the title and the warning on closing the tab.
  *
  * Talks to: importer.js, deck.js, serialize.js, history.js, dialogs.js, ui.js.
@@ -79,7 +84,20 @@
         }
     };
 
+    /*
+     * Has the file on disk changed since we recorded `knownLastModified`
+     * (at open or at our last save)? Someone may have edited it elsewhere.
+     */
+    App.fileio.changedOnDisk = async function changedOnDisk(handle, knownLastModified) {
+        if (knownLastModified === null || knownLastModified === undefined) {
+            return false;
+        }
+        const file = await handle.getFile();
+        return file.lastModified !== knownLastModified;
+    };
+
     // "No permission to write", as opposed to a real failure such as a full disk.
+    App.fileio.isPermissionError = isPermissionError;
     function isPermissionError(error) {
         return !!error && (error.name === 'SecurityError' || error.name === 'NotAllowedError');
     }
@@ -118,6 +136,23 @@
     // ---------------------------------------------------------------
 
     let fileInput = null;
+
+    // One write at a time: each task starts when the previous one has finished.
+    let writeQueue = Promise.resolve();
+    function exclusive(task) {
+        const run = writeQueue.then(task, task);
+        writeQueue = run.catch(() => {});   // a failed save must not block later ones
+        return run;
+    }
+
+    // The file's date after we wrote it, so the next AutoSave can tell if someone else changed it.
+    async function recordDiskVersion(handle, file) {
+        try {
+            App.state.diskLastModified = (file || await handle.getFile()).lastModified;
+        } catch (error) {
+            App.state.diskLastModified = null;   // cannot read it back: skip the check rather than fail
+        }
+    }
 
     App.fileio.init = function init() {
         fileInput = document.getElementById('file-input');
@@ -192,6 +227,7 @@
         const text = await file.text();
         const result = await App.importer.importDeck(text);
         await showDeck(result.html, file.name, handle);
+        App.state.diskLastModified = handle ? file.lastModified : null;
         if (App.importer.reportHasChanges(result.report)) {
             App.history.markDirty();   // the deck now differs from the file on disk
         }
@@ -207,6 +243,8 @@
         await App.deck.load(html);
         App.state.fileName = fileName;
         App.state.fileHandle = handle || null;
+        App.state.openedHtml = html;          // for "Revert to version opened" (SPEC 6.1)
+        App.state.diskLastModified = null;
         App.history.reset();
         App.ui.showDeck();
     }
@@ -284,29 +322,69 @@
         return App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource());
     };
 
-    function afterSave(fileName) {
+    /*
+     * details: { stateId, toHandle, auto }. toHandle = written into a file we
+     * can write again (not a download), which is what AutoSave needs.
+     */
+    function afterSave(fileName, details) {
         App.state.fileName = fileName;
-        App.history.markSaved();
-        App.ui.setStatus('Saved ' + fileName);
-        App.events.emit('saved', { fileName: fileName });
+        App.history.markSaved(details.stateId);
+        App.ui.setStatus((details.auto ? 'AutoSaved ' : 'Saved ') + fileName);
+        App.events.emit('saved', { fileName: fileName, toHandle: !!details.toHandle, auto: !!details.auto });
     }
 
-    App.fileio.save = async function save() {
+    App.fileio.save = function save() {
         if (!App.state.hasDeck) {
-            return;
+            return Promise.resolve();
         }
         if (!App.state.fileHandle) {
-            await App.fileio.saveAs();
-            return;
+            return App.fileio.saveAs();
         }
-        App.ui.setStatus('Saving…');
-        const used = await App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile);
-        if (!used) {
-            App.ui.setStatus('Save cancelled');
-            return;
+        return exclusive(async () => {
+            App.ui.setStatus('Saving…');
+            const stateId = App.history.stateId();
+            const used = await App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile);
+            if (!used) {
+                App.ui.setStatus('Save cancelled');
+                return;
+            }
+            App.state.fileHandle = used;
+            await recordDiskVersion(used);
+            afterSave(used.name, { stateId: stateId, toHandle: true });
+        });
+    };
+
+    /*
+     * One AutoSave write (autosave.js calls this). Never asks the user anything:
+     * returns 'saved', 'nothing' (no file or no changes) or 'conflict' (the file
+     * changed on disk; the caller asks what to do). options.force skips the
+     * check, for "Overwrite". Permission errors are thrown to the caller.
+     */
+    App.fileio.autoSave = function autoSave(options) {
+        return exclusive(async () => {
+            const handle = App.state.fileHandle;
+            if (!App.state.hasDeck || !handle || !App.history.isDirty()) {
+                return 'nothing';
+            }
+            const force = !!(options && options.force);
+            if (!force && await App.fileio.changedOnDisk(handle, App.state.diskLastModified)) {
+                return 'conflict';
+            }
+            App.ui.setStatus('Saving…');
+            const stateId = App.history.stateId();
+            await App.fileio.writeToHandle(handle, App.fileio.currentHtml());
+            await recordDiskVersion(handle);
+            afterSave(handle.name, { stateId: stateId, toHandle: true, auto: true });
+            return 'saved';
+        });
+    };
+
+    /* "Reload": open the file as it is now on disk, dropping the changes in the editor. */
+    App.fileio.reloadFromDisk = async function reloadFromDisk() {
+        const handle = App.state.fileHandle;
+        if (handle) {
+            await App.fileio.openFile(await handle.getFile(), handle);
         }
-        App.state.fileHandle = used;
-        afterSave(used.name);
     };
 
     /*
@@ -343,26 +421,30 @@
         }
     }
 
-    App.fileio.saveAs = async function saveAs() {
+    App.fileio.saveAs = function saveAs() {
         if (!App.state.hasDeck) {
-            return;
+            return Promise.resolve();
         }
-        const html = App.fileio.currentHtml();
-        const suggestedName = App.state.fileName || NEW_DECK_NAME;
+        return exclusive(async () => {
+            const stateId = App.history.stateId();
+            const html = App.fileio.currentHtml();
+            const suggestedName = App.state.fileName || NEW_DECK_NAME;
 
-        if (!window.showSaveFilePicker) {
-            download(suggestedName, html);
-            afterSave(suggestedName);
-            return;
-        }
-        const handle = await pickSaveHandle(suggestedName, App.state.fileHandle);
-        if (!handle) {
-            return;
-        }
-        App.ui.setStatus('Saving…');
-        await App.fileio.writeToHandle(handle, html);
-        App.state.fileHandle = handle;
-        afterSave(handle.name);
+            if (!window.showSaveFilePicker) {
+                download(suggestedName, html);
+                afterSave(suggestedName, { stateId: stateId, toHandle: false });
+                return;
+            }
+            const handle = await pickSaveHandle(suggestedName, App.state.fileHandle);
+            if (!handle) {
+                return;
+            }
+            App.ui.setStatus('Saving…');
+            await App.fileio.writeToHandle(handle, html);
+            App.state.fileHandle = handle;
+            await recordDiskVersion(handle);
+            afterSave(handle.name, { stateId: stateId, toHandle: true });
+        });
     };
 
     function download(fileName, html) {

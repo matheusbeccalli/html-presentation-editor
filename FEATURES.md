@@ -65,11 +65,11 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [x] Format pane "Size & position": X, Y, W, H in px, editable (Enter/Tab applies, Esc cancels, arrows step, decimal comma accepted)
 - [x] Right-click context menu with the common actions (also Shift+F10 / Menu key)
 - [x] Canvas zoom: Ctrl+mouse wheel and zoom slider, 50–400% (plus −/+ and Fit; the wheel zooms around the mouse; fit mode follows the window)
-- [ ] AutoSave layer 1 (6.1): on/off toggle in the title bar, turns on after the first manual save in the session
-- [ ] AutoSave timing: 5 s after the last change, at most every 30 s while editing; never during drag, resize or IME composition
-- [ ] AutoSave writes through `createWritable()` (atomic replace on close)
-- [ ] AutoSave conflict check: compare `lastModified`; if changed on disk, pause and ask overwrite / save as copy / reload
-- [ ] "Revert to version opened" (original kept for the session)
+- [x] AutoSave layer 1 (6.1): on/off toggle in the title bar, turns on after the first manual save in the session (into a file, not a download; hidden in Firefox)
+- [x] AutoSave timing: 5 s after the last change, at most every 30 s while editing; never during drag, resize or IME composition; closing the tab starts the write at once
+- [x] AutoSave writes through `createWritable()` (atomic replace on close); one write at a time
+- [x] AutoSave conflict check: compare `lastModified`; if changed on disk, pause and ask overwrite / save as copy / reload *(Save as copy uses the real Save As window, so it is checked by hand below)*
+- [x] "Revert to version opened" (original kept for the session; File menu; undoable)
 - [ ] Crash-recovery drafts in IndexedDB (6.2): snapshot full deck HTML every 30 s while unsaved, keep the last 5 per deck
 - [ ] Stable deck id `<meta name="deck-id">`, created on first save
 - [ ] On startup / open: recovery dialog ("Unsaved changes from 27/10 14:32 were found") with slide-1 thumbnail and Recover / Compare / Discard
@@ -79,6 +79,10 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [ ] IndexedDB unavailable → "Recovery unavailable" in the status bar, editor keeps working (every storage call in try/catch)
 - [ ] Status indicator (6.4): Saved · Saving… · Unsaved changes · AutoSave off · Draft saved 14:32 · Recovery unavailable
 - [ ] **Done when:** any element can be moved and resized precisely, every action undoes, and killing the browser mid-edit loses at most 30 seconds of work. Autosave (section 6): (1) with AutoSave on, closing the tab after an edit and reopening the file shows the edit; (2) with AutoSave off, killing the browser mid-edit and reopening offers to recover changes no older than 30 seconds; (3) "Delete all drafts now" leaves nothing in IndexedDB (DevTools > Application).
+  - [ ] In Edge: open a deck with File > Open, press Ctrl+S once (confirm the file as in Phase 1): the AutoSave switch at the top left turns On
+  - [ ] With AutoSave On: move an element, wait 5 seconds, close the tab, open the file again: the element is in its new place
+  - [ ] With AutoSave On: open the same file in Notepad, add a space and save it there; then move an element in the editor: the editor asks Reload / Save as copy / Overwrite; try Save as copy (a new file is written and AutoSave continues on it)
+  - [ ] File > Revert to version opened brings back the deck as opened, and Ctrl+Z undoes the revert
 
 ## Phase 3: Text
 

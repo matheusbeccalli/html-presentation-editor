@@ -55,7 +55,7 @@
                 nodes['quick-access'].appendChild(button);
             });
         const refresh = () => {
-            nodes['quick-access'].querySelectorAll('button').forEach((button) => {
+            nodes['quick-access'].querySelectorAll('button[data-command]').forEach((button) => {
                 button.disabled = !App.commands.isEnabled(button.getAttribute('data-command'));
             });
         };

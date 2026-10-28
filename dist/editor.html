@@ -220,6 +220,25 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .menu-keys { color: var(--text-muted); font-size: 11px; }
 .menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 
+/* AutoSave switch in the title bar (autosave.js), like PowerPoint's. */
+#autosave-toggle {
+    display: flex; align-items: center; gap: 6px;
+    margin-right: 6px; padding: 2px 8px; border: 0; border-radius: 4px;
+    background: transparent; color: #fff; cursor: pointer; font-size: 12px;
+}
+#autosave-toggle:hover { background: rgba(255, 255, 255, 0.15); }
+.autosave-switch {
+    position: relative; width: 30px; height: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 8px;
+}
+.autosave-knob {
+    position: absolute; top: 2px; left: 2px; width: 10px; height: 10px;
+    border-radius: 50%; background: #fff; transition: left 0.15s;
+}
+#autosave-toggle[aria-checked="true"] .autosave-switch { background: rgba(255, 255, 255, 0.35); }
+#autosave-toggle[aria-checked="true"] .autosave-knob { left: 16px; }
+.autosave-state { min-width: 20px; text-align: left; }
+
 </style>
 <style>
 /* ---- css/panels.css ---- */
@@ -671,6 +690,8 @@ window.App = {
         fileName: null,      // name shown in the title bar, e.g. "deck.html"
         fileHandle: null,    // FileSystemFileHandle when opened via the File System Access API
         hasDeck: false,      // false while the welcome screen is shown
+        openedHtml: null,    // the deck as it was when opened, for "Revert to version opened"
+        diskLastModified: null,  // the file's date at open / our last save (AutoSave conflict check)
     },
 };
 
@@ -695,6 +716,7 @@ App.start = function start() {
     App.thumbnails.init();
     App.deck.init();
     App.fileio.init();
+    App.autosave.init();
     App.shortcuts.init();
 
     App.ui.showWelcome();
@@ -1297,8 +1319,13 @@ App.createHistory = function createHistory(options) {
 
     // ---- Saved state ----
 
-    function markSaved() {
-        savedState = currentState;
+    /*
+     * Remember which state is on disk. Saving is asynchronous: pass the
+     * stateId() taken when the deck was turned into text, so edits made while
+     * the file was being written still count as unsaved.
+     */
+    function markSaved(stateId) {
+        savedState = stateId === undefined ? currentState : stateId;
         onChange({ action: 'saved' });
     }
 
@@ -1322,6 +1349,8 @@ App.createHistory = function createHistory(options) {
     return {
         change: change, begin: begin, commit: commit, cancel: cancel,
         undo: undo, redo: redo, reset: reset, markSaved: markSaved, markDirty: markDirty,
+        stateId: () => currentState,
+        isPending: () => pending !== null,
         canUndo: () => undoStack.length > 0,
         canRedo: () => redoStack.length > 0,
         isDirty: () => currentState !== savedState,
@@ -3320,6 +3349,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     };
 
+    /*
+     * Replace the whole deck (head and body) with `html`, keeping the editor's
+     * view CSS. Used by "Revert to version opened"; call it inside
+     * history.change(..., 'deck', ...) so it can be undone.
+     */
+    App.deck.replaceContent = function replaceContent(html) {
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        doc.head.innerHTML = parsed.head.innerHTML;
+        doc.body.innerHTML = parsed.body.innerHTML;
+        addEditorView(doc);
+    };
+
     App.deck.getDocument = function getDocument() {
         return doc;
     };
@@ -4605,6 +4646,11 @@ App.template.newDeckHtml = function newDeckHtml() {
  *   createWritable() writes to a temporary file and replaces the original only
  *   when closed, so a crash mid-save cannot corrupt the deck (SPEC 6.1).
  *
+ * AutoSave (autosave.js decides when) writes through autoSave() below, which
+ * first checks that nobody changed the file on disk since we last read or
+ * wrote it (SPEC 6.1). All writes go through one queue, so two saves never
+ * write the same file at the same time.
+ *
  * Also: the unsaved-changes dot in the title and the warning on closing the tab.
  *
  * Talks to: importer.js, deck.js, serialize.js, history.js, dialogs.js, ui.js.
@@ -4670,7 +4716,20 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     };
 
+    /*
+     * Has the file on disk changed since we recorded `knownLastModified`
+     * (at open or at our last save)? Someone may have edited it elsewhere.
+     */
+    App.fileio.changedOnDisk = async function changedOnDisk(handle, knownLastModified) {
+        if (knownLastModified === null || knownLastModified === undefined) {
+            return false;
+        }
+        const file = await handle.getFile();
+        return file.lastModified !== knownLastModified;
+    };
+
     // "No permission to write", as opposed to a real failure such as a full disk.
+    App.fileio.isPermissionError = isPermissionError;
     function isPermissionError(error) {
         return !!error && (error.name === 'SecurityError' || error.name === 'NotAllowedError');
     }
@@ -4709,6 +4768,23 @@ App.template.newDeckHtml = function newDeckHtml() {
     // ---------------------------------------------------------------
 
     let fileInput = null;
+
+    // One write at a time: each task starts when the previous one has finished.
+    let writeQueue = Promise.resolve();
+    function exclusive(task) {
+        const run = writeQueue.then(task, task);
+        writeQueue = run.catch(() => {});   // a failed save must not block later ones
+        return run;
+    }
+
+    // The file's date after we wrote it, so the next AutoSave can tell if someone else changed it.
+    async function recordDiskVersion(handle, file) {
+        try {
+            App.state.diskLastModified = (file || await handle.getFile()).lastModified;
+        } catch (error) {
+            App.state.diskLastModified = null;   // cannot read it back: skip the check rather than fail
+        }
+    }
 
     App.fileio.init = function init() {
         fileInput = document.getElementById('file-input');
@@ -4783,6 +4859,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const text = await file.text();
         const result = await App.importer.importDeck(text);
         await showDeck(result.html, file.name, handle);
+        App.state.diskLastModified = handle ? file.lastModified : null;
         if (App.importer.reportHasChanges(result.report)) {
             App.history.markDirty();   // the deck now differs from the file on disk
         }
@@ -4798,6 +4875,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         await App.deck.load(html);
         App.state.fileName = fileName;
         App.state.fileHandle = handle || null;
+        App.state.openedHtml = html;          // for "Revert to version opened" (SPEC 6.1)
+        App.state.diskLastModified = null;
         App.history.reset();
         App.ui.showDeck();
     }
@@ -4875,29 +4954,69 @@ App.template.newDeckHtml = function newDeckHtml() {
         return App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource());
     };
 
-    function afterSave(fileName) {
+    /*
+     * details: { stateId, toHandle, auto }. toHandle = written into a file we
+     * can write again (not a download), which is what AutoSave needs.
+     */
+    function afterSave(fileName, details) {
         App.state.fileName = fileName;
-        App.history.markSaved();
-        App.ui.setStatus('Saved ' + fileName);
-        App.events.emit('saved', { fileName: fileName });
+        App.history.markSaved(details.stateId);
+        App.ui.setStatus((details.auto ? 'AutoSaved ' : 'Saved ') + fileName);
+        App.events.emit('saved', { fileName: fileName, toHandle: !!details.toHandle, auto: !!details.auto });
     }
 
-    App.fileio.save = async function save() {
+    App.fileio.save = function save() {
         if (!App.state.hasDeck) {
-            return;
+            return Promise.resolve();
         }
         if (!App.state.fileHandle) {
-            await App.fileio.saveAs();
-            return;
+            return App.fileio.saveAs();
         }
-        App.ui.setStatus('Saving…');
-        const used = await App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile);
-        if (!used) {
-            App.ui.setStatus('Save cancelled');
-            return;
+        return exclusive(async () => {
+            App.ui.setStatus('Saving…');
+            const stateId = App.history.stateId();
+            const used = await App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile);
+            if (!used) {
+                App.ui.setStatus('Save cancelled');
+                return;
+            }
+            App.state.fileHandle = used;
+            await recordDiskVersion(used);
+            afterSave(used.name, { stateId: stateId, toHandle: true });
+        });
+    };
+
+    /*
+     * One AutoSave write (autosave.js calls this). Never asks the user anything:
+     * returns 'saved', 'nothing' (no file or no changes) or 'conflict' (the file
+     * changed on disk; the caller asks what to do). options.force skips the
+     * check, for "Overwrite". Permission errors are thrown to the caller.
+     */
+    App.fileio.autoSave = function autoSave(options) {
+        return exclusive(async () => {
+            const handle = App.state.fileHandle;
+            if (!App.state.hasDeck || !handle || !App.history.isDirty()) {
+                return 'nothing';
+            }
+            const force = !!(options && options.force);
+            if (!force && await App.fileio.changedOnDisk(handle, App.state.diskLastModified)) {
+                return 'conflict';
+            }
+            App.ui.setStatus('Saving…');
+            const stateId = App.history.stateId();
+            await App.fileio.writeToHandle(handle, App.fileio.currentHtml());
+            await recordDiskVersion(handle);
+            afterSave(handle.name, { stateId: stateId, toHandle: true, auto: true });
+            return 'saved';
+        });
+    };
+
+    /* "Reload": open the file as it is now on disk, dropping the changes in the editor. */
+    App.fileio.reloadFromDisk = async function reloadFromDisk() {
+        const handle = App.state.fileHandle;
+        if (handle) {
+            await App.fileio.openFile(await handle.getFile(), handle);
         }
-        App.state.fileHandle = used;
-        afterSave(used.name);
     };
 
     /*
@@ -4934,26 +5053,30 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     }
 
-    App.fileio.saveAs = async function saveAs() {
+    App.fileio.saveAs = function saveAs() {
         if (!App.state.hasDeck) {
-            return;
+            return Promise.resolve();
         }
-        const html = App.fileio.currentHtml();
-        const suggestedName = App.state.fileName || NEW_DECK_NAME;
+        return exclusive(async () => {
+            const stateId = App.history.stateId();
+            const html = App.fileio.currentHtml();
+            const suggestedName = App.state.fileName || NEW_DECK_NAME;
 
-        if (!window.showSaveFilePicker) {
-            download(suggestedName, html);
-            afterSave(suggestedName);
-            return;
-        }
-        const handle = await pickSaveHandle(suggestedName, App.state.fileHandle);
-        if (!handle) {
-            return;
-        }
-        App.ui.setStatus('Saving…');
-        await App.fileio.writeToHandle(handle, html);
-        App.state.fileHandle = handle;
-        afterSave(handle.name);
+            if (!window.showSaveFilePicker) {
+                download(suggestedName, html);
+                afterSave(suggestedName, { stateId: stateId, toHandle: false });
+                return;
+            }
+            const handle = await pickSaveHandle(suggestedName, App.state.fileHandle);
+            if (!handle) {
+                return;
+            }
+            App.ui.setStatus('Saving…');
+            await App.fileio.writeToHandle(handle, html);
+            App.state.fileHandle = handle;
+            await recordDiskVersion(handle);
+            afterSave(handle.name, { stateId: stateId, toHandle: true });
+        });
     };
 
     function download(fileName, html) {
@@ -4963,6 +5086,302 @@ App.template.newDeckHtml = function newDeckHtml() {
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 10000);
+    }
+})();
+
+</script>
+<script>
+// ---- js/autosave.js ----
+/*
+ * autosave.js - AutoSave to the deck file, like PowerPoint's (SPEC 6.1, layer 1).
+ *
+ * The AutoSave switch in the title bar turns on by itself after the user's
+ * first manual save of the session into a real file (never for a download),
+ * so the original file is never overwritten before the user chose to save.
+ *
+ * When to write (the "scheduler", tested with a fake clock):
+ *   - 5 seconds after the last change,
+ *   - but at least every 30 seconds while the user keeps editing,
+ *   - never during a drag/resize or while an IME is composing a character
+ *     (it retries a second later),
+ *   - never two writes at once.
+ *
+ * Before each write fileio.autoSave() checks that the file did not change on
+ * disk. If it did, AutoSave pauses and asks: Reload / Save as copy / Overwrite.
+ *
+ * Talks to: fileio.js (writes), history.js (dirty state, drags in progress),
+ *           dialogs.js, ui.js (status), events (history-changed, saved, deck-loaded).
+ */
+
+(function () {
+    'use strict';
+
+    App.autosave = {};
+
+    // ---------------------------------------------------------------
+    // The scheduler (pure timing logic; tests/unit/autosave.test.js)
+    // ---------------------------------------------------------------
+
+    /*
+     * options: { delay, maxWait, save, isBusy, retryMs, clock }
+     *   save()   -> Promise; called when it is time to write
+     *   isBusy() -> true while writing must wait (drag, IME)
+     *   clock    -> { now, setTimeout, clearTimeout }; tests pass a fake one
+     */
+    App.autosave.createScheduler = function createScheduler(options) {
+        const clock = options.clock || {
+            now: () => Date.now(),
+            setTimeout: (fn, ms) => setTimeout(fn, ms),
+            clearTimeout: (id) => clearTimeout(id),
+        };
+        const retryMs = options.retryMs || 1000;
+        const isBusy = options.isBusy || (() => false);
+
+        let timer = null;
+        let firstChangeAt = null;   // start of the current run of edits (for the 30 s limit)
+        let saving = false;
+        let changedWhileSaving = false;
+
+        function schedule(at) {
+            clock.clearTimeout(timer);
+            timer = clock.setTimeout(fire, Math.max(0, at - clock.now()));
+        }
+
+        function notifyChange() {
+            if (saving) {
+                changedWhileSaving = true;   // picked up when the current write ends
+                return;
+            }
+            const now = clock.now();
+            if (firstChangeAt === null) {
+                firstChangeAt = now;
+            }
+            schedule(Math.min(now + options.delay, firstChangeAt + options.maxWait));
+        }
+
+        async function fire() {
+            timer = null;
+            if (saving) {
+                return;
+            }
+            if (isBusy()) {
+                schedule(clock.now() + retryMs);
+                return;
+            }
+            firstChangeAt = null;
+            saving = true;
+            try {
+                await options.save();
+            } catch (error) {
+                console.error('AutoSave failed:', error);   // save() reports to the user itself
+            } finally {
+                saving = false;
+            }
+            if (changedWhileSaving) {
+                changedWhileSaving = false;
+                notifyChange();
+            }
+        }
+
+        /* Write now if a write is waiting (e.g. the tab is closing). */
+        function flush() {
+            if (timer === null) {
+                return Promise.resolve();
+            }
+            clock.clearTimeout(timer);
+            return fire();
+        }
+
+        function cancel() {
+            clock.clearTimeout(timer);
+            timer = null;
+            firstChangeAt = null;
+            changedWhileSaving = false;
+        }
+
+        return { notifyChange: notifyChange, flush: flush, cancel: cancel, isScheduled: () => timer !== null };
+    };
+
+    // ---------------------------------------------------------------
+    // AutoSave in the editor
+    // ---------------------------------------------------------------
+
+    const timing = { delay: 5000, maxWait: 30000 };
+    let scheduler = null;
+    let enabled = false;
+    let userTurnedOff = false;     // the user switched it off: later manual saves do not switch it on
+    let savedToFile = false;       // a manual save into a writable file happened this session
+    let askingUser = false;        // the "changed on disk" question is open
+    let composing = false;         // IME composition in progress
+    let toggle = null;
+
+    App.autosave.init = function init() {
+        scheduler = makeScheduler();
+        buildToggle();
+
+        App.events.on('deck-loaded', () => {
+            setEnabled(false);
+            userTurnedOff = false;
+            savedToFile = false;
+            listenForComposition(App.deck.getDocument().defaultView);
+            refreshToggle();
+        });
+        App.events.on('history-changed', (info) => {
+            if (enabled && info.action !== 'saved' && info.action !== 'reset' && App.history.isDirty()) {
+                scheduler.notifyChange();
+            }
+        });
+        App.events.on('saved', (info) => {
+            if (info.auto || !info.toHandle) {
+                return;
+            }
+            savedToFile = true;
+            if (!userTurnedOff && App.fileio.canSaveInPlace(window)) {
+                setEnabled(true);   // "turns on after the first manual save in the session"
+            }
+            refreshToggle();
+        });
+
+        listenForComposition(window);
+        // Closing the tab: start writing straight away. The browser still asks
+        // "Leave site?" while changes are unsaved, which gives the write time.
+        window.addEventListener('beforeunload', () => {
+            if (enabled && App.history.isDirty()) {
+                scheduler.notifyChange();
+                scheduler.flush();
+            }
+        });
+    };
+
+    function makeScheduler() {
+        return App.autosave.createScheduler({
+            delay: timing.delay, maxWait: timing.maxWait, retryMs: 1000,
+            isBusy: () => App.history.isPending() || composing || askingUser,
+            save: autoSaveNow,
+        });
+    }
+
+    /* Tests use short delays instead of 5 s / 30 s. */
+    App.autosave.setTiming = function setTiming(delay, maxWait) {
+        timing.delay = delay;
+        timing.maxWait = maxWait;
+        scheduler.cancel();
+        scheduler = makeScheduler();
+    };
+
+    App.autosave.isEnabled = function isEnabled() {
+        return enabled;
+    };
+
+    function listenForComposition(targetWindow) {
+        targetWindow.addEventListener('compositionstart', () => { composing = true; });
+        targetWindow.addEventListener('compositionend', () => { composing = false; });
+    }
+
+    function setEnabled(value, reason) {
+        enabled = value;
+        if (!value) {
+            scheduler.cancel();
+        }
+        refreshToggle();
+        if (reason) {
+            App.ui.setStatus(reason);
+        }
+        App.events.emit('autosave-changed', { enabled: enabled });
+    }
+
+    async function autoSaveNow() {
+        if (!enabled) {
+            return;
+        }
+        let result;
+        try {
+            result = await App.fileio.autoSave();
+        } catch (error) {
+            setEnabled(false, 'AutoSave off');
+            const why = App.fileio.isPermissionError(error)
+                ? 'The browser no longer lets the editor write to this file.'
+                : (error && error.message) || String(error);
+            await App.dialogs.alert('AutoSave turned off', why + ' Your changes are still here: use File > Save As to keep them.');
+            return;
+        }
+        if (result === 'conflict') {
+            await resolveConflict();
+        }
+    }
+
+    /* The file changed on disk since we opened or saved it: ask before writing. */
+    async function resolveConflict() {
+        askingUser = true;
+        const choice = await App.dialogs.show({
+            title: 'The file changed on disk',
+            body: '"' + App.state.fileName + '" was changed outside the editor since it was opened or last saved. ' +
+                'AutoSave is paused. Reload throws away the changes made here; Save as copy keeps both versions; ' +
+                'Overwrite replaces the file with the deck in the editor.',
+            buttons: [
+                { label: 'Reload', value: 'reload' },
+                { label: 'Save as copy…', value: 'copy' },
+                { label: 'Overwrite', value: 'overwrite', primary: true },
+            ],
+        });
+        askingUser = false;
+        if (choice === 'overwrite') {
+            await App.fileio.autoSave({ force: true });
+        } else if (choice === 'copy') {
+            const before = App.state.fileHandle;
+            await App.fileio.saveAs();
+            if (App.state.fileHandle === before) {
+                setEnabled(false, 'AutoSave paused: the file changed on disk');   // Save As was cancelled
+            }
+        } else if (choice === 'reload') {
+            await App.fileio.reloadFromDisk();
+        } else {
+            setEnabled(false, 'AutoSave paused: the file changed on disk');
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // The switch in the title bar
+    // ---------------------------------------------------------------
+
+    function buildToggle() {
+        toggle = App.util.el('button', {
+            type: 'button', id: 'autosave-toggle', role: 'switch', 'aria-checked': 'false', hidden: true,
+            onclick: onToggleClick,
+        }, [App.util.el('span', { class: 'autosave-label' }, ['AutoSave']),
+            App.util.el('span', { class: 'autosave-switch' }, [App.util.el('span', { class: 'autosave-knob' })]),
+            App.util.el('span', { class: 'autosave-state' }, ['Off'])]);
+        // Far left of the title bar, before Save / Undo / Redo, as in PowerPoint.
+        document.getElementById('quick-access').prepend(toggle);
+    }
+
+    function refreshToggle() {
+        // Browsers without the File System Access API (Firefox) cannot write files at all.
+        toggle.hidden = !App.state.hasDeck || !App.fileio.canSaveInPlace(window);
+        toggle.setAttribute('aria-checked', enabled ? 'true' : 'false');
+        toggle.querySelector('.autosave-state').textContent = enabled ? 'On' : 'Off';
+        toggle.title = enabled
+            ? 'AutoSave is on: changes are written to the file a few seconds after you make them.'
+            : 'AutoSave is off. Click to save to a file and keep it saved automatically.';
+    }
+
+    function onToggleClick() {
+        if (enabled) {
+            userTurnedOff = true;
+            setEnabled(false, 'AutoSave off');
+            return;
+        }
+        userTurnedOff = false;
+        if (savedToFile && App.state.fileHandle) {
+            setEnabled(true, 'AutoSave on');
+            if (App.history.isDirty()) {
+                scheduler.notifyChange();
+                scheduler.flush();
+            }
+            return;
+        }
+        // Not saved to a file yet: a manual save first (it switches AutoSave on when it succeeds).
+        App.commands.run('save');
     }
 })();
 
@@ -5034,6 +5453,25 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('open', { label: 'Open…', run: () => App.fileio.open() });
         App.commands.define('save', { label: 'Save', run: () => App.fileio.save(), isEnabled: hasDeck });
         App.commands.define('saveAs', { label: 'Save As…', run: () => App.fileio.saveAs(), isEnabled: hasDeck });
+
+        App.commands.define('revertToOpened', {
+            label: 'Revert to version opened',
+            isEnabled: () => hasDeck() && !!App.state.openedHtml,
+            run: async () => {
+                const ok = await App.dialogs.confirm({
+                    title: 'Revert to the version opened?',
+                    message: 'The deck goes back to how it was when you opened it in this session, even if ' +
+                        'AutoSave has already written newer changes to the file. You can undo this with Ctrl+Z.',
+                    ok: 'Revert', danger: true,
+                });
+                if (!ok) {
+                    return;
+                }
+                App.selection.clear();
+                App.history.change('Revert to version opened', 'deck', () => App.deck.replaceContent(App.state.openedHtml));
+                App.ui.setStatus('Reverted to the version opened');
+            },
+        });
 
         App.commands.define('undo', {
             label: 'Undo',
@@ -5161,6 +5599,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         ['open', 'open', 'Ctrl+O'],
         ['save', 'save', 'Ctrl+S'],
         ['saveAs', 'saveAs', 'Ctrl+Shift+S'],
+        ['revertToOpened', 'undo', ''],
     ];
 
     let panel = null;
@@ -5349,7 +5788,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 nodes['quick-access'].appendChild(button);
             });
         const refresh = () => {
-            nodes['quick-access'].querySelectorAll('button').forEach((button) => {
+            nodes['quick-access'].querySelectorAll('button[data-command]').forEach((button) => {
                 button.disabled = !App.commands.isEnabled(button.getAttribute('data-command'));
             });
         };

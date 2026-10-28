@@ -132,3 +132,10 @@ test('fileio: canSaveInPlace is true only when the browser has the File System A
     assert(!App.fileio.canSaveInPlace({}), 'Firefox has neither');
     assert(!App.fileio.canSaveInPlace({ showSaveFilePicker: undefined }), 'switched off');
 });
+
+test('fileio: changedOnDisk compares the file date with the one recorded at open/save', async () => {
+    const handle = fakeHandle();   // getFile() reports lastModified 1234
+    assertEqual(await App.fileio.changedOnDisk(handle, 1234), false);
+    assertEqual(await App.fileio.changedOnDisk(handle, 1000), true);
+    assertEqual(await App.fileio.changedOnDisk(handle, null), false, 'unknown date: nothing to compare');
+});

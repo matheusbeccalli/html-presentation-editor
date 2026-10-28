@@ -713,6 +713,124 @@ def test_zoom(browser):
     editor.close()
 
 
+FAKE_FILE_JS = """name => {
+    // A stand-in for a FileSystemFileHandle (Playwright cannot use real file pickers).
+    // window.__disk is "the file on disk": its text, its date and how often it was written.
+    window.__disk = { text: null, lastModified: 1000, writes: 0 };
+    App.state.fileHandle = {
+        kind: 'file', name: name,
+        queryPermission: async () => 'granted',
+        requestPermission: async () => 'granted',
+        createWritable: async () => {
+            let data = '';
+            return {
+                write: async (text) => { data = text; },
+                close: async () => { __disk.text = data; __disk.writes += 1; __disk.lastModified += 1000; },
+                abort: async () => {},
+            };
+        },
+        getFile: async () => ({ name: name, lastModified: __disk.lastModified, text: async () => __disk.text }),
+    };
+    App.state.diskLastModified = __disk.lastModified;
+}"""
+
+
+def test_autosave_to_file(browser):
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    editor.close_dialog_if_open()
+    page = editor.page
+    page.evaluate(FAKE_FILE_JS, CONTRACT.name)
+    page.evaluate("App.autosave.setTiming(400, 2000)")   # instead of 5 s / 30 s
+    writes = lambda: page.evaluate("__disk.writes")  # noqa: E731
+    # e2's left position in the file on disk, read the way a browser reads the saved file.
+    disk_left = lambda: page.evaluate("""() => new DOMParser().parseFromString(__disk.text, 'text/html')
+        .querySelector('[data-id="e2"]').style.left""")  # noqa: E731
+    switch = "#autosave-toggle"
+
+    # Off until the first manual save; the first save switches it on.
+    check(page.is_visible(switch) and page.get_attribute(switch, "aria-checked") == "false", "AutoSave Off at first")
+    page.mouse.click(*slide_to_screen(page, 300, 290))
+    page.keyboard.press("ArrowRight")
+    page.wait_for_timeout(800)
+    check(writes() == 0, "nothing is written before the first manual save")
+    page.keyboard.press("Control+s")
+    wait_until(page, "__disk.writes === 1")
+    check(page.get_attribute(switch, "aria-checked") == "true", "AutoSave On after the first save")
+    page.screenshot(path=str(OUTPUT / "16-autosave-on.png"), clip={"x": 0, "y": 0, "width": 1440, "height": 40})
+
+    # A change is written shortly after, and the unsaved dot goes away.
+    page.keyboard.press("ArrowRight")
+    wait_until(page, "__disk.writes === 2")
+    check(disk_left() == "66px", "the nudge reached the file")
+    check(page.is_hidden("#title-dirty"), "no unsaved dot after AutoSave")
+
+    # Never in the middle of a drag: the write waits for the mouse button to come up.
+    start = slide_to_screen(page, 300, 290)
+    page.mouse.move(*start)
+    page.mouse.down()
+    page.mouse.move(start[0] + 30, start[1], steps=4)
+    page.wait_for_timeout(1000)
+    check(writes() == 2, "no write during the drag")
+    page.mouse.up()
+    wait_until(page, "__disk.writes === 3")
+
+    # Revert to the version opened (File menu): one undo step, and AutoSave writes it.
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='revertToOpened']")
+    editor.click_dialog_button("Revert")
+    check(element_rect(page, "e2")["left"] == 64, "reverted to the opened position")
+    wait_until(page, "__disk.writes === 4")
+    check(disk_left() == "64px", "the reverted deck was written")
+    page.keyboard.press("Control+z")
+    check(element_rect(page, "e2")["left"] != 64, "Ctrl+Z undoes the revert")
+    wait_until(page, "__disk.writes === 5")
+
+    # Someone changes the file elsewhere: AutoSave asks before writing. Overwrite writes anyway.
+    page.evaluate("__disk.lastModified += 5000")
+    page.mouse.click(*slide_to_screen(page, 614, 290))
+    page.keyboard.press("ArrowDown")
+    page.wait_for_selector("dialog[open]")
+    check("changed on disk" in editor.report_dialog_text(), "conflict dialog")
+    check(writes() == 5, "nothing written before the answer")
+    editor.click_dialog_button("Overwrite")
+    wait_until(page, "__disk.writes === 6")
+
+    # ... Reload instead: the editor shows the file as it is on disk now.
+    page.evaluate("__disk.text = __disk.text.replaceAll('Projeto Atlas', 'Projeto Externo'); __disk.lastModified += 5000")
+    page.keyboard.press("ArrowDown")
+    page.wait_for_selector("dialog[open]")
+    editor.click_dialog_button("Reload")
+    wait_until(page, "App.deck.getDocument().body.textContent.includes('Projeto Externo')")
+    editor.close_dialog_if_open()
+    check(page.get_attribute(switch, "aria-checked") == "false", "a reloaded deck starts with AutoSave off")
+
+    # Switched off by the user: nothing is written. Switched on: unsaved changes are written at once.
+    page.keyboard.press("Control+s")
+    wait_until(page, "document.getElementById('autosave-toggle').getAttribute('aria-checked') === 'true'")
+    page.click(switch)
+    check(page.get_attribute(switch, "aria-checked") == "false", "switched off")
+    count = writes()
+    page.mouse.click(*slide_to_screen(page, 614, 290))
+    page.keyboard.press("ArrowLeft")
+    page.wait_for_timeout(1000)
+    check(writes() == count, "no AutoSave while off")
+    page.click(switch)
+    wait_until(page, f"__disk.writes === {count + 1}")
+
+    # Closing the tab starts the write at once instead of waiting for the timer.
+    page.evaluate("App.autosave.setTiming(60000, 60000)")
+    page.mouse.click(*slide_to_screen(page, 614, 290))
+    page.keyboard.press("ArrowLeft")
+    page.wait_for_timeout(300)
+    check(writes() == count + 1, "long timer: not written yet")
+    page.evaluate("window.dispatchEvent(new Event('beforeunload'))")
+    wait_until(page, f"__disk.writes === {count + 2}")
+
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_drag_and_drop_opens_a_deck(browser):
     editor = Editor(browser)
     text = CONTRACT.read_text(encoding="utf-8")
@@ -767,6 +885,7 @@ TESTS = [
     test_nudge_delete_clipboard_and_order,
     test_format_pane_and_context_menu,
     test_zoom,
+    test_autosave_to_file,
 ]
 
 

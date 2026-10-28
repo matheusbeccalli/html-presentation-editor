@@ -42,6 +42,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `elements.js` | Actions on the selected element: nudge (merged undo), delete, cut/copy/paste/duplicate (own clipboard, fresh ids), stacking order | selection, transform, history, deck |
 | `thumbnails.js` | Slide rail; one small sandboxed iframe per slide, drawn lazily, refreshed debounced | deck, history events |
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |
+| `autosave.js` | AutoSave to the file (SPEC 6.1): the title-bar switch, a scheduler (5 s after the last change, max 30 s, never during a drag/IME, never two writes), the changed-on-disk question | fileio, history, dialogs |
 | `commands.js` | Every user action by name; one place that reports errors | fileio, history, deck |
 | `ribbon.js` | File menu and tabs; buttons only name commands | commands |
 | `ui.js` | Title bar, status bar, notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events |
@@ -83,6 +84,15 @@ pointerdown on #overlay → selection.js hit-tests the slide's elements (transfo
   → mouse moved 3 px → history.begin('Move' | 'Resize', slide) → every move: transform.moveRect/resizeRect → element style
   → pointerup → history.commit()  (one undo step)   ·   Escape → history.cancel()
 'history-changed' → selection.refresh() finds the element again by data-id (undo rebuilt the slide)
+```
+
+**AutoSave** (Phase 2)
+
+```text
+first manual Save into a file → 'saved' {toHandle} → autosave.js switches On
+every change → 'history-changed' → scheduler.notifyChange()  (5 s after the last change, at most every 30 s)
+  → fileio.autoSave(): file date changed on disk? → ask Reload / Save as copy / Overwrite
+                       else → serialize → createWritable → write → close → history.markSaved(stateId)
 ```
 
 **Saving** (Ctrl+S)

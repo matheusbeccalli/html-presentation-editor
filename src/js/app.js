@@ -18,6 +18,8 @@ window.App = {
         fileName: null,      // name shown in the title bar, e.g. "deck.html"
         fileHandle: null,    // FileSystemFileHandle when opened via the File System Access API
         hasDeck: false,      // false while the welcome screen is shown
+        openedHtml: null,    // the deck as it was when opened, for "Revert to version opened"
+        diskLastModified: null,  // the file's date at open / our last save (AutoSave conflict check)
     },
 };
 
@@ -42,6 +44,7 @@ App.start = function start() {
     App.thumbnails.init();
     App.deck.init();
     App.fileio.init();
+    App.autosave.init();
     App.shortcuts.init();
 
     App.ui.showWelcome();

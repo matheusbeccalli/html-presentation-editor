@@ -83,3 +83,22 @@
 .menu-label { flex: 1; }
 .menu-keys { color: var(--text-muted); font-size: 11px; }
 .menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
+
+/* AutoSave switch in the title bar (autosave.js), like PowerPoint's. */
+#autosave-toggle {
+    display: flex; align-items: center; gap: 6px;
+    margin-right: 6px; padding: 2px 8px; border: 0; border-radius: 4px;
+    background: transparent; color: #fff; cursor: pointer; font-size: 12px;
+}
+#autosave-toggle:hover { background: rgba(255, 255, 255, 0.15); }
+.autosave-switch {
+    position: relative; width: 30px; height: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.8); border-radius: 8px;
+}
+.autosave-knob {
+    position: absolute; top: 2px; left: 2px; width: 10px; height: 10px;
+    border-radius: 50%; background: #fff; transition: left 0.15s;
+}
+#autosave-toggle[aria-checked="true"] .autosave-switch { background: rgba(255, 255, 255, 0.35); }
+#autosave-toggle[aria-checked="true"] .autosave-knob { left: 16px; }
+.autosave-state { min-width: 20px; text-align: left; }

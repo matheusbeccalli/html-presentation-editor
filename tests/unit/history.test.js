@@ -225,3 +225,26 @@ test('history: a merged change still notifies listeners (thumbnails, autosave)',
     history.change('Nudge', { slideId: 's1' }, () => setText(doc, 'e1', 'B'), { mergeKey: 'k' });
     assertEqual(calls, ['change', 'change']);
 });
+
+test('history: markSaved(stateId) records the state that was written, not a later one', () => {
+    // An async save serializes the deck, the user keeps editing, then the write finishes.
+    const doc = deckWithTwoSlides();
+    const history = App.createHistory({ getDoc: () => doc });
+    history.change('A', { slideId: 's1' }, () => setText(doc, 'e1', 'A'));
+    const written = history.stateId();
+    history.change('B', { slideId: 's1' }, () => setText(doc, 'e1', 'B'));   // during the write
+    history.markSaved(written);
+    assert(history.isDirty(), 'change B is not saved yet');
+    history.undo();
+    assert(!history.isDirty(), 'undoing B goes back to the saved state');
+});
+
+test('history: isPending is true between begin and commit (a drag in progress)', () => {
+    const doc = deckWithTwoSlides();
+    const history = App.createHistory({ getDoc: () => doc });
+    assert(!history.isPending());
+    history.begin('Move', { slideId: 's1' });
+    assert(history.isPending());
+    history.commit();
+    assert(!history.isPending());
+});

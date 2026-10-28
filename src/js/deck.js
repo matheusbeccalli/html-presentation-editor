@@ -75,6 +75,18 @@
         });
     };
 
+    /*
+     * Replace the whole deck (head and body) with `html`, keeping the editor's
+     * view CSS. Used by "Revert to version opened"; call it inside
+     * history.change(..., 'deck', ...) so it can be undone.
+     */
+    App.deck.replaceContent = function replaceContent(html) {
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        doc.head.innerHTML = parsed.head.innerHTML;
+        doc.body.innerHTML = parsed.body.innerHTML;
+        addEditorView(doc);
+    };
+
     App.deck.getDocument = function getDocument() {
         return doc;
     };

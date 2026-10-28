@@ -49,6 +49,7 @@
         ['open', 'open', 'Ctrl+O'],
         ['save', 'save', 'Ctrl+S'],
         ['saveAs', 'saveAs', 'Ctrl+Shift+S'],
+        ['revertToOpened', 'undo', ''],
     ];
 
     let panel = null;

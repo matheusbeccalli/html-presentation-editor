@@ -28,6 +28,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `history.js` | Undo/redo by HTML snapshots of a slide (or the whole deck); dirty tracking; `mergeKey` joins quick repeats (held arrow key) into one step | deck (via `getDoc`) |
 | `charts.js` | Chart JSON → SVG. **Phase 1: placeholder only** | importer |
 | `template.js` | The blank deck for File > New | fileio |
+| `text.js` | The only door to text (SPEC 3.7). Step 1: the flat-paragraph model (`<p data-list data-level>`), `normalize` (messy HTML → allowed set, idempotent), `getModel`, the bullet/number stylesheet (`deckTextCss`) and list theme variables | importer (step 2), editing (later steps) |
 | `importer.js` | Parse, sanitize (scripts, handlers), find blocked/missing refs, detect slides, run the import | normalize, charts |
 | `normalize.js` | Measures the deck in a hidden iframe and rebuilds it in the contract format | importer |
 | `serialize.js` | Clean copy of the deck + player script/CSS → the saved file's text | fileio |
@@ -51,11 +52,12 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `ribbon.js` | File menu and tabs; buttons only name commands | commands |
 | `ui.js` | Title bar, status bar (save state per SPEC 6.4 + last message), notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events, fileio, autosave, drafts |
 
-**Planned, Phase 3: `text.js`, the only door to text (SPEC 3.7).** Every text action (ribbon, shortcuts, paste,
-import, save) goes through `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`.
-Text is flat paragraphs, `<p data-list data-level>` (SPEC Phase 3, "Text model"); nothing else reads or writes the
-HTML inside a text element. If the `contenteditable` internals stay buggy, they can be swapped for ProseMirror/Tiptap
-(ask first) without touching other modules.
+**`text.js` is the only door to text (SPEC 3.7).** Every text action (ribbon, shortcuts, paste, import, save) goes
+through `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel` (the editing ones arrive
+in later Phase 3 steps). Text is flat paragraphs, `<p data-list data-level>`; bullets and numbers are CSS counters in the
+deck's `<style data-deck-text>`; each line's `--marker-size/-color` lets its bullet follow the first character. Nothing
+else reads or writes the HTML inside a text element. If the `contenteditable` internals stay buggy, they can be swapped
+for ProseMirror/Tiptap (ask first) without touching other modules.
 
 `src/player/player.js` + `player.css` are **not run by the editor**. They are copied into every saved deck
 so it presents (arrow keys, F = full screen, hidden slides skipped) and prints one slide per page on its own.

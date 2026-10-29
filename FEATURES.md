@@ -96,10 +96,10 @@ Nested bullets are the top priority of this phase.
 
 *Interface and model*
 - [ ] `text.js` interface (3.7): `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`; no other module touches text internals
-- [ ] Text model: one `<p data-list="bullet|number|none" data-level="1..5">` per line, optional `data-start`; no `<ul>/<ol>/<li>` or headings inside text elements
+- [x] Text model: one `<p data-list="bullet|number|none" data-level="1..5">` per line, optional `data-start`; no `<ul>/<ol>/<li>` or headings inside text elements
 - [ ] Bullets and numbers drawn with CSS (`::before` + counters) from `<style data-deck-text>`, with a hanging indent; numbering per level, reset by a higher level (1, 2, a, b, 3)
-- [ ] Per-level list theme variables `--list-N-bullet / -number / -bullet-color / -bullet-size / -indent / -space-before` (defaults • – ▪ · ·, 1. a. i.)
-- [ ] `data-start` mirrored to an inline `counter-set` by the normalizer; each `<p>` gets the derived `font-size` and `color` of its first character (bullets follow the text)
+- [ ] Per-level list theme variables `--list-N-bullet / -number / -bullet-color / -bullet-size / -indent / -space-before` (defaults • – ▪ · ·, 1. a. i.; bullet color/size unset = follow the text)
+- [x] `data-start` mirrored to an inline `counter-set` by the normalizer; each `<p>` gets `--marker-size` / `--marker-color` from its first character (the bullet follows the text, the rest of the line is unchanged); an empty line keeps a real `font-size` / `color`
 - [ ] `deck-format` bumped to 2; format-1 decks migrated on open (lists and headings converted, list variables and stylesheet added), noted in the import report
 - [ ] Import: nested `<ul>/<ol>/<li>` → flat paragraphs with levels; headings → `<p>`, their look kept (box-wide look on the `.el`, differences as inline formatting); boxes with flex/grid/column layout flattened and listed in the import report
 - [ ] Import/paste: Word/Outlook `mso-list` levelN paragraphs → flat paragraphs (glyph spans removed); PowerPoint text keeps bullets and levels
@@ -133,9 +133,9 @@ Nested bullets are the top priority of this phase.
 - [ ] Stored as `font-size` in pt on a `<span>`; never `execCommand('fontSize')`; px sizes shown as pt
 
 *Normalizer*
-- [ ] `App.text.normalize(element)` rewrites to the allowed tags/attributes/styles; strong→b, em→i, font→span, div→p, lists→flat paragraphs; unknown tags unwrapped; empty spans removed; identical adjacent spans merged; only http/https/mailto links
+- [x] `App.text.normalize(element)` rewrites to the allowed tags/attributes/styles; strong→b, em→i, font→span, div→p, lists→flat paragraphs; unknown tags unwrapped; empty spans removed; identical adjacent spans merged; only http/https/mailto links
 - [ ] Runs on leaving edit mode, after toolbar commands, after paste, after import and before save; never per keystroke; preserves the selection
-- [ ] Idempotent (normalize twice == once), tested
+- [x] Idempotent (normalize twice == once), tested
 
 *Paste*
 - [ ] Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets/levels, links), drops fonts, sizes and colors ("Use Destination Theme"); text copied inside the editor keeps all its formatting

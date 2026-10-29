@@ -1131,6 +1131,64 @@ def test_heavy_deck_stays_responsive(browser):
     editor.close()
 
 
+def rendered_text(page, selector):
+    """
+    The text Chromium actually laid out inside `selector`, including CSS-generated
+    bullets and counter numbers (which no DOM API exposes), via a DevTools snapshot.
+    """
+    page.evaluate("s => document.querySelector(s).setAttribute('data-snapshot-root', '')", selector)
+    cdp = page.context.new_cdp_session(page)
+    snap = cdp.send("DOMSnapshot.captureSnapshot", {"computedStyles": []})
+    strings, doc = snap["strings"], snap["documents"][0]
+    nodes, layout = doc["nodes"], doc["layout"]
+    parents = nodes["parentIndex"]
+    # Index of the root element, then every layout piece whose node sits under it.
+    root = next(i for i, attrs in enumerate(nodes["attributes"])
+                if any(strings[a] == "data-snapshot-root" for a in attrs[0::2]))
+
+    def under_root(index):
+        while index != -1:
+            if index == root:
+                return True
+            index = parents[index]
+        return False
+
+    pieces = [strings[t] for n, t in zip(layout["nodeIndex"], layout["text"]) if t >= 0 and under_root(n)]
+    return "".join(pieces)
+
+
+def test_text_lists_render_bullets_and_numbers(browser):
+    editor = Editor(browser)
+    page = editor.page
+    css = page.evaluate("App.text.deckTextCss()")
+    # Normalized by the real normalizer, so data-start becomes its counter-set.
+    paragraphs = page.evaluate("""() => {
+        const box = document.createElement('div');
+        box.innerHTML =
+            '<p data-list="number" data-level="1">Um</p><p data-list="number" data-level="1">Dois</p>' +
+            '<p data-list="number" data-level="2">sub a</p><p data-list="number" data-level="2">sub b</p>' +
+            '<p data-list="number" data-level="1">Três, uma linha longa o bastante para quebrar e mostrar que a ' +
+            'segunda linha alinha com o texto e não com o número</p>' +
+            '<p data-list="bullet" data-level="1">Marcador</p><p data-list="number" data-level="1">De novo um</p>' +
+            '<p data-list="number" data-level="1" data-start="7">Sete</p>' +
+            '<p data-list="bullet" data-level="2">Nível dois</p><p data-list="number" data-level="3">romano</p>' +
+            '<p data-list="none" data-level="2">Texto simples no nível dois</p>' +
+            '<p data-list="bullet" data-level="1"><span style="font-size: 28pt; color: rgb(204, 9, 47)">Grande</span> e normal</p>';
+        App.text.normalize(box);
+        return box.innerHTML;
+    }""")
+    page.set_content('<!DOCTYPE html><html><head><style data-deck-text>' + css + '</style></head><body>' +
+                     '<div class="el" data-type="text" style="position:relative; width:700px; font: 18pt Calibri, Arial, sans-serif">' +
+                     paragraphs + '</div></body></html>')
+    text = rendered_text(page, ".el")
+    for expected in ["1.Um", "2.Dois", "a.sub a", "b.sub b", "3.Três", "•Marcador", "1.De novo um", "7.Sete",
+                     "–Nível dois", "i.romano", "•Grande"]:
+        check(expected in text, f"rendered {expected!r} in {text!r}")
+    check("Texto simples" in text and "·Texto" not in text, "a plain line has no bullet")
+    page.screenshot(path=str(OUTPUT / "30-text-lists.png"), clip={"x": 0, "y": 0, "width": 760, "height": 520})
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -1151,6 +1209,7 @@ TESTS = [
     test_crash_recovery_drafts,
     test_recovery_unavailable_when_storage_is_blocked,
     test_settings_recent_files_and_status,
+    test_text_lists_render_bullets_and_numbers,
 ]
 
 

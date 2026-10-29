@@ -953,8 +953,8 @@ test('formatting: strikethrough, superscript and subscript', async () => {
 });
 
 test('formatting: other formatting, colours and links are kept', async () => {
-    const result = await styled(['<a href="https://example.com"><span style="color: red">A[lf]a</span></a>'], 'underline');
-    assertEqual(result.lines, ['<a href="https://example.com"><span style="color: red;">A<u>lf</u>a</span></a>']);
+    const result = await styled(['<a href="https://example.com"><span style="color: red">A[lf]a</span></a> Beta'], 'underline');
+    assertEqual(result.lines, ['<a href="https://example.com"><span style="color: red;">A<u>lf</u>a</span></a> Beta']);
 });
 
 test('formatting: Clear formatting removes formatting, sizes and colours from the selection (links stay)', async () => {
@@ -1065,4 +1065,30 @@ test('font size: when the size moves onto the box, an empty line outside the sel
     assertEqual(box.el.style.fontSize, '24pt');
     assertEqual(box.el.lastElementChild.style.fontSize, '18pt');
     box.frame.remove();
+});
+
+test('colour: a colour on a selection; a theme colour is stored as its variable', async () => {
+    const result = await styled(['Alfa [Beta]'], 'color', 'var(--color-primary)');
+    assertEqual(result.lines, ['Alfa <span style="color: var(--color-primary);">Beta</span>']);
+    assertEqual(result.action, 'Font color');
+    assertEqual((await styled(['Alfa [Beta]'], 'color', '#c00000')).lines, ['Alfa <span style="color: rgb(192, 0, 0);">Beta</span>']);
+});
+
+test('colour: one colour for all the text of the box goes on the box; an empty line takes it too', async () => {
+    const box = await formatBox(['[Alfa', '<br>', 'Beta]']);
+    App.text.runAction(box.el, App.text.styleAction(box.el, 'color', 'var(--color-accent)', box.caret));
+    assertEqual(Array.from(box.el.children).map((p) => p.innerHTML), ['Alfa', '<br>', 'Beta']);
+    assertEqual(box.el.style.color, 'var(--color-accent)');
+    assertEqual(box.el.children[1].style.color, 'var(--color-accent)');
+    box.frame.remove();
+});
+
+test('highlight: on a selection, and "No color" takes it off; it never goes on the box', async () => {
+    assertEqual((await styled(['Alfa [Beta]'], 'background-color', '#ffff00')).lines,
+        ['Alfa <span style="background-color: rgb(255, 255, 0);">Beta</span>']);
+    const all = await styled(['[Alfa]'], 'background-color', '#ffff00');
+    assertEqual(all.lines, ['<span style="background-color: rgb(255, 255, 0);">Alfa</span>']);
+    assertEqual(all.action, 'Highlight');
+    assertEqual((await styled(['<span style="background-color: yellow; color: red">Al[fa]</span> Beta'], 'background-color', null)).lines,
+        ['<span style="color: red; background-color: yellow;">Al</span><span style="color: red;">fa</span> Beta']);
 });

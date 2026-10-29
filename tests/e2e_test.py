@@ -677,6 +677,48 @@ def test_font_and_size(browser):
     editor.close()
 
 
+def test_text_colors(browser):
+    """Home > Font: font colour and highlight, with the deck's theme colours first."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    last_line = lambda: page.evaluate(  # noqa: E731
+        "() => App.deck.getDocument().querySelector('[data-id=\"e7\"]').lastElementChild.innerHTML")
+    start = last_line()
+    page.keyboard.press("Enter")
+    page.keyboard.press("Control+Shift+ArrowLeft")   # the last word
+
+    page.locator('#ribbon-panel [data-command="fontColor"]').click()   # the colour shown on the button
+    check('color: var(--color-primary)' in last_line(), f"the Font color button uses the theme's primary colour: {last_line()}")
+    page.locator("#ribbon-panel .font-color-menu-button").click()
+    page.locator('.color-menu [title="Accent (theme)"]').click()
+    check('color: var(--color-accent)' in last_line(), f"a theme colour is stored as its variable: {last_line()}")
+    page.locator("#ribbon-panel .font-color-menu-button").click()
+    page.locator('.color-menu [title="Dark Red"]').click()
+    check('color: rgb(192, 0, 0)' in last_line(), f"a standard colour: {last_line()}")
+    page.keyboard.press("Home")
+    page.keyboard.press("Control+Shift+ArrowRight")   # the first word
+    page.locator('#ribbon-panel [data-command="fontColor"]').click()
+    check(last_line().startswith('<span style="color: rgb(192, 0, 0);">Plano'), f"the button now uses Dark Red: {last_line()}")
+
+    page.locator('#ribbon-panel [data-command="highlight"]').click()
+    check('background-color: rgb(255, 255, 0)' in last_line(), f"highlight starts yellow: {last_line()}")
+    page.locator("#ribbon-panel .highlight-menu-button").click()
+    page.locator('.color-menu [title="No color"]').click()
+    check('background-color' not in last_line(), f"No color takes the highlight off: {last_line()}")
+    check(page.evaluate("App.text.isEditing()"), "still editing")
+
+    for _ in range(8):
+        if last_line() == start:
+            break
+        page.keyboard.press("Control+z")
+    check(last_line() == start, f"every step undoes: {last_line()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1625,6 +1667,7 @@ TESTS = [
     test_list_buttons,
     test_character_formatting,
     test_font_and_size,
+    test_text_colors,
 ]
 
 

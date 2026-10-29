@@ -109,7 +109,7 @@ Nested bullets are the top priority of this phase.
 - [x] Double-click a text element to edit (`contenteditable`) *(also Enter / F2 on a selected text box; Esc or a click outside stops)*
 - [x] Insert text box, PowerPoint style: click the button, then click on the slide (grows as you type) or drag to set the width *(click = 360 px wide, grows in height; an empty new box is removed)*
 - [x] Toolbar: bold, italic, underline, strikethrough, superscript, subscript *(Home > Font; Ctrl+B / Ctrl+I / Ctrl+U; a cursor inside a word formats the word, elsewhere the text typed next; with the box selected: all its text)*
-- [ ] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting; theme fonts and theme colors stored as `var(--…)`
+- [x] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting; theme fonts and theme colors stored as `var(--…)` *(Font color / Highlight are split buttons that remember the last colour; More colors… opens the browser's colour window)*
 - [ ] Toolbar: align left / center / right / justify
 - [ ] Line spacing and paragraph spacing
 - [ ] Format painter (copy the style of one text, apply to another)
@@ -162,6 +162,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Home > Paragraph: select two bullets, click Numbering (1., 2.; the button lights up), Increase indent (a., b.), type: the cursor is still in the text; put the cursor on b. and click Restart numbering (a.); in a later numbered line after a bullet, Continue numbering goes on from the run above; Esc, then Bullets acts on the whole box; Ctrl+Z undoes each click
   - [ ] Home > Font: select a word, Ctrl+B, then the Italic button (both light up); click inside another word and Ctrl+U underlines the word; at the end of a line Ctrl+B then type: only the new text is bold; select a box (not typing) and Ctrl+B: all its text; Clear formatting removes it; Ctrl+Z undoes each step
   - [ ] Home > Font, sizes and fonts: select a word, Ctrl+] twice (the size box counts up the list), type 30 in the size box + Enter (the word stays selected, typing goes on in the text), pick 40 from the size list, pick Georgia and then the "(Headings)" theme font from the font list; select a whole line with mixed sizes: the size box is blank; with the box selected (not typing) Ctrl+[ makes all its text one step smaller
+  - [ ] Home > Font, colours: select a word, click the Font color arrow: the deck's theme colours come first; pick one, then a standard colour; the button's bar now shows that colour and clicking it colours another word; Highlight paints yellow, its "No color" takes it off; More colors… opens the colour window
 
 ## Phase 4: Tables
 

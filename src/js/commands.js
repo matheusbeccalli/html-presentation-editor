@@ -170,6 +170,23 @@
             label: 'Font size', keepsEdit: true, run: (value) => App.text.applyStyle('font-size', value),
             isEnabled: () => App.text.canStyle(),
         });
+        // Font color / Highlight: the split button applies its current colour, its list a chosen one.
+        App.commands.define('fontColor', {
+            label: 'Font color', keepsEdit: true, isEnabled: () => App.text.canStyle(),
+            run: () => App.text.applyStyle('color', App.fontControls.currentColor('color')),
+        });
+        App.commands.define('setFontColor', {
+            label: 'Font color', keepsEdit: true, run: (value) => App.text.applyStyle('color', value),
+            isEnabled: () => App.text.canStyle(),
+        });
+        App.commands.define('highlight', {
+            label: 'Text highlight color', keepsEdit: true, isEnabled: () => App.text.canStyle(),
+            run: () => App.text.applyStyle('background-color', App.fontControls.currentColor('background-color')),
+        });
+        App.commands.define('setHighlight', {
+            label: 'Text highlight color', keepsEdit: true, run: (value) => App.text.applyStyle('background-color', value),
+            isEnabled: () => App.text.canStyle(),
+        });
         App.commands.define('growFont', {
             label: 'Increase font size', keepsEdit: true, run: () => App.text.applyStyle('grow'),
             isEnabled: () => App.text.canStyle(),

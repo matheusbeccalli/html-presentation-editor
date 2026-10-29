@@ -83,6 +83,23 @@
 .font-family-menu { width: 220px; }
 .font-size-menu { width: 64px; }
 .font-family-menu .menu-item, .font-size-menu .menu-item { padding: 5px 10px; }
+
+/* Font color / Highlight split buttons and their colour lists (fontcontrols.js). */
+.color-split { display: flex; align-items: stretch; }
+.color-main { position: relative; padding-bottom: 6px; }
+.color-bar { position: absolute; left: 4px; right: 4px; bottom: 2px; height: 4px; border: 1px solid rgba(0, 0, 0, 0.15); }
+.color-menu-button {
+    width: 14px; padding: 0; border: 1px solid transparent; border-radius: 3px;
+    background: transparent; color: var(--text-muted); font-size: 10px; cursor: pointer;
+}
+.color-menu-button:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--border); }
+.color-menu-button:disabled { opacity: 0.4; cursor: default; }
+.color-menu { min-width: 0; width: 236px; }
+.color-menu-label { padding: 6px 6px 4px; font-size: 11px; color: var(--text-muted); }
+.color-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 4px; padding: 0 6px 6px; }
+.color-swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 2px; cursor: pointer; }
+.color-swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.color-picker-input { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; }
 .ribbon-note {
     align-self: center; max-width: 560px; padding: 0 14px;
     color: var(--text-muted); font-size: 12px; line-height: 1.4;

@@ -838,12 +838,10 @@
      */
     const themeCache = new WeakMap();
 
-    function themeValues(sourceDoc) {
-        if (themeCache.has(sourceDoc)) {
-            return themeCache.get(sourceDoc);
-        }
+    /* The custom properties a document's :root rules define whose names match `pattern`, in order. */
+    function rootVariables(doc, pattern) {
         const names = [];
-        Array.from(sourceDoc.styleSheets).forEach((sheet) => {
+        Array.from(doc.styleSheets).forEach((sheet) => {
             let rules = [];
             try {
                 rules = Array.from(sheet.cssRules || []);
@@ -853,14 +851,27 @@
             rules.forEach((rule) => {
                 if (rule.selectorText && /(^|,)\s*:root\s*($|,)/.test(rule.selectorText)) {
                     Array.from(rule.style).forEach((name) => {
-                        if (/^--(font-(heading|body)|color-[a-z0-9-]+)$/.test(name) && !/^--color-(bg|background)/.test(name) &&
-                            names.indexOf(name) === -1) {
+                        if (pattern.test(name) && names.indexOf(name) === -1) {
                             names.push(name);
                         }
                     });
                 }
             });
         });
+        return names;
+    }
+
+    /* The deck's theme colours, e.g. ['--color-primary', '--color-accent', …] (the colour pickers' first row). */
+    App.text.themeColorNames = function themeColorNames(doc) {
+        return rootVariables(doc, /^--color-[a-z0-9-]+$/);
+    };
+
+    function themeValues(sourceDoc) {
+        if (themeCache.has(sourceDoc)) {
+            return themeCache.get(sourceDoc);
+        }
+        const names = rootVariables(sourceDoc, /^--(font-(heading|body)|color-[a-z0-9-]+)$/)
+            .filter((name) => !/^--color-(bg|background)/.test(name));
         const probe = sourceDoc.createElement('span');
         sourceDoc.body.appendChild(probe);
         const view = sourceDoc.defaultView;
@@ -1690,9 +1701,12 @@
     const TOGGLES = { bold: 'b', italic: 'i', underline: 'u', strikethrough: 's', superscript: 'sup', subscript: 'sub' };
     const STYLE_LABELS = { bold: 'Bold', italic: 'Italic', underline: 'Underline', strikethrough: 'Strikethrough',
         superscript: 'Superscript', subscript: 'Subscript', clear: 'Clear formatting', 'font-family': 'Font',
-        'font-size': 'Font size', grow: 'Increase font size', shrink: 'Decrease font size' };
+        'font-size': 'Font size', grow: 'Increase font size', shrink: 'Decrease font size', color: 'Font color',
+        'background-color': 'Highlight' };
     // Commands that set a size: an empty line takes it too (its height, and what is typed there later).
     const SIZE_STYLES = ['font-size', 'grow', 'shrink'];
+    // Commands an empty line takes on its own <p> (it has no text to carry them).
+    const LINE_STYLES = SIZE_STYLES.concat(['color']);
     // The font size list (SPEC Phase 3, "Font sizes"); Increase / Decrease step through it.
     App.text.FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
     // Bold and italic can also come from the box itself (.el font-weight / font-style).
@@ -1925,7 +1939,8 @@
                 texts.forEach((run) => run.formats.delete(format));
             }
         });
-        ['font-family', 'font-size'].forEach((property) => {
+        // (Not the highlight: on the box it would colour the whole box, not the text.)
+        ['font-family', 'font-size', 'color'].forEach((property) => {
             const value = texts[0].styles[property];
             if (value && texts.every((run) => run.styles[property] === value)) {
                 if (property === 'font-size') {
@@ -1952,8 +1967,14 @@
             });
             return;
         }
-        if (style === 'font-family') {
-            selected.forEach((run) => { run.styles['font-family'] = value; });
+        if (style === 'font-family' || style === 'color' || style === 'background-color') {
+            selected.forEach((run) => {
+                if (value) {
+                    run.styles[style] = value;
+                } else {
+                    delete run.styles[style];   // highlight "No color"
+                }
+            });
             return;
         }
         if (SIZE_STYLES.indexOf(style) !== -1) {
@@ -2010,8 +2031,9 @@
             selectedText.push(...sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end).selected);
         });
         const sizes = SIZE_STYLES.indexOf(style) !== -1;
-        // Empty lines in the selection take a size too (they have no text to carry it).
-        const emptyLines = sizes ? segments.map((segment) => lines[segment.index]).filter(isEmptyLine) : [];
+        // Empty lines in the selection take a size or colour too (they have no text to carry it).
+        const emptyLines = LINE_STYLES.indexOf(style) !== -1
+            ? segments.map((segment) => lines[segment.index]).filter(isEmptyLine) : [];
         if (sizes && style !== 'font-size') {
             // Increase / Decrease at the end of the list change nothing: no undo step either.
             const changes = (size) => size !== null && parseFloat(newSize(style, value, size)) !== size;
@@ -2028,7 +2050,8 @@
             run: () => {
                 // Read everything before changing anything: the box's look decides what the text shows.
                 const perLine = lines.map((line) => readRuns(line));
-                const emptySizes = emptyLines.map((line) => newSize(style, value, shownLook(line) ? shownLook(line).size : null));
+                const emptyValues = emptyLines.map((line) => (style === 'color' ? value
+                    : newSize(style, value, shownLook(line) ? shownLook(line).size : null)));
                 const selected = [];
                 segments.forEach((segment) => {
                     const sliced = sliceRuns(perLine[segment.index], segment.start, segment.end);
@@ -2040,8 +2063,8 @@
                 liftToBox(element, allRuns, lines);
                 lines.forEach((line, index) => writeRuns(line, perLine[index]));
                 emptyLines.forEach((line, index) => {
-                    if (emptySizes[index]) {
-                        line.style.setProperty('font-size', emptySizes[index]);
+                    if (emptyValues[index]) {
+                        line.style.setProperty(style === 'color' ? 'color' : 'font-size', emptyValues[index]);
                     }
                 });
                 return caret;

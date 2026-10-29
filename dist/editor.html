@@ -220,6 +220,23 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .font-family-menu { width: 220px; }
 .font-size-menu { width: 64px; }
 .font-family-menu .menu-item, .font-size-menu .menu-item { padding: 5px 10px; }
+
+/* Font color / Highlight split buttons and their colour lists (fontcontrols.js). */
+.color-split { display: flex; align-items: stretch; }
+.color-main { position: relative; padding-bottom: 6px; }
+.color-bar { position: absolute; left: 4px; right: 4px; bottom: 2px; height: 4px; border: 1px solid rgba(0, 0, 0, 0.15); }
+.color-menu-button {
+    width: 14px; padding: 0; border: 1px solid transparent; border-radius: 3px;
+    background: transparent; color: var(--text-muted); font-size: 10px; cursor: pointer;
+}
+.color-menu-button:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--border); }
+.color-menu-button:disabled { opacity: 0.4; cursor: default; }
+.color-menu { min-width: 0; width: 236px; }
+.color-menu-label { padding: 6px 6px 4px; font-size: 11px; color: var(--text-muted); }
+.color-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 4px; padding: 0 6px 6px; }
+.color-swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 2px; cursor: pointer; }
+.color-swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.color-picker-input { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; }
 .ribbon-note {
     align-self: center; max-width: 560px; padding: 0 14px;
     color: var(--text-muted); font-size: 12px; line-height: 1.4;
@@ -2480,12 +2497,10 @@ App.template.newDeckHtml = function newDeckHtml() {
      */
     const themeCache = new WeakMap();
 
-    function themeValues(sourceDoc) {
-        if (themeCache.has(sourceDoc)) {
-            return themeCache.get(sourceDoc);
-        }
+    /* The custom properties a document's :root rules define whose names match `pattern`, in order. */
+    function rootVariables(doc, pattern) {
         const names = [];
-        Array.from(sourceDoc.styleSheets).forEach((sheet) => {
+        Array.from(doc.styleSheets).forEach((sheet) => {
             let rules = [];
             try {
                 rules = Array.from(sheet.cssRules || []);
@@ -2495,14 +2510,27 @@ App.template.newDeckHtml = function newDeckHtml() {
             rules.forEach((rule) => {
                 if (rule.selectorText && /(^|,)\s*:root\s*($|,)/.test(rule.selectorText)) {
                     Array.from(rule.style).forEach((name) => {
-                        if (/^--(font-(heading|body)|color-[a-z0-9-]+)$/.test(name) && !/^--color-(bg|background)/.test(name) &&
-                            names.indexOf(name) === -1) {
+                        if (pattern.test(name) && names.indexOf(name) === -1) {
                             names.push(name);
                         }
                     });
                 }
             });
         });
+        return names;
+    }
+
+    /* The deck's theme colours, e.g. ['--color-primary', '--color-accent', …] (the colour pickers' first row). */
+    App.text.themeColorNames = function themeColorNames(doc) {
+        return rootVariables(doc, /^--color-[a-z0-9-]+$/);
+    };
+
+    function themeValues(sourceDoc) {
+        if (themeCache.has(sourceDoc)) {
+            return themeCache.get(sourceDoc);
+        }
+        const names = rootVariables(sourceDoc, /^--(font-(heading|body)|color-[a-z0-9-]+)$/)
+            .filter((name) => !/^--color-(bg|background)/.test(name));
         const probe = sourceDoc.createElement('span');
         sourceDoc.body.appendChild(probe);
         const view = sourceDoc.defaultView;
@@ -3332,9 +3360,12 @@ App.template.newDeckHtml = function newDeckHtml() {
     const TOGGLES = { bold: 'b', italic: 'i', underline: 'u', strikethrough: 's', superscript: 'sup', subscript: 'sub' };
     const STYLE_LABELS = { bold: 'Bold', italic: 'Italic', underline: 'Underline', strikethrough: 'Strikethrough',
         superscript: 'Superscript', subscript: 'Subscript', clear: 'Clear formatting', 'font-family': 'Font',
-        'font-size': 'Font size', grow: 'Increase font size', shrink: 'Decrease font size' };
+        'font-size': 'Font size', grow: 'Increase font size', shrink: 'Decrease font size', color: 'Font color',
+        'background-color': 'Highlight' };
     // Commands that set a size: an empty line takes it too (its height, and what is typed there later).
     const SIZE_STYLES = ['font-size', 'grow', 'shrink'];
+    // Commands an empty line takes on its own <p> (it has no text to carry them).
+    const LINE_STYLES = SIZE_STYLES.concat(['color']);
     // The font size list (SPEC Phase 3, "Font sizes"); Increase / Decrease step through it.
     App.text.FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
     // Bold and italic can also come from the box itself (.el font-weight / font-style).
@@ -3567,7 +3598,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 texts.forEach((run) => run.formats.delete(format));
             }
         });
-        ['font-family', 'font-size'].forEach((property) => {
+        // (Not the highlight: on the box it would colour the whole box, not the text.)
+        ['font-family', 'font-size', 'color'].forEach((property) => {
             const value = texts[0].styles[property];
             if (value && texts.every((run) => run.styles[property] === value)) {
                 if (property === 'font-size') {
@@ -3594,8 +3626,14 @@ App.template.newDeckHtml = function newDeckHtml() {
             });
             return;
         }
-        if (style === 'font-family') {
-            selected.forEach((run) => { run.styles['font-family'] = value; });
+        if (style === 'font-family' || style === 'color' || style === 'background-color') {
+            selected.forEach((run) => {
+                if (value) {
+                    run.styles[style] = value;
+                } else {
+                    delete run.styles[style];   // highlight "No color"
+                }
+            });
             return;
         }
         if (SIZE_STYLES.indexOf(style) !== -1) {
@@ -3652,8 +3690,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             selectedText.push(...sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end).selected);
         });
         const sizes = SIZE_STYLES.indexOf(style) !== -1;
-        // Empty lines in the selection take a size too (they have no text to carry it).
-        const emptyLines = sizes ? segments.map((segment) => lines[segment.index]).filter(isEmptyLine) : [];
+        // Empty lines in the selection take a size or colour too (they have no text to carry it).
+        const emptyLines = LINE_STYLES.indexOf(style) !== -1
+            ? segments.map((segment) => lines[segment.index]).filter(isEmptyLine) : [];
         if (sizes && style !== 'font-size') {
             // Increase / Decrease at the end of the list change nothing: no undo step either.
             const changes = (size) => size !== null && parseFloat(newSize(style, value, size)) !== size;
@@ -3670,7 +3709,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             run: () => {
                 // Read everything before changing anything: the box's look decides what the text shows.
                 const perLine = lines.map((line) => readRuns(line));
-                const emptySizes = emptyLines.map((line) => newSize(style, value, shownLook(line) ? shownLook(line).size : null));
+                const emptyValues = emptyLines.map((line) => (style === 'color' ? value
+                    : newSize(style, value, shownLook(line) ? shownLook(line).size : null)));
                 const selected = [];
                 segments.forEach((segment) => {
                     const sliced = sliceRuns(perLine[segment.index], segment.start, segment.end);
@@ -3682,8 +3722,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 liftToBox(element, allRuns, lines);
                 lines.forEach((line, index) => writeRuns(line, perLine[index]));
                 emptyLines.forEach((line, index) => {
-                    if (emptySizes[index]) {
-                        line.style.setProperty('font-size', emptySizes[index]);
+                    if (emptyValues[index]) {
+                        line.style.setProperty(style === 'color' ? 'color' : 'font-size', emptyValues[index]);
                     }
                 });
                 return caret;
@@ -6027,6 +6067,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             '<path d="M6 14.5c.8 1.3 2.3 2 4 2 2.2 0 4-1.2 4-3 0-.8-.3-1.4-.8-2"/><path d="M3 10h14"/>',
         superscript: '<path d="M3 7l7 9M10 7l-7 9"/><path d="M13 4.5a1.5 1.5 0 1 1 2.5 1.1L13 8h3.5"/>',
         subscript: '<path d="M3 4l7 9M10 4l-7 9"/><path d="M13 13.5a1.5 1.5 0 1 1 2.5 1.1L13 17h3.5"/>',
+        fontColor: '<path d="M5 13.5L10 2.5l5 11M7 9.5h6"/>',
+        highlight: '<path d="M6.5 12.5l6.5-9.5 3 2-6.5 9.5h-3z"/><path d="M6.5 12.5L5 15h3"/>',
         growFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 7l2-2.5L18 7"/>',
         shrinkFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 4.5l2 2.5 2-2.5"/>',
         clearFormatting: '<path d="M5 4.5h10M10 4.5l-3 11"/><path d="M12 12l5 5M17 12l-5 5"/>',
@@ -9890,6 +9932,23 @@ App.template.newDeckHtml = function newDeckHtml() {
             label: 'Font size', keepsEdit: true, run: (value) => App.text.applyStyle('font-size', value),
             isEnabled: () => App.text.canStyle(),
         });
+        // Font color / Highlight: the split button applies its current colour, its list a chosen one.
+        App.commands.define('fontColor', {
+            label: 'Font color', keepsEdit: true, isEnabled: () => App.text.canStyle(),
+            run: () => App.text.applyStyle('color', App.fontControls.currentColor('color')),
+        });
+        App.commands.define('setFontColor', {
+            label: 'Font color', keepsEdit: true, run: (value) => App.text.applyStyle('color', value),
+            isEnabled: () => App.text.canStyle(),
+        });
+        App.commands.define('highlight', {
+            label: 'Text highlight color', keepsEdit: true, isEnabled: () => App.text.canStyle(),
+            run: () => App.text.applyStyle('background-color', App.fontControls.currentColor('background-color')),
+        });
+        App.commands.define('setHighlight', {
+            label: 'Text highlight color', keepsEdit: true, run: (value) => App.text.applyStyle('background-color', value),
+            isEnabled: () => App.text.canStyle(),
+        });
         App.commands.define('growFont', {
             label: 'Increase font size', keepsEdit: true, run: () => App.text.applyStyle('grow'),
             isEnabled: () => App.text.canStyle(),
@@ -9965,7 +10024,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 <script>
 // ---- js/fontcontrols.js ----
 /*
- * fontcontrols.js - the font list and the font size box of Home > Font (SPEC Phase 3).
+ * fontcontrols.js - the font list, the font size box and the colour buttons
+ * of Home > Font (SPEC Phase 3).
  *
  * Unlike the other ribbon buttons, these show a value: the font and size of
  * the selected text (blank when the selection mixes them, as in PowerPoint).
@@ -9977,8 +10037,12 @@ App.template.newDeckHtml = function newDeckHtml() {
  *   Windows fonts of SPEC 2.1, each with a generic fallback.
  * - The size box takes a typed size (Enter applies it, Esc goes back to the
  *   text) or one from its list (App.text.FONT_SIZES).
+ * - Font color and Highlight are split buttons, as in PowerPoint: the button
+ *   applies the colour shown under its icon (the last one chosen), the arrow
+ *   opens the colours: the deck's theme colours first (stored as
+ *   var(--color-…)), then standard colours, and "More colors…".
  *
- * Talks to: commands.js (setFontFamily, setFontSize), text.js (what the
+ * Talks to: commands.js (setFontFamily, setFontSize, setFontColor, setHighlight), text.js (what the
  * selection has), deck.js (the theme fonts), ribbon.js (places the controls).
  */
 
@@ -10000,6 +10064,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         ['Times New Roman', '"Times New Roman", serif'],
         ['Verdana', 'Verdana, sans-serif'],
     ];
+
+    // PowerPoint's standard colours and text highlight colours.
+    const STANDARD_COLORS = [['Dark Red', '#c00000'], ['Red', '#ff0000'], ['Orange', '#ffc000'], ['Yellow', '#ffff00'],
+        ['Light Green', '#92d050'], ['Green', '#00b050'], ['Light Blue', '#00b0f0'], ['Blue', '#0070c0'],
+        ['Dark Blue', '#002060'], ['Purple', '#7030a0']];
+    const HIGHLIGHT_COLORS = [['Yellow', '#ffff00'], ['Bright Green', '#00ff00'], ['Turquoise', '#00ffff'],
+        ['Pink', '#ff00ff'], ['Blue', '#0000ff'], ['Red', '#ff0000'], ['Dark Blue', '#000080'], ['Teal', '#008080'],
+        ['Green', '#008000'], ['Violet', '#800080'], ['Dark Red', '#800000'], ['Dark Yellow', '#808000'],
+        ['Gray 50%', '#808080'], ['Gray 25%', '#c0c0c0'], ['Black', '#000000']];
+
+    // The colour each split button applies: the last one chosen (null = its default).
+    const lastColors = { color: null, 'background-color': null };
 
     let fontButton = null;
     let sizeInput = null;
@@ -10149,8 +10225,134 @@ App.template.newDeckHtml = function newDeckHtml() {
         return el('div', { class: 'font-size-box' }, [sizeInput, arrow]);
     }
 
-    /* The control named in the ribbon's layout ('fontFamily' or 'fontSize'). */
+    /* "Primary (theme)" for --color-primary. */
+    function themeColorTitle(variable) {
+        const words = variable.replace(/^--color-/, '').replace(/^bg$/, 'background').split('-');
+        return words.map((word, i) => (i === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word)).join(' ') + ' (theme)';
+    }
+
+    /* What a stored colour looks like on screen (a theme variable resolved in the deck). */
+    function shownColor(value) {
+        const match = /^var\((--[a-z0-9-]+)\)$/.exec(value || '');
+        const doc = App.deck.getDocument();
+        if (match && doc) {
+            return getComputedStyle(doc.documentElement).getPropertyValue(match[1]).trim() || 'transparent';
+        }
+        return value || 'transparent';
+    }
+
+    /* The colour a split button applies now: the last chosen, else the theme's primary colour / yellow. */
+    App.fontControls.currentColor = function currentColor(property) {
+        if (lastColors[property] !== null) {
+            return lastColors[property];
+        }
+        if (property === 'background-color') {
+            return '#ffff00';
+        }
+        const doc = App.deck.getDocument();
+        return doc && App.text.themeColorNames(doc).indexOf('--color-primary') !== -1 ? 'var(--color-primary)' : '#c00000';
+    };
+
+    /* A colour chosen from the list: it applies, and the button keeps it for next time. */
+    function chooseColor(property, value) {
+        lastColors[property] = value;
+        App.commands.run(property === 'color' ? 'setFontColor' : 'setHighlight', value);
+        App.fontControls.refresh();
+    }
+
+    function swatch(title, value, property) {
+        return el('button', {
+            type: 'button', class: 'color-swatch', title: title, 'aria-label': title, style: 'background: ' + shownColor(value),
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => {
+                closeMenu();
+                chooseColor(property, value);
+            },
+        });
+    }
+
+    /* The colours of a split button's arrow. */
+    function openColorMenu(anchor, property) {
+        closeMenu();
+        menu = keepEdit(el('div', { class: 'menu color-menu ' + (property === 'color' ? 'font-color-menu' : 'highlight-menu'), role: 'menu' }));
+        const section = (label, colors) => {
+            menu.append(el('div', { class: 'color-menu-label' }, [label]),
+                el('div', { class: 'color-grid' }, colors.map(([title, value]) => swatch(title, value, property))));
+        };
+        if (property === 'color') {
+            const doc = App.deck.getDocument();
+            const theme = doc ? App.text.themeColorNames(doc) : [];
+            if (theme.length > 0) {
+                section('Theme colors', theme.map((name) => [themeColorTitle(name), 'var(' + name + ')']));
+            }
+            section('Standard colors', STANDARD_COLORS);
+        } else {
+            menu.appendChild(el('button', {
+                type: 'button', class: 'menu-item', title: 'No color', onmousedown: (event) => event.preventDefault(),
+                onclick: () => {
+                    closeMenu();
+                    App.commands.run('setHighlight', null);
+                },
+            }, [el('span', { class: 'menu-label' }, ['No color'])]));
+            section('Highlight colors', HIGHLIGHT_COLORS);
+        }
+        // Any colour: the browser's colour window (it takes the focus; the text gets it back after).
+        const picker = el('input', { type: 'color', class: 'color-picker-input', tabindex: '-1' });
+        picker.addEventListener('change', () => {
+            chooseColor(property, picker.value);
+            App.text.refocus();
+            picker.remove();
+        });
+        menu.appendChild(el('button', {
+            type: 'button', class: 'menu-item', onmousedown: (event) => event.preventDefault(),
+            onclick: () => {
+                closeMenu();
+                keepEdit(picker);
+                document.body.appendChild(picker);
+                picker.click();
+            },
+        }, [el('span', { class: 'menu-label' }, ['More colors…'])]));
+        const rect = anchor.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = rect.bottom + 'px';
+        document.body.appendChild(menu);
+        window.addEventListener('pointerdown', onOutsidePointerDown, true);
+        window.addEventListener('keydown', onMenuKey, true);
+    }
+
+    const colorButtons = {};   // property -> { main, arrow, bar }
+
+    /* A split button: the main part applies the colour under the icon, the arrow lists colours. */
+    function createColorButton(property) {
+        const command = property === 'color' ? 'fontColor' : 'highlight';
+        const main = keepEdit(el('button', {
+            type: 'button', class: 'ribbon-button small color-main', 'data-command': command,
+            title: App.commands.label(command), 'aria-label': App.commands.label(command),
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => App.commands.run(command),
+        }));
+        main.innerHTML = App.icons.get(command);
+        const bar = el('span', { class: 'color-bar' });
+        main.appendChild(bar);
+        const arrow = keepEdit(el('button', {
+            type: 'button', class: 'color-menu-button ' + (property === 'color' ? 'font-color-menu-button' : 'highlight-menu-button'),
+            title: App.commands.label(command) + ': more colors', 'aria-haspopup': 'menu',
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => (menu && menu.classList.contains(property === 'color' ? 'font-color-menu' : 'highlight-menu')
+                ? closeMenu() : openColorMenu(main, property)),
+        }, ['▾']));
+        colorButtons[property] = { main: main, arrow: arrow, bar: bar };
+        return el('div', { class: 'color-split' }, [main, arrow]);
+    }
+
+    /* The control named in the ribbon's layout. */
     App.fontControls.create = function create(name) {
+        if (name === 'fontColor') {
+            return createColorButton('color');
+        }
+        if (name === 'highlight') {
+            return createColorButton('background-color');
+        }
         return name === 'fontFamily' ? createFontFamily() : createFontSize();
     };
 
@@ -10168,6 +10370,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (document.activeElement !== sizeInput) {
             sizeInput.value = state.fontSize ? String(state.fontSize) : '';
         }
+        Object.keys(colorButtons).forEach((property) => {
+            const parts = colorButtons[property];
+            parts.main.disabled = !enabled;
+            parts.arrow.disabled = !enabled;
+            parts.bar.style.background = shownColor(App.fontControls.currentColor(property));
+        });
     };
 })();
 
@@ -10203,7 +10411,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                     rows: [[{ control: 'fontFamily' }, { control: 'fontSize' }, ['growFont', 'growFont'],
                         ['shrinkFont', 'shrinkFont'], ['clearFormatting', 'clearFormatting']],
                         [['bold', 'bold'], ['italic', 'italic'], ['underline', 'underline'],
-                            ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript']]],
+                            ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript'],
+                            { control: 'fontColor' }, { control: 'highlight' }]],
                 },
                 {
                     label: 'Paragraph',

@@ -36,6 +36,8 @@
             '<path d="M6 14.5c.8 1.3 2.3 2 4 2 2.2 0 4-1.2 4-3 0-.8-.3-1.4-.8-2"/><path d="M3 10h14"/>',
         superscript: '<path d="M3 7l7 9M10 7l-7 9"/><path d="M13 4.5a1.5 1.5 0 1 1 2.5 1.1L13 8h3.5"/>',
         subscript: '<path d="M3 4l7 9M10 4l-7 9"/><path d="M13 13.5a1.5 1.5 0 1 1 2.5 1.1L13 17h3.5"/>',
+        fontColor: '<path d="M5 13.5L10 2.5l5 11M7 9.5h6"/>',
+        highlight: '<path d="M6.5 12.5l6.5-9.5 3 2-6.5 9.5h-3z"/><path d="M6.5 12.5L5 15h3"/>',
         growFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 7l2-2.5L18 7"/>',
         shrinkFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 4.5l2 2.5 2-2.5"/>',
         clearFormatting: '<path d="M5 4.5h10M10 4.5l-3 11"/><path d="M12 12l5 5M17 12l-5 5"/>',

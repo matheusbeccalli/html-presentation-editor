@@ -27,7 +27,8 @@
                     rows: [[{ control: 'fontFamily' }, { control: 'fontSize' }, ['growFont', 'growFont'],
                         ['shrinkFont', 'shrinkFont'], ['clearFormatting', 'clearFormatting']],
                         [['bold', 'bold'], ['italic', 'italic'], ['underline', 'underline'],
-                            ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript']]],
+                            ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript'],
+                            { control: 'fontColor' }, { control: 'highlight' }]],
                 },
                 {
                     label: 'Paragraph',

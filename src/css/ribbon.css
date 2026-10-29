@@ -60,6 +60,7 @@
 .ribbon-button .icon { width: 24px; height: 24px; }
 .ribbon-button:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--border); }
 .ribbon-button:disabled { opacity: 0.4; cursor: default; }
+.ribbon-button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .ribbon-button-label { font-size: 12px; white-space: nowrap; }
 .ribbon-note {
     align-self: center; max-width: 560px; padding: 0 14px;

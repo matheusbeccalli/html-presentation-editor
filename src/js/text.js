@@ -1580,11 +1580,110 @@
         };
     };
 
-    /* Run an action from keyAction/autoFormatAction: change the lines, tidy them, put the cursor back. */
+    // ---------------------------------------------------------------
+    // Toolbar list buttons
+    // ---------------------------------------------------------------
+    //
+    // Bullets, Numbering, Increase/Decrease indent, Restart/Continue numbering
+    // (SPEC Phase 3, "Bullet behavior", Toolbar rows). Like the keys, each
+    // button is an action { label, run }; it works on the selected lines, or on
+    // every line when caret is null (the box is selected, not being edited).
+
+    function selectedRange(element, caret) {
+        if (!caret) {
+            return { first: 0, last: textLines(element).length - 1 };
+        }
+        return { first: Math.min(caret.anchor.p, caret.focus.p), last: Math.max(caret.anchor.p, caret.focus.p) };
+    }
+
+    /*
+     * The number each line shows (null for a line without one), worked out the
+     * way the CSS counters of deckTextCss count: a numbered line at level N
+     * counts on list-N and zeroes the deeper levels; any other line at level N
+     * zeroes list-N and deeper.
+     */
+    function shownNumbers(lines) {
+        const counters = [0, 0, 0, 0, 0, 0];   // index = level
+        return lines.map((line) => {
+            const level = levelOf(line);
+            const isNumber = listOf(line) === 'number';
+            if (isNumber) {
+                const start = positiveInt(line.getAttribute('data-start'));
+                counters[level] = start !== null ? start : counters[level] + 1;
+            }
+            for (let n = isNumber ? level + 1 : level; n <= MAX_LEVEL; n++) {
+                counters[n] = 0;
+            }
+            return isNumber ? counters[level] : null;
+        });
+    }
+
+    /* The number Continue gives line `index`: one more than the last numbered line before it at its level. */
+    function continuedNumber(lines, index) {
+        const numbers = shownNumbers(lines);
+        const level = levelOf(lines[index]);
+        for (let i = index - 1; i >= 0; i--) {
+            if (numbers[i] !== null && levelOf(lines[i]) === level) {
+                return numbers[i] + 1;
+            }
+        }
+        return null;
+    }
+
+    const LIST_LABELS = { bullet: 'Bullets', number: 'Numbering', indent: 'Increase indent', outdent: 'Decrease indent',
+        restart: 'Restart numbering', continue: 'Continue numbering' };
+
+    /*
+     * The action for a list button, or null when it cannot act here (no lines;
+     * Restart/Continue without a numbered line; Continue with no earlier
+     * numbered line at that level). command: bullet | number | indent | outdent
+     * | restart | continue.
+     */
+    App.text.listAction = function listAction(element, command, caret) {
+        const lines = textLines(element);
+        if (lines.length === 0 || !LIST_LABELS[command]) {
+            return null;
+        }
+        const { first, last } = selectedRange(element, caret);
+        const selected = lines.slice(first, last + 1);
+        const keepCaret = () => caret;
+        const label = LIST_LABELS[command];
+
+        if (command === 'bullet' || command === 'number') {
+            // As in PowerPoint: if every selected line already has it, it comes off; otherwise all get it.
+            const list = selected.every((line) => listOf(line) === command) ? 'none' : command;
+            return { label: label, run: () => { selected.forEach((line) => setListType(line, list)); return keepCaret(); } };
+        }
+        if (command === 'indent' || command === 'outdent') {
+            return { label: label, run: () => { shiftLevels(element, first, last, command === 'indent' ? 1 : -1); return keepCaret(); } };
+        }
+        const target = selected.find((line) => listOf(line) === 'number');
+        if (!target) {
+            return null;
+        }
+        const start = command === 'restart' ? 1 : continuedNumber(lines, lines.indexOf(target));
+        if (start === null) {
+            return null;
+        }
+        return { label: label, run: () => { target.setAttribute('data-start', String(start)); return keepCaret(); } };
+    };
+
+    /* Whether every selected line (every line, without a caret) is bulleted / numbered: the buttons show "on". */
+    App.text.listState = function listState(element, caret) {
+        const { first, last } = selectedRange(element, caret);
+        const selected = textLines(element).slice(first, last + 1);
+        const all = (list) => selected.length > 0 && selected.every((line) => listOf(line) === list);
+        return { bullet: all('bullet'), number: all('number') };
+    };
+
+    /* Run an action (a key, AutoFormat, a list button): change the lines, tidy them, put the cursor back
+       (an action on a selected box, not being edited, has no cursor). */
     App.text.runAction = function runAction(element, action) {
         const caret = action.run();
         App.text.normalize(element);
-        App.text.setCaret(element, caret);
+        if (caret) {
+            App.text.setCaret(element, caret);
+        }
     };
 
     // ---------------------------------------------------------------
@@ -1652,6 +1751,7 @@
         attachToElement(element);
         doc.addEventListener('keydown', onKeyDown, true);
         doc.addEventListener('pointerdown', onDeckPointerDown, true);
+        doc.addEventListener('selectionchange', onSelectionChange);
         window.addEventListener('pointerdown', onEditorPointerDown, true);
         overlayElement().classList.add('editing');
 
@@ -1699,6 +1799,7 @@
         editing = null;
         state.doc.removeEventListener('keydown', onKeyDown, true);
         state.doc.removeEventListener('pointerdown', onDeckPointerDown, true);
+        state.doc.removeEventListener('selectionchange', onSelectionChange);
         window.removeEventListener('pointerdown', onEditorPointerDown, true);
         overlayElement().classList.remove('editing');
         const element = state.element;
@@ -1717,6 +1818,19 @@
         window.focus();
         App.events.emit('text-edit-changed', { editing: false, id: state.id });
     };
+
+    /* The cursor moved: the ribbon shows what the lines under it have (once per frame at most). */
+    let selectionFrame = 0;
+    function onSelectionChange() {
+        if (!selectionFrame) {
+            selectionFrame = requestAnimationFrame(() => {
+                selectionFrame = 0;
+                if (editing) {
+                    App.events.emit('text-selection-changed');
+                }
+            });
+        }
+    }
 
     /* Close the open typing step now (before saving, a command, leaving edit mode). */
     App.text.commitTyping = function commitTyping() {
@@ -1856,26 +1970,61 @@
     }
 
     /*
-     * Increase (delta 1) or decrease (-1) the level of the selected lines while
-     * editing, or of every line of the selected text box (SPEC 3.7 setLevel).
+     * What the list buttons work on: the selected lines of the box being
+     * edited, or every line of a selected text box (caret null).
      */
-    App.text.setLevel = function setLevel(delta) {
-        const label = delta > 0 ? 'Increase indent' : 'Decrease indent';
+    function listTarget() {
         if (editing) {
-            const caret = App.text.getCaret(editing.element) || END_OF_TEXT;
-            const first = Math.min(caret.anchor.p, caret.focus.p);
-            const last = Math.max(caret.anchor.p, caret.focus.p);
-            runInEditor({ label: label, run: () => { shiftLevels(editing.element, first, last, delta); return caret; } });
-            return;
+            return { element: editing.element, caret: App.text.getCaret(editing.element) || END_OF_TEXT };
         }
         const element = App.selection.getElement();
-        if (element && element.getAttribute('data-type') === 'text') {
-            const slideId = element.closest('section.slide').getAttribute('data-slide-id');
-            App.history.change(label, { slideId: slideId }, () => {
-                shiftLevels(element, 0, textLines(element).length - 1, delta);
-                App.text.normalize(element);
-            });
+        return element && element.getAttribute('data-type') === 'text' ? { element: element, caret: null } : null;
+    }
+
+    /* Run a list button (see listAction) on the selected lines or the selected box, as one undo step. */
+    function runList(command) {
+        const target = listTarget();
+        const action = target && App.text.listAction(target.element, command, target.caret);
+        if (!action) {
+            return;
         }
+        if (editing) {
+            runInEditor(action);
+            return;
+        }
+        const element = target.element;
+        App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, () => {
+            App.text.runAction(element, action);
+            App.text.fitHeight(element);
+        });
+        App.selection.refresh();
+    }
+
+    /* Bullets ('bullet') or Numbering ('number') on or off (SPEC 3.7 toggleList). */
+    App.text.toggleList = function toggleList(list) {
+        runList(list);
+    };
+
+    /* Increase (delta 1) or decrease (-1) the level (SPEC 3.7 setLevel). */
+    App.text.setLevel = function setLevel(delta) {
+        runList(delta > 0 ? 'indent' : 'outdent');
+    };
+
+    /* Restart ('restart') or continue ('continue') the numbering at the first selected numbered line. */
+    App.text.setNumbering = function setNumbering(mode) {
+        runList(mode);
+    };
+
+    /* Whether a list button can act now (greys out the ribbon button otherwise). */
+    App.text.canRunList = function canRunList(command) {
+        const target = listTarget();
+        return !!(target && App.text.listAction(target.element, command, target.caret));
+    };
+
+    /* { bullet, number }: whether the Bullets / Numbering buttons show "on". */
+    App.text.currentListState = function currentListState() {
+        const target = listTarget();
+        return target ? App.text.listState(target.element, target.caret) : { bullet: false, number: false };
     };
 
     /* A press on the slide outside the text: leave edit mode and select what is there. */

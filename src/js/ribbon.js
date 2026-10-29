@@ -21,10 +21,16 @@
             groups: [
                 { label: 'Clipboard', commands: [['paste', 'paste'], ['cut', 'cut'], ['copy', 'copy'], ['duplicate', 'duplicate']] },
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
+                {
+                    label: 'Paragraph',
+                    commands: [['bullets', 'bullets'], ['numbering', 'numbering'], ['decreaseIndent', 'outdent'],
+                        ['increaseIndent', 'indent'], ['restartNumbering', 'restartNumbering'],
+                        ['continueNumbering', 'continueNumbering']],
+                },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
             note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). ' +
-                'Double-click a text box (or press Enter) to type in it; Esc stops typing.',
+                'Double-click a text box (or press Enter) to type in it; Esc stops typing. The Paragraph buttons work on the selected lines, or on the whole text box.',
         },
         {
             id: 'insert', label: 'Insert',
@@ -71,6 +77,12 @@
             'data-command': command,
             onclick: () => App.commands.run(command),
         });
+        if (App.commands.keepsEdit(command)) {
+            // Works on the text being edited: pressing it must not end editing (text.js) or
+            // take the focus, and with it the cursor, out of the text.
+            button.setAttribute('data-keep-edit', '');
+            button.addEventListener('mousedown', (event) => event.preventDefault());
+        }
         button.innerHTML = App.icons.get(iconName);
         button.appendChild(el('span', { class: 'ribbon-button-label' }, [App.commands.label(command)]));
         buttons.push({ button: button, command: command });
@@ -79,6 +91,12 @@
 
     function renderTab(tab) {
         panel.innerHTML = '';
+        // Forget the buttons of the tab shown before (the File menu's stay).
+        for (let i = buttons.length - 1; i >= 0; i--) {
+            if (!buttons[i].button.isConnected) {
+                buttons.splice(i, 1);
+            }
+        }
         (tab.groups || []).forEach((group) => {
             const groupNode = el('div', { class: 'ribbon-group' });
             const row = el('div', { class: 'ribbon-group-buttons' });
@@ -170,7 +188,7 @@
         });
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
-         'recent-changed']
+         'recent-changed', 'text-edit-changed', 'text-selection-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 
@@ -178,10 +196,15 @@
         selectTab('home');
     };
 
-    /* Grey out buttons whose command cannot run right now (e.g. Undo with nothing to undo). */
+    /* Grey out buttons whose command cannot run right now (e.g. Undo with nothing to undo);
+       toggle buttons (Bullets …) show whether they are on. */
     App.ribbon.refresh = function refresh() {
         buttons.forEach(({ button, command }) => {
             button.disabled = !App.commands.isEnabled(command);
+            const checked = App.commands.isChecked(command);
+            if (checked !== null) {
+                button.setAttribute('aria-pressed', checked ? 'true' : 'false');
+            }
         });
     };
 })();

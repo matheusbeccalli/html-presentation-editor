@@ -197,6 +197,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .ribbon-button .icon { width: 24px; height: 24px; }
 .ribbon-button:hover:not(:disabled) { background: var(--surface-alt); border-color: var(--border); }
 .ribbon-button:disabled { opacity: 0.4; cursor: default; }
+.ribbon-button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .ribbon-button-label { font-size: 12px; white-space: nowrap; }
 .ribbon-note {
     align-self: center; max-width: 560px; padding: 0 14px;
@@ -3190,11 +3191,110 @@ App.template.newDeckHtml = function newDeckHtml() {
         };
     };
 
-    /* Run an action from keyAction/autoFormatAction: change the lines, tidy them, put the cursor back. */
+    // ---------------------------------------------------------------
+    // Toolbar list buttons
+    // ---------------------------------------------------------------
+    //
+    // Bullets, Numbering, Increase/Decrease indent, Restart/Continue numbering
+    // (SPEC Phase 3, "Bullet behavior", Toolbar rows). Like the keys, each
+    // button is an action { label, run }; it works on the selected lines, or on
+    // every line when caret is null (the box is selected, not being edited).
+
+    function selectedRange(element, caret) {
+        if (!caret) {
+            return { first: 0, last: textLines(element).length - 1 };
+        }
+        return { first: Math.min(caret.anchor.p, caret.focus.p), last: Math.max(caret.anchor.p, caret.focus.p) };
+    }
+
+    /*
+     * The number each line shows (null for a line without one), worked out the
+     * way the CSS counters of deckTextCss count: a numbered line at level N
+     * counts on list-N and zeroes the deeper levels; any other line at level N
+     * zeroes list-N and deeper.
+     */
+    function shownNumbers(lines) {
+        const counters = [0, 0, 0, 0, 0, 0];   // index = level
+        return lines.map((line) => {
+            const level = levelOf(line);
+            const isNumber = listOf(line) === 'number';
+            if (isNumber) {
+                const start = positiveInt(line.getAttribute('data-start'));
+                counters[level] = start !== null ? start : counters[level] + 1;
+            }
+            for (let n = isNumber ? level + 1 : level; n <= MAX_LEVEL; n++) {
+                counters[n] = 0;
+            }
+            return isNumber ? counters[level] : null;
+        });
+    }
+
+    /* The number Continue gives line `index`: one more than the last numbered line before it at its level. */
+    function continuedNumber(lines, index) {
+        const numbers = shownNumbers(lines);
+        const level = levelOf(lines[index]);
+        for (let i = index - 1; i >= 0; i--) {
+            if (numbers[i] !== null && levelOf(lines[i]) === level) {
+                return numbers[i] + 1;
+            }
+        }
+        return null;
+    }
+
+    const LIST_LABELS = { bullet: 'Bullets', number: 'Numbering', indent: 'Increase indent', outdent: 'Decrease indent',
+        restart: 'Restart numbering', continue: 'Continue numbering' };
+
+    /*
+     * The action for a list button, or null when it cannot act here (no lines;
+     * Restart/Continue without a numbered line; Continue with no earlier
+     * numbered line at that level). command: bullet | number | indent | outdent
+     * | restart | continue.
+     */
+    App.text.listAction = function listAction(element, command, caret) {
+        const lines = textLines(element);
+        if (lines.length === 0 || !LIST_LABELS[command]) {
+            return null;
+        }
+        const { first, last } = selectedRange(element, caret);
+        const selected = lines.slice(first, last + 1);
+        const keepCaret = () => caret;
+        const label = LIST_LABELS[command];
+
+        if (command === 'bullet' || command === 'number') {
+            // As in PowerPoint: if every selected line already has it, it comes off; otherwise all get it.
+            const list = selected.every((line) => listOf(line) === command) ? 'none' : command;
+            return { label: label, run: () => { selected.forEach((line) => setListType(line, list)); return keepCaret(); } };
+        }
+        if (command === 'indent' || command === 'outdent') {
+            return { label: label, run: () => { shiftLevels(element, first, last, command === 'indent' ? 1 : -1); return keepCaret(); } };
+        }
+        const target = selected.find((line) => listOf(line) === 'number');
+        if (!target) {
+            return null;
+        }
+        const start = command === 'restart' ? 1 : continuedNumber(lines, lines.indexOf(target));
+        if (start === null) {
+            return null;
+        }
+        return { label: label, run: () => { target.setAttribute('data-start', String(start)); return keepCaret(); } };
+    };
+
+    /* Whether every selected line (every line, without a caret) is bulleted / numbered: the buttons show "on". */
+    App.text.listState = function listState(element, caret) {
+        const { first, last } = selectedRange(element, caret);
+        const selected = textLines(element).slice(first, last + 1);
+        const all = (list) => selected.length > 0 && selected.every((line) => listOf(line) === list);
+        return { bullet: all('bullet'), number: all('number') };
+    };
+
+    /* Run an action (a key, AutoFormat, a list button): change the lines, tidy them, put the cursor back
+       (an action on a selected box, not being edited, has no cursor). */
     App.text.runAction = function runAction(element, action) {
         const caret = action.run();
         App.text.normalize(element);
-        App.text.setCaret(element, caret);
+        if (caret) {
+            App.text.setCaret(element, caret);
+        }
     };
 
     // ---------------------------------------------------------------
@@ -3262,6 +3362,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         attachToElement(element);
         doc.addEventListener('keydown', onKeyDown, true);
         doc.addEventListener('pointerdown', onDeckPointerDown, true);
+        doc.addEventListener('selectionchange', onSelectionChange);
         window.addEventListener('pointerdown', onEditorPointerDown, true);
         overlayElement().classList.add('editing');
 
@@ -3309,6 +3410,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         editing = null;
         state.doc.removeEventListener('keydown', onKeyDown, true);
         state.doc.removeEventListener('pointerdown', onDeckPointerDown, true);
+        state.doc.removeEventListener('selectionchange', onSelectionChange);
         window.removeEventListener('pointerdown', onEditorPointerDown, true);
         overlayElement().classList.remove('editing');
         const element = state.element;
@@ -3327,6 +3429,19 @@ App.template.newDeckHtml = function newDeckHtml() {
         window.focus();
         App.events.emit('text-edit-changed', { editing: false, id: state.id });
     };
+
+    /* The cursor moved: the ribbon shows what the lines under it have (once per frame at most). */
+    let selectionFrame = 0;
+    function onSelectionChange() {
+        if (!selectionFrame) {
+            selectionFrame = requestAnimationFrame(() => {
+                selectionFrame = 0;
+                if (editing) {
+                    App.events.emit('text-selection-changed');
+                }
+            });
+        }
+    }
 
     /* Close the open typing step now (before saving, a command, leaving edit mode). */
     App.text.commitTyping = function commitTyping() {
@@ -3466,26 +3581,61 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     /*
-     * Increase (delta 1) or decrease (-1) the level of the selected lines while
-     * editing, or of every line of the selected text box (SPEC 3.7 setLevel).
+     * What the list buttons work on: the selected lines of the box being
+     * edited, or every line of a selected text box (caret null).
      */
-    App.text.setLevel = function setLevel(delta) {
-        const label = delta > 0 ? 'Increase indent' : 'Decrease indent';
+    function listTarget() {
         if (editing) {
-            const caret = App.text.getCaret(editing.element) || END_OF_TEXT;
-            const first = Math.min(caret.anchor.p, caret.focus.p);
-            const last = Math.max(caret.anchor.p, caret.focus.p);
-            runInEditor({ label: label, run: () => { shiftLevels(editing.element, first, last, delta); return caret; } });
-            return;
+            return { element: editing.element, caret: App.text.getCaret(editing.element) || END_OF_TEXT };
         }
         const element = App.selection.getElement();
-        if (element && element.getAttribute('data-type') === 'text') {
-            const slideId = element.closest('section.slide').getAttribute('data-slide-id');
-            App.history.change(label, { slideId: slideId }, () => {
-                shiftLevels(element, 0, textLines(element).length - 1, delta);
-                App.text.normalize(element);
-            });
+        return element && element.getAttribute('data-type') === 'text' ? { element: element, caret: null } : null;
+    }
+
+    /* Run a list button (see listAction) on the selected lines or the selected box, as one undo step. */
+    function runList(command) {
+        const target = listTarget();
+        const action = target && App.text.listAction(target.element, command, target.caret);
+        if (!action) {
+            return;
         }
+        if (editing) {
+            runInEditor(action);
+            return;
+        }
+        const element = target.element;
+        App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, () => {
+            App.text.runAction(element, action);
+            App.text.fitHeight(element);
+        });
+        App.selection.refresh();
+    }
+
+    /* Bullets ('bullet') or Numbering ('number') on or off (SPEC 3.7 toggleList). */
+    App.text.toggleList = function toggleList(list) {
+        runList(list);
+    };
+
+    /* Increase (delta 1) or decrease (-1) the level (SPEC 3.7 setLevel). */
+    App.text.setLevel = function setLevel(delta) {
+        runList(delta > 0 ? 'indent' : 'outdent');
+    };
+
+    /* Restart ('restart') or continue ('continue') the numbering at the first selected numbered line. */
+    App.text.setNumbering = function setNumbering(mode) {
+        runList(mode);
+    };
+
+    /* Whether a list button can act now (greys out the ribbon button otherwise). */
+    App.text.canRunList = function canRunList(command) {
+        const target = listTarget();
+        return !!(target && App.text.listAction(target.element, command, target.caret));
+    };
+
+    /* { bullet, number }: whether the Bullets / Numbering buttons show "on". */
+    App.text.currentListState = function currentListState() {
+        const target = listTarget();
+        return target ? App.text.listState(target.element, target.caret) : { bullet: false, number: false };
     };
 
     /* A press on the slide outside the text: leave edit mode and select what is there. */
@@ -5270,6 +5420,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         check: '<path d="M4 10.5l4 4 8-9"/>',
         textBox: '<rect x="2.5" y="4" width="15" height="12" stroke-dasharray="2 1.5"/><path d="M6.5 7.5h7M10 7.5v6"/>',
         close: '<path d="M5 5l10 10M15 5L5 15"/>',
+        bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
+            '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
+        numbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M2.8 12.2a1.6 1.6 0 1 1 2.6 1.2l-2.6 2.6h3.4"/>' +
+            '<path d="M9 5h8.5M9 14h8.5"/>',
+        outdent: '<path d="M2.5 3.5h15M9 8h8.5M9 12h8.5M2.5 16.5h15"/><path d="M6 7.5L3 10l3 2.5"/>',
+        indent: '<path d="M2.5 3.5h15M9 8h8.5M9 12h8.5M2.5 16.5h15"/><path d="M3 7.5L6 10l-3 2.5"/>',
+        restartNumbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M9 5h8.5"/>' +
+            '<path d="M16 12.5a4 4 0 1 1-1.5-3"/><path d="M15 6.8l-.4 2.9 2.9.2"/>',
+        continueNumbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M9 5h8.5"/>' +
+            '<path d="M4.5 10.5v6M2.5 14.5l2 2 2-2"/><path d="M9 14h8.5"/>',
         slides: '<rect x="2.5" y="4" width="15" height="9.5"/><path d="M6 16.5h8"/>',
         hidden: '<path d="M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z"/><path d="M3.5 16.5l13-13"/>',
         file: '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M7.5 10h5M7.5 13h5"/>',
@@ -8965,19 +9125,38 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     App.commands = {};
 
-    const registry = new Map();   // name -> { label, run, isEnabled }
+    const registry = new Map();   // name -> { label, run, isEnabled, isChecked, keepsEdit }
 
+    /*
+     * definition: { label, run, isEnabled?, isChecked?, keepsEdit? }. isChecked
+     * makes a toggle button (shown "on" when it returns true); keepsEdit marks a
+     * command that works on the text being edited, so its button does not end
+     * text editing or take the cursor out of the text.
+     */
     App.commands.define = function define(name, definition) {
         registry.set(name, {
             label: definition.label,
             run: definition.run,
             isEnabled: definition.isEnabled || (() => true),
+            isChecked: definition.isChecked || null,
+            keepsEdit: !!definition.keepsEdit,
         });
     };
 
     App.commands.isEnabled = function isEnabled(name) {
         const command = registry.get(name);
         return !!command && command.isEnabled();
+    };
+
+    /* true / false for a toggle command, null for a plain one. */
+    App.commands.isChecked = function isChecked(name) {
+        const command = registry.get(name);
+        return command && command.isChecked ? !!command.isChecked() : null;
+    };
+
+    App.commands.keepsEdit = function keepsEdit(name) {
+        const command = registry.get(name);
+        return !!command && command.keepsEdit;
     };
 
     App.commands.label = function label(name) {
@@ -9083,6 +9262,20 @@ App.template.newDeckHtml = function newDeckHtml() {
             label: 'Edit text', isEnabled: () => !!selectedText() && !App.text.isEditing(),
             run: () => App.text.enterEdit(selectedText(), { caret: 'end' }),
         });
+        // The list buttons (Home > Paragraph): the selected lines, or every line of a selected box.
+        [['bullets', 'Bullets', 'bullet', () => App.text.toggleList('bullet')],
+         ['numbering', 'Numbering', 'number', () => App.text.toggleList('number')],
+         ['decreaseIndent', 'Decrease indent', 'outdent', () => App.text.setLevel(-1)],
+         ['increaseIndent', 'Increase indent', 'indent', () => App.text.setLevel(1)],
+         ['restartNumbering', 'Restart numbering', 'restart', () => App.text.setNumbering('restart')],
+         ['continueNumbering', 'Continue numbering', 'continue', () => App.text.setNumbering('continue')]]
+            .forEach(([name, label, list, run]) => {
+                App.commands.define(name, {
+                    label: label, run: run, keepsEdit: true,
+                    isEnabled: () => App.text.canRunList(list),
+                    isChecked: list === 'bullet' || list === 'number' ? () => App.text.currentListState()[list] : null,
+                });
+            });
         App.commands.define('insertTextBox', {
             label: 'Text box', isEnabled: hasDeck,
             run: () => {
@@ -9154,10 +9347,16 @@ App.template.newDeckHtml = function newDeckHtml() {
             groups: [
                 { label: 'Clipboard', commands: [['paste', 'paste'], ['cut', 'cut'], ['copy', 'copy'], ['duplicate', 'duplicate']] },
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
+                {
+                    label: 'Paragraph',
+                    commands: [['bullets', 'bullets'], ['numbering', 'numbering'], ['decreaseIndent', 'outdent'],
+                        ['increaseIndent', 'indent'], ['restartNumbering', 'restartNumbering'],
+                        ['continueNumbering', 'continueNumbering']],
+                },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
             note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). ' +
-                'Double-click a text box (or press Enter) to type in it; Esc stops typing.',
+                'Double-click a text box (or press Enter) to type in it; Esc stops typing. The Paragraph buttons work on the selected lines, or on the whole text box.',
         },
         {
             id: 'insert', label: 'Insert',
@@ -9204,6 +9403,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             'data-command': command,
             onclick: () => App.commands.run(command),
         });
+        if (App.commands.keepsEdit(command)) {
+            // Works on the text being edited: pressing it must not end editing (text.js) or
+            // take the focus, and with it the cursor, out of the text.
+            button.setAttribute('data-keep-edit', '');
+            button.addEventListener('mousedown', (event) => event.preventDefault());
+        }
         button.innerHTML = App.icons.get(iconName);
         button.appendChild(el('span', { class: 'ribbon-button-label' }, [App.commands.label(command)]));
         buttons.push({ button: button, command: command });
@@ -9212,6 +9417,12 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     function renderTab(tab) {
         panel.innerHTML = '';
+        // Forget the buttons of the tab shown before (the File menu's stay).
+        for (let i = buttons.length - 1; i >= 0; i--) {
+            if (!buttons[i].button.isConnected) {
+                buttons.splice(i, 1);
+            }
+        }
         (tab.groups || []).forEach((group) => {
             const groupNode = el('div', { class: 'ribbon-group' });
             const row = el('div', { class: 'ribbon-group-buttons' });
@@ -9303,7 +9514,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
-         'recent-changed']
+         'recent-changed', 'text-edit-changed', 'text-selection-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 
@@ -9311,10 +9522,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         selectTab('home');
     };
 
-    /* Grey out buttons whose command cannot run right now (e.g. Undo with nothing to undo). */
+    /* Grey out buttons whose command cannot run right now (e.g. Undo with nothing to undo);
+       toggle buttons (Bullets …) show whether they are on. */
     App.ribbon.refresh = function refresh() {
         buttons.forEach(({ button, command }) => {
             button.disabled = !App.commands.isEnabled(command);
+            const checked = App.commands.isChecked(command);
+            if (checked !== null) {
+                button.setAttribute('aria-pressed', checked ? 'true' : 'false');
+            }
         });
     };
 })();

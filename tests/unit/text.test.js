@@ -678,6 +678,14 @@ async function runKeys(startLines, steps) {
         : { anchor: markerPosition(startLines, '|'), focus: markerPosition(startLines, '|') };
     App.text.setCaret(el, caret);
     for (const step of steps) {
+        if (step.startsWith('cmd:')) {
+            // A toolbar button: works on the selected lines.
+            const action = App.text.listAction(el, step.slice(4), App.text.getCaret(el));
+            if (action) {
+                App.text.runAction(el, action);
+            }
+            continue;
+        }
         if (step.startsWith('type:')) {
             for (const character of step.slice(5)) {
                 doc.execCommand('insertText', false, character);
@@ -751,6 +759,87 @@ KEY_TABLE.forEach(([what, start, steps, expected]) => {
     test('bullet keys: ' + what, async () => {
         assertEqual(await runKeys(start, steps), expected);
     });
+});
+
+// ---------------------------------------------------------------
+// Toolbar list buttons (SPEC Phase 3, "Bullet behavior", Toolbar rows)
+// ---------------------------------------------------------------
+//
+// Steps "cmd:bullet", "cmd:number", "cmd:indent", "cmd:outdent", "cmd:restart",
+// "cmd:continue" press the button with the lines and cursor as they are.
+
+const TOOLBAR_TABLE = [
+    ['Bullets on a plain line adds a bullet, from anywhere in the line', ['p1:Al|fa'], ['cmd:bullet'], ['b1:Al|fa']],
+    ['Bullets on a bulleted line removes it (the level stays)', ['b2:Al|fa'], ['cmd:bullet'], ['p2:Al|fa']],
+    ['Bullets on a numbered line switches it to a bullet', ['n1:Al|fa'], ['cmd:bullet'], ['b1:Al|fa']],
+    ['Bullets on a mixed selection bullets every line', ['b1:Al[fa', 'n2:Beta', 'p1:Ga]ma'], ['cmd:bullet'],
+        ['b1:Al[fa', 'b2:Beta', 'b1:Ga]ma']],
+    ['Bullets on a selection that is all bullets removes them all', ['b1:[Alfa', 'b2:Be]ta'], ['cmd:bullet'],
+        ['p1:[Alfa', 'p2:Be]ta']],
+    ['Numbering on bulleted lines numbers them', ['b1:[Alfa', 'b1:Be]ta'], ['cmd:number'], ['n1:[Alfa', 'n1:Be]ta']],
+    ['Numbering toggled off also drops a restart number', ['n1@3:Al|fa'], ['cmd:number'], ['p1:Al|fa']],
+    ['Increase indent works from the middle of a line', ['b1:Al|fa'], ['cmd:indent'], ['b2:Al|fa']],
+    ['Decrease indent promotes every selected line, mixed types included', ['b2:[Alfa', 'n3:Beta', 'p2:Ga]ma'],
+        ['cmd:outdent'], ['b1:[Alfa', 'n2:Beta', 'p1:Ga]ma']],
+    ['Restart numbering starts the line at 1', ['n1:Alfa', 'n1:Be|ta'], ['cmd:restart'], ['n1:Alfa', 'n1@1:Be|ta']],
+    ['Continue numbering goes on from the previous numbered run', ['n1:Alfa', 'n1:Beta', 'p1:Texto', 'n1:|Gama'],
+        ['cmd:continue'], ['n1:Alfa', 'n1:Beta', 'p1:Texto', 'n1@3:|Gama']],
+    ['Continue counts from a restart number', ['n1@5:Alfa', 'b1:Texto', 'n1:|Gama'], ['cmd:continue'],
+        ['n1@5:Alfa', 'b1:Texto', 'n1@6:|Gama']],
+    ['Continue ignores deeper lines in between', ['n1:Alfa', 'n2:Sub', 'n2:Sub', 'b1:Texto', 'n1:|Beta'],
+        ['cmd:continue'], ['n1:Alfa', 'n2:Sub', 'n2:Sub', 'b1:Texto', 'n1@2:|Beta']],
+    ['Continue at level 2 goes on across a level-1 line', ['n2:Alfa', 'n2:Beta', 'b1:Tópico', 'n2:|Gama'],
+        ['cmd:continue'], ['n2:Alfa', 'n2:Beta', 'b1:Tópico', 'n2@3:|Gama']],
+    ['Restart / continue act on the first numbered line of the selection', ['n1:Alfa', 'b1:Texto', 'p1:[x', 'n1:Ga]ma'],
+        ['cmd:continue'], ['n1:Alfa', 'b1:Texto', 'p1:[x', 'n1@2:Ga]ma']],
+    ['An outline built with the buttons', ['p1:Receita|'], ['cmd:bullet', 'Enter', 'cmd:indent', 'type:Crescimento',
+        'Enter', 'cmd:number'], ['b1:Receita', 'b2:Crescimento', 'n2:|']],
+];
+
+TOOLBAR_TABLE.forEach(([what, start, steps, expected]) => {
+    test('list buttons: ' + what, async () => {
+        assertEqual(await runKeys(start, steps), expected);
+    });
+});
+
+async function listBox(lines) {
+    const frame = await renderedBox('', lines.map(lineHtml).join(''));
+    const el = frame.contentDocument.querySelector('.el');
+    const anchor = markerPosition(lines, '[');
+    const caret = anchor ? { anchor: anchor, focus: markerPosition(lines, ']') }
+        : { anchor: markerPosition(lines, '|'), focus: markerPosition(lines, '|') };
+    App.text.setCaret(el, caret);
+    return { frame: frame, el: el, caret: caret };
+}
+
+test('list buttons: restart / continue are unavailable without a numbered line or an earlier run', async () => {
+    let box = await listBox(['b1:Al|fa']);
+    assertEqual(App.text.listAction(box.el, 'restart', box.caret), null, 'no numbered line');
+    assertEqual(App.text.listAction(box.el, 'continue', box.caret), null, 'no numbered line');
+    box.frame.remove();
+    box = await listBox(['b1:Alfa', 'n2:Beta', 'n1:|Gama']);
+    assertEqual(App.text.listAction(box.el, 'continue', box.caret), null, 'no earlier numbered line at level 1');
+    assertEqual(App.text.listAction(box.el, 'restart', box.caret).label, 'Restart numbering');
+    box.frame.remove();
+});
+
+test('list buttons: without a cursor (the box is selected) they act on every line', async () => {
+    const box = await listBox(['p1:|Alfa', 'b2:Beta', 'n1:Gama']);
+    App.text.runAction(box.el, App.text.listAction(box.el, 'bullet', null));
+    assertEqual(describeLines(box.el).map((line) => line.replace('|', '')), ['b1:Alfa', 'b2:Beta', 'b1:Gama']);
+    App.text.runAction(box.el, App.text.listAction(box.el, 'indent', null));
+    assertEqual(App.text.getModel(box.el).map((line) => line.level), [2, 3, 2]);
+    box.frame.remove();
+});
+
+test('list buttons: listState says whether every selected line is bulleted / numbered', async () => {
+    let box = await listBox(['b1:[Alfa', 'b2:Be]ta', 'n1:Gama']);
+    assertEqual(App.text.listState(box.el, box.caret), { bullet: true, number: false });
+    assertEqual(App.text.listState(box.el, null), { bullet: false, number: false }, 'the whole box is mixed');
+    box.frame.remove();
+    box = await listBox(['n1:Al|fa']);
+    assertEqual(App.text.listState(box.el, box.caret), { bullet: false, number: true });
+    box.frame.remove();
 });
 
 test('bullet keys: nothing happens while an IME is composing a character', async () => {

@@ -29,6 +29,16 @@
         check: '<path d="M4 10.5l4 4 8-9"/>',
         textBox: '<rect x="2.5" y="4" width="15" height="12" stroke-dasharray="2 1.5"/><path d="M6.5 7.5h7M10 7.5v6"/>',
         close: '<path d="M5 5l10 10M15 5L5 15"/>',
+        bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
+            '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
+        numbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M2.8 12.2a1.6 1.6 0 1 1 2.6 1.2l-2.6 2.6h3.4"/>' +
+            '<path d="M9 5h8.5M9 14h8.5"/>',
+        outdent: '<path d="M2.5 3.5h15M9 8h8.5M9 12h8.5M2.5 16.5h15"/><path d="M6 7.5L3 10l3 2.5"/>',
+        indent: '<path d="M2.5 3.5h15M9 8h8.5M9 12h8.5M2.5 16.5h15"/><path d="M3 7.5L6 10l-3 2.5"/>',
+        restartNumbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M9 5h8.5"/>' +
+            '<path d="M16 12.5a4 4 0 1 1-1.5-3"/><path d="M15 6.8l-.4 2.9 2.9.2"/>',
+        continueNumbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M9 5h8.5"/>' +
+            '<path d="M4.5 10.5v6M2.5 14.5l2 2 2-2"/><path d="M9 14h8.5"/>',
         slides: '<rect x="2.5" y="4" width="15" height="9.5"/><path d="M6 16.5h8"/>',
         hidden: '<path d="M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z"/><path d="M3.5 16.5l13-13"/>',
         file: '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M7.5 10h5M7.5 13h5"/>',

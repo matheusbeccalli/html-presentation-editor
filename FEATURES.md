@@ -123,7 +123,7 @@ Nested bullets are the top priority of this phase.
 - [x] Enter in a non-empty list line: new line, same level and type; in an empty list line: promote, at level 1 becomes plain
 - [x] Shift+Enter: line break inside the same paragraph
 - [x] Backspace at line start: level > 1 promotes; level 1 removes the bullet; plain line merges with the line above
-- [ ] Toolbar: bullets toggle, numbering toggle, increase/decrease indent, restart / continue numbering; all act on every selected line, mixed selections included
+- [x] Toolbar: bullets toggle, numbering toggle, increase/decrease indent, restart / continue numbering; all act on every selected line, mixed selections included *(Home > Paragraph; with a box selected, not edited: every line of it)*
 - [x] Autoformat: "- " / "* " starts a bullet, "1. " starts numbering; Ctrl+Z right after undoes only the autoformat
 - [x] No list behavior during IME composition
 
@@ -159,6 +159,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Insert > Text box, click on the slide, type two lines (Shift+Enter): the box grows; Insert > Text box, drag, Esc without typing: no box is left
   - [ ] Type a misspelled Portuguese word (e.g. "recieta"): it gets a red underline (Edge needs Portuguese under Settings > Languages > Spell check)
   - [ ] In a bulleted box: End, Enter, Tab, type, Enter, Enter, Enter (level 2 → level 1 → plain text); type "- " (bullet) then Ctrl+Z ("- " stays as text); Backspace at the start of a bullet removes it; select three lines and Shift+Tab
+  - [ ] Home > Paragraph: select two bullets, click Numbering (1., 2.; the button lights up), Increase indent (a., b.), type: the cursor is still in the text; put the cursor on b. and click Restart numbering (a.); in a later numbered line after a bullet, Continue numbering goes on from the run above; Esc, then Bullets acts on the whole box; Ctrl+Z undoes each click
 
 ## Phase 4: Tables
 

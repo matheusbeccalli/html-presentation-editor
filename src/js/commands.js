@@ -15,19 +15,38 @@
 
     App.commands = {};
 
-    const registry = new Map();   // name -> { label, run, isEnabled }
+    const registry = new Map();   // name -> { label, run, isEnabled, isChecked, keepsEdit }
 
+    /*
+     * definition: { label, run, isEnabled?, isChecked?, keepsEdit? }. isChecked
+     * makes a toggle button (shown "on" when it returns true); keepsEdit marks a
+     * command that works on the text being edited, so its button does not end
+     * text editing or take the cursor out of the text.
+     */
     App.commands.define = function define(name, definition) {
         registry.set(name, {
             label: definition.label,
             run: definition.run,
             isEnabled: definition.isEnabled || (() => true),
+            isChecked: definition.isChecked || null,
+            keepsEdit: !!definition.keepsEdit,
         });
     };
 
     App.commands.isEnabled = function isEnabled(name) {
         const command = registry.get(name);
         return !!command && command.isEnabled();
+    };
+
+    /* true / false for a toggle command, null for a plain one. */
+    App.commands.isChecked = function isChecked(name) {
+        const command = registry.get(name);
+        return command && command.isChecked ? !!command.isChecked() : null;
+    };
+
+    App.commands.keepsEdit = function keepsEdit(name) {
+        const command = registry.get(name);
+        return !!command && command.keepsEdit;
     };
 
     App.commands.label = function label(name) {
@@ -133,6 +152,20 @@
             label: 'Edit text', isEnabled: () => !!selectedText() && !App.text.isEditing(),
             run: () => App.text.enterEdit(selectedText(), { caret: 'end' }),
         });
+        // The list buttons (Home > Paragraph): the selected lines, or every line of a selected box.
+        [['bullets', 'Bullets', 'bullet', () => App.text.toggleList('bullet')],
+         ['numbering', 'Numbering', 'number', () => App.text.toggleList('number')],
+         ['decreaseIndent', 'Decrease indent', 'outdent', () => App.text.setLevel(-1)],
+         ['increaseIndent', 'Increase indent', 'indent', () => App.text.setLevel(1)],
+         ['restartNumbering', 'Restart numbering', 'restart', () => App.text.setNumbering('restart')],
+         ['continueNumbering', 'Continue numbering', 'continue', () => App.text.setNumbering('continue')]]
+            .forEach(([name, label, list, run]) => {
+                App.commands.define(name, {
+                    label: label, run: run, keepsEdit: true,
+                    isEnabled: () => App.text.canRunList(list),
+                    isChecked: list === 'bullet' || list === 'number' ? () => App.text.currentListState()[list] : null,
+                });
+            });
         App.commands.define('insertTextBox', {
             label: 'Text box', isEnabled: hasDeck,
             run: () => {

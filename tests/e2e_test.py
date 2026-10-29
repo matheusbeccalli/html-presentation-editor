@@ -498,6 +498,59 @@ def test_bullet_keys(browser):
     editor.close()
 
 
+def test_list_buttons(browser):
+    """Home > Paragraph buttons: they act on the selected lines and the cursor stays in the text."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    start = page.evaluate(LINES_OF, "e7")
+    lines = lambda: page.evaluate(LINES_OF, "e7")  # noqa: E731
+    button = lambda command: page.locator(f'#ribbon-panel [data-command="{command}"]')  # noqa: E731
+    pressed = lambda command: button(command).get_attribute("aria-pressed") == "true"  # noqa: E731
+    check(pressed("bullets") and not pressed("numbering"), "a selected bulleted box shows Bullets on")
+
+    page.keyboard.press("Enter")   # edit, cursor at the end of the last bullet
+    page.keyboard.press("Shift+ArrowUp")   # the last two lines selected
+    check(button("continueNumbering").is_disabled(), "Continue numbering needs a numbered line")
+    button("numbering").click()
+    check(page.evaluate("App.text.isEditing()"), "clicking a list button keeps editing")
+    check([line[:2] for line in lines()] == ["b1", "b1", "n1", "n1"], f"the two selected lines are numbered: {lines()}")
+    check(pressed("numbering") and not pressed("bullets"), "Numbering shows on, Bullets off")
+
+    button("increaseIndent").click()
+    check([line[:2] for line in lines()] == ["b1", "b1", "n2", "n2"], f"Increase indent demotes both: {lines()}")
+    page.keyboard.press("End")
+    page.keyboard.type("!")   # the cursor is where the selection ended: the third line
+    check(lines()[2].endswith("!"), f"the cursor stayed in the text: {lines()}")
+
+    page.keyboard.press("ArrowUp")   # into the second line, a bullet
+    wait_until(page, "() => document.querySelector('#ribbon-panel [data-command=\"bullets\"]').ariaPressed === 'true'", timeout=3000)
+    check(not pressed("numbering"), "the buttons follow the cursor")
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("ArrowDown")
+    button("restartNumbering").click()
+    check(lines()[-1].startswith("n2:"), "restart keeps the line numbered")
+    check(page.evaluate("""() => App.text.editingElement().lastElementChild.getAttribute('data-start')""") == "1",
+          "Restart numbering writes data-start=1")
+    for _ in range(4):   # restart, typing, indent, numbering
+        page.keyboard.press("Control+z")
+    check(lines() == start, f"each button press is one undo step: {lines()}")
+    check(page.evaluate("App.text.isEditing()"), "still editing after undo")
+
+    page.keyboard.press("Escape")
+    button("bullets").click()
+    check([line[:2] for line in lines()] == ["p1"] * 4, f"with the box selected, Bullets acts on every line: {lines()}")
+    check(not pressed("bullets"), "Bullets shows off")
+    page.keyboard.press("Control+z")
+    check(lines() == start, "Ctrl+Z undoes it")
+    page.evaluate("App.selection.clear()")
+    check(button("bullets").is_disabled(), "no text selected: the list buttons are disabled")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1443,6 +1496,7 @@ TESTS = [
     test_text_lists_render_bullets_and_numbers,
     test_text_editing,
     test_bullet_keys,
+    test_list_buttons,
 ]
 
 

@@ -28,7 +28,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `history.js` | Undo/redo by HTML snapshots of a slide (or the whole deck); dirty tracking; `mergeKey` joins quick repeats (held arrow key) into one step; `meta` travels with a step (text: the cursor); a pending step (typing) is committed before any other change | deck (via `getDoc`) |
 | `charts.js` | Chart JSON → SVG. **Phase 1: placeholder only** | importer |
 | `template.js` | The blank deck for File > New | fileio |
-| `text.js` | The only door to text (SPEC 3.7): the flat-paragraph model (`<p data-list data-level>`), `normalize` (messy HTML → allowed set, idempotent), `getModel`, the bullet/number stylesheet (`deckTextCss`) and list theme variables; `fromRendered` converts rendered text (import, format-1 decks) keeping its look; edit mode (`enterEdit`/`exitEdit`), typing as undo steps, the cursor as line + character (`getCaret`/`setCaret`), new text boxes that grow with their text; bullet keys and AutoFormat (`keyAction`, `autoFormatAction`), `setLevel` | normalize, importer, history, selection, commands |
+| `text.js` | The only door to text (SPEC 3.7): the flat-paragraph model (`<p data-list data-level>`), `normalize` (messy HTML → allowed set, idempotent), `getModel`, the bullet/number stylesheet (`deckTextCss`) and list theme variables; `fromRendered` converts rendered text (import, format-1 decks) keeping its look; edit mode (`enterEdit`/`exitEdit`), typing as undo steps, the cursor as line + character (`getCaret`/`setCaret`), new text boxes that grow with their text; bullet keys and AutoFormat (`keyAction`, `autoFormatAction`); list buttons (`listAction`, `toggleList`, `setLevel`, `setNumbering`) | normalize, importer, history, selection, commands |
 | `importer.js` | Parse, sanitize (scripts, handlers), find blocked/missing refs, detect slides, run the import | normalize, charts |
 | `normalize.js` | Measures the deck in a hidden iframe and rebuilds it in the contract format; converts text to the text model while it can still measure it (text.js); icons inside headings become their own elements | importer, text |
 | `serialize.js` | Clean copy of the deck + player script/CSS → the saved file's text | fileio |
@@ -48,8 +48,8 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `settings.js` | Privacy settings (keep drafts, retention 1–30 days, recent files) in localStorage, and the File > Settings dialog | storage, drafts, dialogs |
 | `drafts.js` | Crash-recovery drafts (SPEC 6.2): a draft 30 s after unsaved changes (last 5 per deck), deleted on save/clean state/discard/after 1 day; Recover / Compare / Discard dialogs | storage, autosave (scheduler), fileio, importer, deck, thumbnails |
 | `recent.js` | Recent files (off by default): remembers file handles on open/save, last 10; welcome list and File > Open recent… open the picker in the file's folder | storage, settings, fileio |
-| `commands.js` | Every user action by name; one place that reports errors | fileio, history, deck |
-| `ribbon.js` | File menu and tabs; buttons only name commands | commands |
+| `commands.js` | Every user action by name; one place that reports errors; toggle commands (`isChecked`) and commands that keep text editing (`keepsEdit`) | fileio, history, deck, text |
+| `ribbon.js` | File menu and tabs; buttons only name commands; toggle buttons show `aria-pressed`; `keepsEdit` buttons do not take the focus out of the text | commands |
 | `ui.js` | Title bar, status bar (save state per SPEC 6.4 + last message), notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events, fileio, autosave, drafts |
 
 **`text.js` is the only door to text (SPEC 3.7).** Every text action (ribbon, shortcuts, paste, import, save) goes
@@ -104,6 +104,10 @@ Ctrl+Z while typing → text.js keydown (capture) → commands 'undo' → histor
 Tab / Enter / Backspace / Alt+Shift+arrows → text.js keydown (capture) → text.keyAction decides (or leaves the key to the browser)
   → runInEditor: history.change(label, slide, runAction, { meta: cursor }) → lines changed, normalize, cursor put back
 typed space → 'input' → text.autoFormatAction ("- ", "* ", "1. ") → its own undo step after the typing step
+Home > Paragraph button (Bullets, Numbering, indent, Restart/Continue) → mousedown is cancelled, so the cursor stays in the
+  text, and the click does not end editing (data-keep-edit) → commands → text.toggleList / setLevel / setNumbering
+  → text.listAction on the selected lines (every line of a selected box when not editing) → one undo step
+cursor moves → iframe 'selectionchange' → 'text-selection-changed' (once per frame) → ribbon shows Bullets/Numbering on/off
 Esc / click outside → text.exitEdit → normalize → box selected   ·   Save → text.commitTyping, serialize normalizes the copy
 ```
 

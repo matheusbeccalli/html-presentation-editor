@@ -118,14 +118,14 @@ Nested bullets are the top priority of this phase.
 - [ ] Find & replace across all slides
 
 *Bullet behavior (key table in SPEC Phase 3)*
-- [ ] Tab at line start / multi-line selection demotes (max 5); Shift+Tab promotes; Tab mid-text inserts nothing
-- [ ] Alt+Shift+Right / Alt+Shift+Left demote / promote from anywhere in the line
-- [ ] Enter in a non-empty list line: new line, same level and type; in an empty list line: promote, at level 1 becomes plain
-- [ ] Shift+Enter: line break inside the same paragraph
-- [ ] Backspace at line start: level > 1 promotes; level 1 removes the bullet; plain line merges with the line above
+- [x] Tab at line start / multi-line selection demotes (max 5); Shift+Tab promotes; Tab mid-text inserts nothing
+- [x] Alt+Shift+Right / Alt+Shift+Left demote / promote from anywhere in the line
+- [x] Enter in a non-empty list line: new line, same level and type; in an empty list line: promote, at level 1 becomes plain
+- [x] Shift+Enter: line break inside the same paragraph
+- [x] Backspace at line start: level > 1 promotes; level 1 removes the bullet; plain line merges with the line above
 - [ ] Toolbar: bullets toggle, numbering toggle, increase/decrease indent, restart / continue numbering; all act on every selected line, mixed selections included
-- [ ] Autoformat: "- " / "* " starts a bullet, "1. " starts numbering; Ctrl+Z right after undoes only the autoformat
-- [ ] No list behavior during IME composition
+- [x] Autoformat: "- " / "* " starts a bullet, "1. " starts numbering; Ctrl+Z right after undoes only the autoformat
+- [x] No list behavior during IME composition
 
 *Font sizes*
 - [ ] Size in pt: dropdown (8 … 96) plus a typed-value field; blank when the selection mixes sizes
@@ -149,7 +149,7 @@ Nested bullets are the top priority of this phase.
 
 *Tests*
 - [ ] Unit fixtures (fake text): messy execCommand output, Word paste with `mso-list` levels, Copilot 3-level nested `<ul>`, mixed numbered/bulleted lists
-- [ ] Automated key-sequence table for the bullet behavior (start paragraphs + keys → expected paragraphs, types, levels)
+- [x] Automated key-sequence table for the bullet behavior (start paragraphs + keys → expected paragraphs, types, levels)
 
 - [ ] **Done when:** a 3-level bulleted slide imported from a Copilot deck and a 3-level list pasted from Word both become editable flat paragraphs; every behavior in the bullet table works; a slide title and a bulleted paragraph can be fully reformatted without touching code; the saved deck prints to PDF (Ctrl+P on the saved file) with bullets, numbers and indents as on screen.
   - [ ] In Edge: open a deck you saved with the Phase 1–2 editor (or `samples/contract-deck-format1.html`): the import report says its text was converted; slides look as before (only the bullet dots may look slightly different); Save, close, reopen: no report
@@ -158,6 +158,7 @@ Nested bullets are the top priority of this phase.
   - [ ] While typing: arrow keys move the cursor (not the box); type, wait 2 s, type again, Ctrl+Z: only the second part goes and the cursor goes back to where it was
   - [ ] Insert > Text box, click on the slide, type two lines (Shift+Enter): the box grows; Insert > Text box, drag, Esc without typing: no box is left
   - [ ] Type a misspelled Portuguese word (e.g. "recieta"): it gets a red underline (Edge needs Portuguese under Settings > Languages > Spell check)
+  - [ ] In a bulleted box: End, Enter, Tab, type, Enter, Enter, Enter (level 2 → level 1 → plain text); type "- " (bullet) then Ctrl+Z ("- " stays as text); Backspace at the start of a bullet removes it; select three lines and Shift+Tab
 
 ## Phase 4: Tables
 

@@ -236,7 +236,7 @@ Nested bullets are on almost every slide the user makes, so they are the top pri
 | Backspace | at the start of a list line, level 1 | Remove the bullet/number (the line becomes plain text) |
 | Backspace | at the start of a plain line | Merge with the line above |
 | Type "- " or "* " | at the start of a plain line | Start a bullet (the typed characters are removed) |
-| Type "1. " | at the start of a plain line | Start numbering |
+| Type "1. " | at the start of a plain line | Start numbering (another number, e.g. "3. ", starts at that number) |
 | Ctrl+Z | right after an autoformat | Undo only the autoformat (the typed "- " stays as text) |
 | Toolbar | Bullets / Numbering | Toggle the list type on every selected line |
 | Toolbar | Increase / Decrease indent | Demote / promote every selected line |

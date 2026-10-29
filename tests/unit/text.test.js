@@ -604,3 +604,160 @@ test('text editing: a "resize" box takes the height of its text, growing and shr
     assertEqual(el.style.height, '90px', 'boxes without autofit keep their size');
     frame.remove();
 });
+
+// ---------------------------------------------------------------
+// Bullet behavior: the key-sequence table (SPEC Phase 3, "Bullet behavior")
+// ---------------------------------------------------------------
+//
+// A line is written "b2:Text": b = bullet, n = number, p = plain; the digit is
+// the level; "n1@3:" = numbered, starting at 3. "|" is the cursor, "[" and "]"
+// the start (anchor) and end (focus) of a selection. Steps are key names, or
+// "type:…" to type text the way the browser does. When keyAction leaves a key
+// to the browser, the runner does what the browser would (Backspace, Shift+Enter).
+
+const LIST_CODES = { b: 'bullet', n: 'number', p: 'none' };
+
+function lineHtml(line) {
+    const match = /^([bnp])(\d)(?:@(\d+))?:(.*)$/s.exec(line);
+    const text = match[4].replace(/[|[\]]/g, '');
+    return '<p data-list="' + LIST_CODES[match[1]] + '" data-level="' + match[2] + '"' +
+        (match[3] ? ' data-start="' + match[3] + '"' : '') + '>' + (text === '' ? '<br>' : text.replace(/\n/g, '<br>')) + '</p>';
+}
+
+function markerPosition(lines, marker) {
+    for (let p = 0; p < lines.length; p++) {
+        const text = lines[p].replace(/^[^:]*:/, '');
+        const clean = text.replace(marker === '|' ? /[[\]]/g : marker === '[' ? /[|\]]/g : /[|[]/g, '');
+        const o = clean.indexOf(marker);
+        if (o !== -1) {
+            return { p: p, o: o };
+        }
+    }
+    return null;
+}
+
+function describeLines(element) {
+    const caret = App.text.getCaret(element);
+    return App.text.getModel(element).map((line, p) => {
+        const code = { bullet: 'b', number: 'n', none: 'p' }[line.list] + line.level + (line.start ? '@' + line.start : '');
+        let text = line.text.replace(/ /g, ' ');
+        const marks = [];
+        if (caret && caret.anchor.p === caret.focus.p && caret.anchor.o === caret.focus.o) {
+            if (caret.focus.p === p) {
+                marks.push([caret.focus.o, '|']);
+            }
+        } else if (caret) {
+            if (caret.anchor.p === p) {
+                marks.push([caret.anchor.o, '[']);
+            }
+            if (caret.focus.p === p) {
+                marks.push([caret.focus.o, ']']);
+            }
+        }
+        marks.sort((x, y) => y[0] - x[0]).forEach(([o, mark]) => { text = text.slice(0, o) + mark + text.slice(o); });
+        return code + ':' + text;
+    });
+}
+
+const KEY_NAMES = {
+    'Tab': { key: 'Tab' }, 'Shift+Tab': { key: 'Tab', shiftKey: true },
+    'Alt+Shift+Right': { key: 'ArrowRight', altKey: true, shiftKey: true },
+    'Alt+Shift+Left': { key: 'ArrowLeft', altKey: true, shiftKey: true },
+    'Enter': { key: 'Enter' }, 'Shift+Enter': { key: 'Enter', shiftKey: true },
+    'Backspace': { key: 'Backspace' },
+};
+
+async function runKeys(startLines, steps) {
+    const frame = await renderedBox('', startLines.map(lineHtml).join(''));
+    const doc = frame.contentDocument;
+    const el = doc.querySelector('.el');
+    el.setAttribute('contenteditable', 'true');
+    el.focus();
+    const anchor = markerPosition(startLines, '[');
+    const caret = anchor ? { anchor: anchor, focus: markerPosition(startLines, ']') }
+        : { anchor: markerPosition(startLines, '|'), focus: markerPosition(startLines, '|') };
+    App.text.setCaret(el, caret);
+    for (const step of steps) {
+        if (step.startsWith('type:')) {
+            for (const character of step.slice(5)) {
+                doc.execCommand('insertText', false, character);
+                const format = App.text.autoFormatAction(el);
+                if (format) {
+                    App.text.runAction(el, format);
+                }
+            }
+            continue;
+        }
+        const action = App.text.keyAction(el, KEY_NAMES[step]);
+        if (action && action.run) {
+            App.text.runAction(el, action);
+        } else if (!action) {
+            // Left to the browser.
+            if (step === 'Backspace') {
+                doc.execCommand('delete');
+            } else if (step === 'Shift+Enter') {
+                doc.execCommand('insertLineBreak');
+            }
+        }
+    }
+    const result = describeLines(el);
+    frame.remove();
+    return result;
+}
+
+const KEY_TABLE = [
+    // [what, start lines, steps, expected lines]
+    ['Tab at the start of a line demotes it', ['b1:|Alfa'], ['Tab'], ['b2:|Alfa']],
+    ['Tab never goes past level 5', ['b5:|Alfa'], ['Tab'], ['b5:|Alfa']],
+    ['Tab in the middle of text does nothing (no tab character)', ['b1:Al|fa'], ['Tab'], ['b1:Al|fa']],
+    ['Tab demotes every selected line, mixed types included', ['b1:Al[fa', 'n1:Beta', 'p1:Ga]ma'], ['Tab'],
+        ['b2:Al[fa', 'n2:Beta', 'p2:Ga]ma']],
+    ['Tab on a plain line at its start demotes it too', ['p1:|Texto'], ['Tab'], ['p2:|Texto']],
+    ['Shift+Tab at the start promotes', ['b3:|Alfa'], ['Shift+Tab'], ['b2:|Alfa']],
+    ['Shift+Tab never goes below level 1', ['n1:|Alfa'], ['Shift+Tab'], ['n1:|Alfa']],
+    ['Shift+Tab promotes every selected line', ['b2:[Alfa', 'b3:Be]ta'], ['Shift+Tab'], ['b1:[Alfa', 'b2:Be]ta']],
+    ['Shift+Tab in the middle of text does nothing', ['b2:Al|fa'], ['Shift+Tab'], ['b2:Al|fa']],
+    ['Alt+Shift+Right demotes from anywhere in the line', ['b1:Al|fa'], ['Alt+Shift+Right'], ['b2:Al|fa']],
+    ['Alt+Shift+Left promotes from anywhere in the line', ['n3:Al|fa'], ['Alt+Shift+Left'], ['n2:Al|fa']],
+    ['Enter in a list line makes a new line with the same type and level', ['b2:Al|fa'], ['Enter'], ['b2:Al', 'b2:|fa']],
+    ['Enter at the end of a numbered line continues the numbering', ['n1:Alfa|'], ['Enter', 'type:Beta'],
+        ['n1:Alfa', 'n1:Beta|']],
+    ['Enter does not copy a restart number', ['n1@3:Alfa|'], ['Enter'], ['n1@3:Alfa', 'n1:|']],
+    ['Enter in an empty list line promotes it', ['b1:Alfa', 'b2:|'], ['Enter'], ['b1:Alfa', 'b1:|']],
+    ['Enter in an empty level-1 list line makes it plain text', ['b1:Alfa', 'b1:|'], ['Enter'], ['b1:Alfa', 'p1:|']],
+    ['Enter in plain text makes a new plain line', ['p1:Tí|tulo'], ['Enter'], ['p1:Tí', 'p1:|tulo']],
+    ['Enter with a selection replaces it by the line break', ['b1:A[lf]a'], ['Enter'], ['b1:A', 'b1:|a']],
+    ['Shift+Enter breaks the line inside the same paragraph (no new bullet)', ['b1:Al|fa'], ['Shift+Enter'], ['b1:Al\n|fa']],
+    ['Backspace at the start of a level-2+ list line promotes it', ['b3:|Alfa'], ['Backspace'], ['b2:|Alfa']],
+    ['Backspace at the start of a level-1 list line removes the bullet', ['n1:|Alfa'], ['Backspace'], ['p1:|Alfa']],
+    ['Backspace at the start of a plain line merges it with the line above', ['b1:Alfa', 'p1:|Beta'], ['Backspace'],
+        ['b1:Alfa|Beta']],
+    ['Backspace at the start of an empty plain line removes it', ['p1:Alfa', 'p1:|'], ['Backspace'], ['p1:Alfa|']],
+    ['Backspace at the start of the first plain line does nothing', ['p1:|Alfa'], ['Backspace'], ['p1:|Alfa']],
+    ['Backspace inside text deletes a character', ['b1:Al|fa'], ['Backspace'], ['b1:A|fa']],
+    ['Backspace twice: level 2 -> level 1 -> plain', ['b2:|Alfa'], ['Backspace', 'Backspace'], ['p1:|Alfa']],
+    ['"- " at the start of a plain line starts a bullet', ['p1:|'], ['type:- Receita'], ['b1:Receita|']],
+    ['"* " also starts a bullet', ['p1:|'], ['type:* Receita'], ['b1:Receita|']],
+    ['"1. " starts numbering', ['p1:|'], ['type:1. Passo'], ['n1:Passo|']],
+    ['"3. " starts numbering at 3', ['p1:|'], ['type:3. Passo'], ['n1@3:Passo|']],
+    ['"- " in the middle of a line is just text', ['p1:Alfa|'], ['type: - b'], ['p1:Alfa - b|']],
+    ['"- " in a line that already has a bullet is just text', ['b1:|'], ['type:- b'], ['b1:- b|']],
+    ['A typical outline: Enter, Tab, Enter, Enter, Enter', ['b1:Receita|'],
+        ['Enter', 'Tab', 'type:Crescimento', 'Enter', 'Enter', 'Enter'],
+        ['b1:Receita', 'b2:Crescimento', 'p1:|']],
+];
+
+KEY_TABLE.forEach(([what, start, steps, expected]) => {
+    test('bullet keys: ' + what, async () => {
+        assertEqual(await runKeys(start, steps), expected);
+    });
+});
+
+test('bullet keys: nothing happens while an IME is composing a character', async () => {
+    const frame = await renderedBox('', lineHtml('b1:Alfa'));
+    const el = frame.contentDocument.querySelector('.el');
+    App.text.setCaret(el, { anchor: { p: 0, o: 0 }, focus: { p: 0, o: 0 } });
+    assertEqual(App.text.keyAction(el, { key: 'Tab', isComposing: true }), null);
+    assertEqual(App.text.keyAction(el, { key: 'Enter', isComposing: true }), null);
+    frame.remove();
+});

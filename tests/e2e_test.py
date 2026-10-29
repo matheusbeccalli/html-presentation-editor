@@ -422,6 +422,82 @@ def test_text_editing(browser):
     editor.close()
 
 
+LINES_OF = """id => App.text.getModel(App.deck.getDocument().querySelector('[data-id="' + id + '"]'))
+    .map(p => ({ bullet: 'b', number: 'n', none: 'p' })[p.list] + p.level + ':' + p.text.replace(/ /g, ' '))"""
+
+
+def test_bullet_keys(browser):
+    """The bullet table with real key presses in the browser (the full table runs in the unit tests)."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    start = page.evaluate(LINES_OF, "e7")
+    page.keyboard.press("Enter")   # edit, cursor at the end of the last bullet
+    lines = lambda: page.evaluate(LINES_OF, "e7")  # noqa: E731
+
+    page.keyboard.press("Enter")
+    page.keyboard.press("Tab")
+    page.keyboard.type("Sub um")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Sub dois")
+    check(lines()[-3:] == [start[-1], "b2:Sub um", "b2:Sub dois"], f"Enter keeps the level, Tab demotes: {lines()[-3:]}")
+
+    page.keyboard.press("Alt+Shift+ArrowRight")
+    check(lines()[-1] == "b3:Sub dois", "Alt+Shift+Right demotes from the end of the line")
+    page.keyboard.press("Control+z")
+    check(lines()[-1] == "b2:Sub dois", "Ctrl+Z undoes the indent only")
+    check(page.evaluate("App.text.isEditing()"), "still editing")
+
+    page.keyboard.press("Enter")
+    page.keyboard.press("Enter")   # empty level-2 bullet -> level 1
+    check(lines()[-1] == "b1:", f"Enter in an empty level-2 bullet promotes it: {lines()[-1]}")
+    page.keyboard.press("Enter")   # empty level-1 bullet -> plain text
+    check(lines()[-1] == "p1:", "Enter in an empty level-1 bullet ends the list")
+    page.keyboard.type("- ")
+    check(lines()[-1] == "b1:", f"typing '- ' starts a bullet: {lines()[-1]}")
+    page.keyboard.press("Control+z")
+    check(lines()[-1] == "p1:- ", f"Ctrl+Z right after undoes only the AutoFormat: {lines()[-1]}")
+    page.keyboard.press("Backspace")
+    page.keyboard.press("Backspace")
+    page.keyboard.type("1. Passo")
+    check(lines()[-1] == "n1:Passo", f"'1. ' starts numbering: {lines()[-1]}")
+
+    page.keyboard.press("Home")
+    page.keyboard.press("Backspace")
+    check(lines()[-1] == "p1:Passo", "Backspace at the start removes the number")
+    page.keyboard.press("Backspace")
+    check(lines()[-1] == "b2:Sub doisPasso", f"Backspace at the start of a plain line merges it with the line above: {lines()[-2:]}")
+    check(page.evaluate("App.text.getCaret(App.text.editingElement()).focus.o") == len("Sub dois"), "cursor at the join")
+
+    # Shift+Tab with several lines selected promotes all of them; Tab in mid-text inserts nothing.
+    page.keyboard.press("ArrowUp")
+    page.keyboard.press("End")
+    page.keyboard.press("Shift+ArrowUp")
+    page.keyboard.press("Shift+Tab")
+    check(lines()[-3:] == [start[-1], "b1:Sub um", "b2:Sub doisPasso"], f"Shift+Tab promoted the selected lines: {lines()[-3:]}")
+    before_tab = lines()
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("Tab")
+    check(lines() == before_tab, "Tab in the middle of text changes nothing")
+    check(page.evaluate("App.text.isEditing()"), "Tab did not move the focus out of the text")
+
+    page.keyboard.press("Escape")
+    check(all(":" in line for line in lines()), "the text is still in the model")
+
+    # setLevel on a selected (not edited) text box changes every line, as one undo step.
+    levels = lambda: [int(line[1]) for line in lines()]  # noqa: E731
+    selected = levels()
+    page.evaluate("App.text.setLevel(1)")
+    check(levels() == [min(5, level + 1) for level in selected], f"every line one level deeper: {levels()}")
+    page.keyboard.press("Control+z")
+    check(levels() == selected, "Ctrl+Z undoes it")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1366,6 +1442,7 @@ TESTS = [
     test_settings_recent_files_and_status,
     test_text_lists_render_bullets_and_numbers,
     test_text_editing,
+    test_bullet_keys,
 ]
 
 

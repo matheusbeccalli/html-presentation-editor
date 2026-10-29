@@ -22,8 +22,10 @@
  *
  * Editing: enterEdit / exitEdit make a text element contenteditable inside
  * the deck iframe; typing becomes history steps that remember the cursor
- * (getCaret / setCaret as line + character). Still to come in Phase 3:
- * applyStyle, setLevel, toggleList.
+ * (getCaret / setCaret as line + character). Bullet keys (Tab, Enter,
+ * Backspace … and "- " AutoFormat) are decided by keyAction and run as one
+ * undo step each; setLevel changes levels. Still to come in Phase 3:
+ * applyStyle, toggleList.
  *
  * Talks to: normalize.js and importer.js (import), history.js (typing steps),
  *           selection.js (selected box), commands.js (undo/redo while typing).
@@ -1368,6 +1370,223 @@
         return height !== old;
     };
 
+
+    // ---------------------------------------------------------------
+    // Bullet behavior (SPEC Phase 3, "Bullet behavior")
+    // ---------------------------------------------------------------
+    //
+    // keyAction decides what a key does to the lines; it changes nothing itself.
+    // It returns null (the browser handles the key: typing, Shift+Enter, Backspace
+    // inside text), { label: null } (the key is swallowed: Tab in the middle of
+    // text), or { label, run } where run() changes the lines and returns the new
+    // cursor. runAction runs it and tidies up; in the editor every run is one
+    // undo step (text.js runInEditor). Tested by the key-sequence table in
+    // tests/unit/text.test.js.
+
+    function textLines(element) {
+        return Array.from(element.children).filter((child) => tagOf(child) === 'p');
+    }
+
+    function listOf(line) {
+        const list = line.getAttribute('data-list');
+        return LIST_TYPES.indexOf(list) !== -1 ? list : 'none';
+    }
+
+    function levelOf(line) {
+        return clampLevel(line.getAttribute('data-level'));
+    }
+
+    function isEmptyLine(line) {
+        return line.textContent.replace(/[ \t\n\r\f]/g, '') === '';
+    }
+
+    function sameCaret(caret) {
+        return caret.anchor.p === caret.focus.p && caret.anchor.o === caret.focus.o;
+    }
+
+    /* Change the level of lines first..last by delta (kept between 1 and 5). */
+    function shiftLevels(element, first, last, delta) {
+        textLines(element).slice(first, last + 1).forEach((line) => {
+            line.setAttribute('data-level', String(Math.min(MAX_LEVEL, Math.max(1, levelOf(line) + delta))));
+        });
+    }
+
+    function setListType(line, list) {
+        line.setAttribute('data-list', list);
+        if (list !== 'number') {
+            line.removeAttribute('data-start');
+        }
+    }
+
+    /* The last element inside `node` where a placeholder <br> keeps the line's formatting. */
+    function appendPlaceholder(line) {
+        let target = line;
+        while (target.lastChild && target.lastChild.nodeType === Node.ELEMENT_NODE && tagOf(target.lastChild) !== 'br') {
+            target = target.lastChild;
+        }
+        target.appendChild(line.ownerDocument.createElement('br'));
+    }
+
+    /* Enter: split the line at the cursor; the new line has the same list type and level. */
+    function splitLine(element) {
+        const doc = element.ownerDocument;
+        const selection = doc.getSelection();
+        if (!selection.isCollapsed) {
+            doc.execCommand('delete');   // Enter replaces the selection, as in PowerPoint
+        }
+        const range = selection.getRangeAt(0);
+        const line = lineOf(element, range.startContainer) || textLines(element)[0];
+        const tail = doc.createRange();
+        tail.setStart(range.startContainer, range.startOffset);
+        tail.setEnd(line, line.childNodes.length);
+        const newLine = line.cloneNode(false);   // same type, level and paragraph formatting …
+        newLine.removeAttribute('data-start');   // … but a restart number belongs to the first line only
+        newLine.appendChild(tail.extractContents());
+        line.after(newLine);
+        [line, newLine].forEach((part) => {
+            if (isEmptyLine(part) && !part.querySelector('br')) {
+                appendPlaceholder(part);
+            }
+        });
+        return { p: textLines(element).indexOf(newLine), o: 0 };
+    }
+
+    /* Backspace at the start of a plain line: join it to the end of the line above. */
+    function mergeWithPrevious(element, index) {
+        const lines = textLines(element);
+        const line = lines[index];
+        const previous = lines[index - 1];
+        const items = inlineItems(previous);
+        const last = items[items.length - 1];
+        if (last && last.nodeType !== Node.TEXT_NODE) {
+            last.remove();   // the <br> that only kept the line above open
+        }
+        const o = lineLength(previous);
+        if (!isEmptyLine(line)) {
+            while (line.firstChild) {
+                previous.appendChild(line.firstChild);
+            }
+        }
+        line.remove();
+        if (previous.childNodes.length === 0 || (isEmptyLine(previous) && !previous.querySelector('br'))) {
+            appendPlaceholder(previous);
+        }
+        return { p: index - 1, o: o };
+    }
+
+    function caretAt(position) {
+        return { anchor: position, focus: position };
+    }
+
+    App.text.keyAction = function keyAction(element, key) {
+        if (key.isComposing) {
+            return null;   // an IME is building a character (e.g. accents): its keys are not ours
+        }
+        const caret = App.text.getCaret(element);
+        const lines = textLines(element);
+        if (!caret || lines.length === 0) {
+            return null;
+        }
+        const first = Math.min(caret.anchor.p, caret.focus.p);
+        const last = Math.max(caret.anchor.p, caret.focus.p);
+        const collapsed = sameCaret(caret);
+        const line = lines[caret.focus.p];
+        const list = listOf(line);
+        const level = levelOf(line);
+        const atLineStart = collapsed && caret.focus.o === 0;
+        const ctrl = key.ctrlKey || key.metaKey;
+        const keepCaret = () => caret;
+
+        if (key.key === 'Tab' && !ctrl && !key.altKey) {
+            if (first !== last || atLineStart) {
+                const delta = key.shiftKey ? -1 : 1;
+                return { label: delta > 0 ? 'Increase indent' : 'Decrease indent',
+                    run: () => { shiftLevels(element, first, last, delta); return keepCaret(); } };
+            }
+            return { label: null };   // in the middle of text Tab inserts nothing
+        }
+        if ((key.key === 'ArrowRight' || key.key === 'ArrowLeft') && key.altKey && key.shiftKey && !ctrl) {
+            const delta = key.key === 'ArrowRight' ? 1 : -1;
+            return { label: delta > 0 ? 'Increase indent' : 'Decrease indent',
+                run: () => { shiftLevels(element, first, last, delta); return keepCaret(); } };
+        }
+        if (key.key === 'Enter' && !key.shiftKey && !ctrl && !key.altKey) {
+            if (collapsed && list !== 'none' && isEmptyLine(line)) {
+                if (level > 1) {
+                    return { label: 'Decrease indent', run: () => { shiftLevels(element, first, first, -1); return keepCaret(); } };
+                }
+                return { label: list === 'number' ? 'Remove numbering' : 'Remove bullet',
+                    run: () => { setListType(line, 'none'); return keepCaret(); } };
+            }
+            return { label: 'New paragraph', run: () => caretAt(splitLine(element)) };
+        }
+        if (key.key === 'Backspace' && !ctrl && !key.altKey && !key.shiftKey && atLineStart) {
+            if (list !== 'none') {
+                if (level > 1) {
+                    return { label: 'Decrease indent', run: () => { shiftLevels(element, first, first, -1); return keepCaret(); } };
+                }
+                return { label: list === 'number' ? 'Remove numbering' : 'Remove bullet',
+                    run: () => { setListType(line, 'none'); return keepCaret(); } };
+            }
+            if (caret.focus.p === 0) {
+                return { label: null };   // nothing above to merge with
+            }
+            return { label: 'Merge lines', run: () => caretAt(mergeWithPrevious(element, caret.focus.p)) };
+        }
+        return null;
+    };
+
+    // "- " or "* " starts a bullet, "1. " numbering (any number: it becomes the start).
+    const AUTOFORMAT_RE = /^(?:([-*])|(\d{1,3})\.)[  ]$/;
+
+    /*
+     * Called after the user typed a space: if the plain line so far is "- ", "* "
+     * or "1. ", the action turns it into a list line and removes those characters.
+     * Run as its own undo step, Ctrl+Z right after brings back the typed "- ".
+     */
+    App.text.autoFormatAction = function autoFormatAction(element) {
+        const caret = App.text.getCaret(element);
+        if (!caret || !sameCaret(caret)) {
+            return null;
+        }
+        const line = textLines(element)[caret.focus.p];
+        if (!line || listOf(line) !== 'none') {
+            return null;
+        }
+        const before = line.textContent.slice(0, caret.focus.o);
+        const match = AUTOFORMAT_RE.exec(before);
+        if (!match || lineLength(line) < caret.focus.o) {
+            return null;
+        }
+        const number = match[2] ? parseInt(match[2], 10) : null;
+        return {
+            label: number === null ? 'Bullets (AutoFormat)' : 'Numbering (AutoFormat)',
+            run: () => {
+                const start = pointOf(element, { p: caret.focus.p, o: 0 });
+                const end = pointOf(element, caret.focus);
+                const range = element.ownerDocument.createRange();
+                range.setStart(start.node, start.offset);
+                range.setEnd(end.node, end.offset);
+                range.deleteContents();
+                setListType(line, number === null ? 'bullet' : 'number');
+                if (number !== null && number !== 1) {
+                    line.setAttribute('data-start', String(number));
+                }
+                if (isEmptyLine(line) && !line.querySelector('br')) {
+                    appendPlaceholder(line);
+                }
+                return caretAt({ p: caret.focus.p, o: 0 });
+            },
+        };
+    };
+
+    /* Run an action from keyAction/autoFormatAction: change the lines, tidy them, put the cursor back. */
+    App.text.runAction = function runAction(element, action) {
+        const caret = action.run();
+        App.text.normalize(element);
+        App.text.setCaret(element, caret);
+    };
+
     // ---------------------------------------------------------------
     // Edit mode
     // ---------------------------------------------------------------
@@ -1382,6 +1601,7 @@
     const TYPING_PAUSE_MS = 1000;
     let editing = null;   // { element, id, slideId, isNew, doc }
     let typing = null;    // { meta, timer } while a typing step is open
+    let applying = false; // a key action is changing the text: its own input events are not typing
 
     App.text.isEditing = function isEditing() {
         return editing !== null;
@@ -1525,6 +1745,9 @@
     }
 
     function onBeforeInput(event) {
+        if (applying) {
+            return;
+        }
         if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
             // The browser's own text undo is replaced by the editor's (one undo stack).
             event.preventDefault();
@@ -1541,12 +1764,18 @@
         typing.timer = setTimeout(App.text.commitTyping, TYPING_PAUSE_MS);
     }
 
-    function onInput() {
+    function onInput(event) {
         const element = editing && editing.element;
-        if (!element) {
+        if (!element || applying) {
             return;
         }
         ensureLines(element);
+        if (event.inputType === 'insertText' && /[ \u00a0]$/.test(event.data || '')) {
+            const format = App.text.autoFormatAction(element);
+            if (format) {
+                runInEditor(format);   // its own undo step, after the typed "- "
+            }
+        }
         if (App.text.fitHeight(element)) {
             App.selection.refresh();
         }
@@ -1586,6 +1815,14 @@
             command = 'redo';
         }
         if (!command) {
+            const action = editing.element.contains(event.target) ? App.text.keyAction(editing.element, event) : null;
+            if (action) {
+                event.preventDefault();
+                event.stopPropagation();
+                if (action.run) {
+                    runInEditor(action);
+                }
+            }
             return;
         }
         // Ours, not the browser's: its text undo would bypass the editor's history.
@@ -1597,6 +1834,49 @@
             App.commands.run(command);
         }
     }
+
+    /*
+     * Run a text action (a bullet key, AutoFormat, a toolbar command) as one undo
+     * step that remembers the cursor before and after it.
+     */
+    function runInEditor(action) {
+        App.text.commitTyping();
+        const element = editing.element;
+        const meta = { textId: editing.id, caretBefore: App.text.getCaret(element), caretAfter: null };
+        applying = true;
+        try {
+            App.history.change(action.label, { slideId: editing.slideId }, () => App.text.runAction(element, action), { meta: meta });
+        } finally {
+            applying = false;
+        }
+        meta.caretAfter = App.text.getCaret(element);
+        if (App.text.fitHeight(element)) {
+            App.selection.refresh();
+        }
+    }
+
+    /*
+     * Increase (delta 1) or decrease (-1) the level of the selected lines while
+     * editing, or of every line of the selected text box (SPEC 3.7 setLevel).
+     */
+    App.text.setLevel = function setLevel(delta) {
+        const label = delta > 0 ? 'Increase indent' : 'Decrease indent';
+        if (editing) {
+            const caret = App.text.getCaret(editing.element) || END_OF_TEXT;
+            const first = Math.min(caret.anchor.p, caret.focus.p);
+            const last = Math.max(caret.anchor.p, caret.focus.p);
+            runInEditor({ label: label, run: () => { shiftLevels(editing.element, first, last, delta); return caret; } });
+            return;
+        }
+        const element = App.selection.getElement();
+        if (element && element.getAttribute('data-type') === 'text') {
+            const slideId = element.closest('section.slide').getAttribute('data-slide-id');
+            App.history.change(label, { slideId: slideId }, () => {
+                shiftLevels(element, 0, textLines(element).length - 1, delta);
+                App.text.normalize(element);
+            });
+        }
+    };
 
     /* A press on the slide outside the text: leave edit mode and select what is there. */
     function onDeckPointerDown(event) {

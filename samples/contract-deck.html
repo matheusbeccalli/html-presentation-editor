@@ -1,11 +1,17 @@
 <!DOCTYPE html>
-<!-- SAMPLE DECK - FAKE DATA ONLY. Follows the deck contract (SPEC 3.3) exactly. -->
-<html lang="pt-BR">
-<head>
+<!-- SAMPLE DECK - FAKE DATA ONLY. Follows the deck contract (SPEC 3.3), deck format 2 (text model). -->
+<html lang="pt-BR"><head>
 <meta charset="utf-8">
-<meta name="deck-format" content="1">
+<meta name="deck-format" content="2">
 <title>Projeto Atlas — Apresentação ao Comitê</title>
-<style>
+<style data-deck-lists="">:root {
+--list-1-bullet: "•"; --list-1-number: decimal; --list-1-indent: 24px; --list-1-space-before: 6pt;
+--list-2-bullet: "–"; --list-2-number: lower-alpha; --list-2-indent: 56px; --list-2-space-before: 3pt;
+--list-3-bullet: "▪"; --list-3-number: lower-roman; --list-3-indent: 88px; --list-3-space-before: 3pt;
+--list-4-bullet: "·"; --list-4-number: decimal; --list-4-indent: 120px; --list-4-space-before: 3pt;
+--list-5-bullet: "·"; --list-5-number: lower-alpha; --list-5-indent: 152px; --list-5-space-before: 3pt;
+}
+</style><style>
   :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
           --color-primary: #CC092F; --color-accent: #1F2A44; --color-text: #222; --color-bg: #fff; }
   body { margin: 0; font-family: var(--font-body); color: var(--color-text); }
@@ -24,33 +30,65 @@
   table.comps td.num, table.comps th.num { text-align: right; }
   table.comps tr.total td { font-weight: 700; border-top: 2px solid #222; }
 </style>
-</head>
+<style data-deck-text="">/* Bullets, numbers and indents of the text model (written by the editor). */
+.el { counter-reset: list-1 list-2 list-3 list-4 list-5; }
+.el p[data-list][data-level] { font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; text-align: inherit; text-indent: 0; margin: 0; padding: 0; border: 0; background: none; }
+.el p[data-list="bullet"][data-level="1"], .el p[data-list="number"][data-level="1"] { padding-left: var(--list-1-indent, 24px); }
+.el p[data-list="bullet"][data-level="1"], .el p[data-list="number"][data-level="1"] { margin-top: var(--list-1-space-before, 6pt); }
+.el p[data-list="number"][data-level="1"] { counter-increment: list-1; counter-set: list-2 0 list-3 0 list-4 0 list-5 0; }
+.el p[data-list="bullet"][data-level="1"], .el p[data-list="none"][data-level="1"] { counter-set: list-1 0 list-2 0 list-3 0 list-4 0 list-5 0; }
+.el p[data-list="bullet"][data-level="1"]::before, .el p[data-list="number"][data-level="1"]::before { display: inline-block; width: var(--list-1-indent, 24px); margin-left: calc(-1 * var(--list-1-indent, 24px)); color: var(--list-1-bullet-color, var(--marker-color, currentColor)); font-size: var(--list-1-bullet-size, var(--marker-size, 1em)); }
+.el p[data-list="bullet"][data-level="1"]::before { content: var(--list-1-bullet, "•"); }
+.el p[data-list="number"][data-level="1"]::before { content: counter(list-1, var(--list-1-number, decimal)) "."; }
+.el p[data-list="bullet"][data-level="2"], .el p[data-list="number"][data-level="2"], .el p[data-list="none"][data-level="2"] { padding-left: var(--list-2-indent, 56px); }
+.el p[data-list="bullet"][data-level="2"], .el p[data-list="number"][data-level="2"] { margin-top: var(--list-2-space-before, 3pt); }
+.el p[data-list="number"][data-level="2"] { counter-increment: list-2; counter-set: list-3 0 list-4 0 list-5 0; }
+.el p[data-list="bullet"][data-level="2"], .el p[data-list="none"][data-level="2"] { counter-set: list-2 0 list-3 0 list-4 0 list-5 0; }
+.el p[data-list="bullet"][data-level="2"]::before, .el p[data-list="number"][data-level="2"]::before { display: inline-block; width: calc(var(--list-2-indent, 56px) - var(--list-1-indent, 24px)); margin-left: calc(-1 * calc(var(--list-2-indent, 56px) - var(--list-1-indent, 24px))); color: var(--list-2-bullet-color, var(--marker-color, currentColor)); font-size: var(--list-2-bullet-size, var(--marker-size, 1em)); }
+.el p[data-list="bullet"][data-level="2"]::before { content: var(--list-2-bullet, "–"); }
+.el p[data-list="number"][data-level="2"]::before { content: counter(list-2, var(--list-2-number, lower-alpha)) "."; }
+.el p[data-list="bullet"][data-level="3"], .el p[data-list="number"][data-level="3"], .el p[data-list="none"][data-level="3"] { padding-left: var(--list-3-indent, 88px); }
+.el p[data-list="bullet"][data-level="3"], .el p[data-list="number"][data-level="3"] { margin-top: var(--list-3-space-before, 3pt); }
+.el p[data-list="number"][data-level="3"] { counter-increment: list-3; counter-set: list-4 0 list-5 0; }
+.el p[data-list="bullet"][data-level="3"], .el p[data-list="none"][data-level="3"] { counter-set: list-3 0 list-4 0 list-5 0; }
+.el p[data-list="bullet"][data-level="3"]::before, .el p[data-list="number"][data-level="3"]::before { display: inline-block; width: calc(var(--list-3-indent, 88px) - var(--list-2-indent, 56px)); margin-left: calc(-1 * calc(var(--list-3-indent, 88px) - var(--list-2-indent, 56px))); color: var(--list-3-bullet-color, var(--marker-color, currentColor)); font-size: var(--list-3-bullet-size, var(--marker-size, 1em)); }
+.el p[data-list="bullet"][data-level="3"]::before { content: var(--list-3-bullet, "▪"); }
+.el p[data-list="number"][data-level="3"]::before { content: counter(list-3, var(--list-3-number, lower-roman)) "."; }
+.el p[data-list="bullet"][data-level="4"], .el p[data-list="number"][data-level="4"], .el p[data-list="none"][data-level="4"] { padding-left: var(--list-4-indent, 120px); }
+.el p[data-list="bullet"][data-level="4"], .el p[data-list="number"][data-level="4"] { margin-top: var(--list-4-space-before, 3pt); }
+.el p[data-list="number"][data-level="4"] { counter-increment: list-4; counter-set: list-5 0; }
+.el p[data-list="bullet"][data-level="4"], .el p[data-list="none"][data-level="4"] { counter-set: list-4 0 list-5 0; }
+.el p[data-list="bullet"][data-level="4"]::before, .el p[data-list="number"][data-level="4"]::before { display: inline-block; width: calc(var(--list-4-indent, 120px) - var(--list-3-indent, 88px)); margin-left: calc(-1 * calc(var(--list-4-indent, 120px) - var(--list-3-indent, 88px))); color: var(--list-4-bullet-color, var(--marker-color, currentColor)); font-size: var(--list-4-bullet-size, var(--marker-size, 1em)); }
+.el p[data-list="bullet"][data-level="4"]::before { content: var(--list-4-bullet, "·"); }
+.el p[data-list="number"][data-level="4"]::before { content: counter(list-4, var(--list-4-number, decimal)) "."; }
+.el p[data-list="bullet"][data-level="5"], .el p[data-list="number"][data-level="5"], .el p[data-list="none"][data-level="5"] { padding-left: var(--list-5-indent, 152px); }
+.el p[data-list="bullet"][data-level="5"], .el p[data-list="number"][data-level="5"] { margin-top: var(--list-5-space-before, 3pt); }
+.el p[data-list="number"][data-level="5"] { counter-increment: list-5; }
+.el p[data-list="bullet"][data-level="5"], .el p[data-list="none"][data-level="5"] { counter-set: list-5 0; }
+.el p[data-list="bullet"][data-level="5"]::before, .el p[data-list="number"][data-level="5"]::before { display: inline-block; width: calc(var(--list-5-indent, 152px) - var(--list-4-indent, 120px)); margin-left: calc(-1 * calc(var(--list-5-indent, 152px) - var(--list-4-indent, 120px))); color: var(--list-5-bullet-color, var(--marker-color, currentColor)); font-size: var(--list-5-bullet-size, var(--marker-size, 1em)); }
+.el p[data-list="bullet"][data-level="5"]::before { content: var(--list-5-bullet, "·"); }
+.el p[data-list="number"][data-level="5"]::before { content: counter(list-5, var(--list-5-number, lower-alpha)) "."; }
+.el p[data-list]:first-child { margin-top: 0; }
+</style></head>
 <body>
 
 <section class="slide" data-slide-id="s1" data-layout="title">
   <img class="el" data-type="image" data-id="e1" style="left:64px; top:56px; width:120px; height:40px; z-index:1" alt="Logo" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAHgAAAAoCAYAAAA16j4lAAABDElEQVR42u3ZOw4CMQxF0WlZBT0Nm2D57CkjWhSYycSf5+heyV0KK6f01r56355Ss9FcrRPAiwMrISPkBKyCjNBkn09URkbIAFgZGSEjYFVkhAyBFZERMgZWQ0bIAVgJGSEnYBVkhByBFZARcgbORj7a//54td7wfgA4ExngIOAsZIADgTOQAQ4GjkYGOAE4EhngJOAoZIATgSOQAU4G9kYGWADYExlgEWAvZICFgD2QARYDtkYGWBDYEhlgUWArZICFgS2QARYHnkXmYh9w8M9ERqgI8FVkhAoBX0FGqBjwKDJCBYFHkBEqCnwWGaHCwGeQESoOfISM0ALA/5ARWgT4FzJCCwH3kBGaaweiLh97x++7BAAAAABJRU5ErkJggg==">
-  <div class="el" data-type="text" data-id="e2" style="left:64px; top:230px; width:1100px; height:120px; z-index:2"><h1>Projeto Atlas</h1></div>
+  <div class="el" data-type="text" data-id="e2" style="left: 64px; top: 230px; width: 1100px; height: 120px; z-index: 2; font-family: var(--font-heading); font-size: 39pt; color: var(--color-accent); font-weight: bold; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.1;"><p data-list="none" data-level="1">Projeto Atlas</p></div>
   <div class="el accent" data-type="shape" data-id="e3" style="left:64px; top:350px; width:140px; height:8px; z-index:3"></div>
-  <div class="el" data-type="text" data-id="e4" style="left:64px; top:378px; width:1100px; height:70px; z-index:4"><p class="muted">Aquisição da Alfa Alimentos S.A. · Comitê de Investimentos · Outubro 2026</p></div>
+  <div class="el" data-type="text" data-id="e4" style="left: 64px; top: 378px; width: 1100px; height: 70px; z-index: 4; font-family: var(--font-body); font-size: 16.5pt; color: rgb(102, 102, 102); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.45;"><p data-list="none" data-level="1">Aquisição da Alfa Alimentos S.A. · Comitê de Investimentos · Outubro 2026</p></div>
   <aside class="notes">Abrir com o contexto da transação. Todos os números deste deck são fictícios.</aside>
 </section>
 
 <section class="slide" data-slide-id="s2" data-layout="title-content">
-  <div class="el" data-type="text" data-id="e5" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Sumário executivo</h2></div>
+  <div class="el" data-type="text" data-id="e5" style="left: 64px; top: 48px; width: 1152px; height: 60px; z-index: 1; font-family: var(--font-heading); font-size: 25.5pt; color: var(--color-accent); font-weight: bold; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.2;"><p data-list="none" data-level="1">Sumário executivo</p></div>
   <div class="el accent" data-type="shape" data-id="e6" style="left:64px; top:112px; width:80px; height:6px; z-index:2"></div>
-  <div class="el" data-type="text" data-id="e7" style="left:64px; top:150px; width:1152px; height:480px; z-index:3">
-    <ul>
-      <li>Alfa Alimentos: líder regional em snacks saudáveis, receita de R$ 587 mn em 2024</li>
-      <li>Crescimento de 18% a.a. entre 2022 e 2025E, com expansão de margem</li>
-      <li>Proposta: aquisição de 70% por EV de R$ 1,2 bi (8,5x EBITDA 2025E)</li>
-      <li>Plano de criação de valor: expansão para o Sudeste e ganhos de compras</li>
-    </ul>
-  </div>
+  <div class="el" data-type="text" data-id="e7" style="left: 64px; top: 150px; width: 1152px; height: 480px; z-index: 3; font-family: var(--font-body); font-size: 16.5pt; color: var(--color-text); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.45; --list-1-indent: 28px; --list-1-space-before: 0px;"><p data-list="bullet" data-level="1" style="line-height: 1.45;">Alfa Alimentos: líder regional em snacks saudáveis, receita de R$ 587 mn em 2024</p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Crescimento de 18% a.a. entre 2022 e 2025E, com expansão de margem</p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Proposta: aquisição de 70% por EV de R$ 1,2 bi (8,5x EBITDA 2025E)</p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Plano de criação de valor: expansão para o Sudeste e ganhos de compras</p></div>
   <aside class="notes">Reforçar o múltiplo de entrada abaixo da média dos comparáveis.</aside>
 </section>
 
 <section class="slide" data-slide-id="s3" data-layout="title-content">
-  <div class="el" data-type="text" data-id="e8" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Comparáveis de mercado</h2></div>
+  <div class="el" data-type="text" data-id="e8" style="left: 64px; top: 48px; width: 1152px; height: 60px; z-index: 1; font-family: var(--font-heading); font-size: 25.5pt; color: var(--color-accent); font-weight: bold; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.2;"><p data-list="none" data-level="1">Comparáveis de mercado</p></div>
   <div class="el" data-type="table" data-id="e9" style="left:64px; top:140px; width:1152px; height:330px; z-index:2">
     <table class="comps">
       <thead><tr><th>Empresa</th><th class="num">EV (R$ mn)</th><th class="num">EV/EBITDA 2025E</th><th class="num">Margem EBITDA</th></tr></thead>
@@ -63,48 +101,40 @@
       </tbody>
     </table>
   </div>
-  <div class="el" data-type="text" data-id="e10" style="left:64px; top:640px; width:800px; height:30px; z-index:3"><p class="muted" style="font-size:14px">Fonte: estimativas fictícias para teste.</p></div>
+  <div class="el" data-type="text" data-id="e10" style="left: 64px; top: 640px; width: 800px; height: 30px; z-index: 3; font-family: var(--font-body); font-size: 10.5pt; color: rgb(102, 102, 102); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.45;"><p data-list="none" data-level="1">Fonte: estimativas fictícias para teste.</p></div>
 </section>
 
 <section class="slide" data-slide-id="s4" data-layout="title-content">
-  <div class="el" data-type="text" data-id="e11" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Receita e margem EBITDA</h2></div>
+  <div class="el" data-type="text" data-id="e11" style="left: 64px; top: 48px; width: 1152px; height: 60px; z-index: 1; font-family: var(--font-heading); font-size: 25.5pt; color: var(--color-accent); font-weight: bold; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.2;"><p data-list="none" data-level="1">Receita e margem EBITDA</p></div>
   <figure class="el" data-type="chart" data-id="e12" style="left:64px; top:140px; width:760px; height:420px; z-index:2; margin:0">
     <script type="application/json" class="chart-data">{"version":1,"type":"combo","categories":["2022","2023","2024","2025E"],"estimates":[false,false,false,true],"series":[{"name":"Receita (R$ mn)","type":"column","axis":"primary","values":[410,498,587,702]},{"name":"Margem EBITDA","type":"line","axis":"secondary","values":[0.18,0.2,0.21,0.23],"format":"percent"}],"options":{"title":"Receita e margem","legend":"bottom","dataLabels":true,"locale":"pt-BR","source":"Fonte: empresa"}}</script>
     <svg width="760" height="420" viewBox="0 0 760 420" font-family="Calibri, Arial, sans-serif">
-      <line x1="60" y1="360" x2="720" y2="360" stroke="#999"/>
-      <rect x="100" y="186" width="90" height="174" fill="#1F2A44"/><text x="145" y="178" text-anchor="middle" font-size="16">410</text>
-      <rect x="260" y="149" width="90" height="211" fill="#1F2A44"/><text x="305" y="141" text-anchor="middle" font-size="16">498</text>
-      <rect x="420" y="111" width="90" height="249" fill="#1F2A44"/><text x="465" y="103" text-anchor="middle" font-size="16">587</text>
-      <rect x="580" y="62" width="90" height="298" fill="#1F2A44" fill-opacity="0.55"/><text x="625" y="54" text-anchor="middle" font-size="16">702</text>
-      <polyline points="145,250 305,220 465,205 625,175" fill="none" stroke="#CC092F" stroke-width="3"/>
+      <line x1="60" y1="360" x2="720" y2="360" stroke="#999"></line>
+      <rect x="100" y="186" width="90" height="174" fill="#1F2A44"></rect><text x="145" y="178" text-anchor="middle" font-size="16">410</text>
+      <rect x="260" y="149" width="90" height="211" fill="#1F2A44"></rect><text x="305" y="141" text-anchor="middle" font-size="16">498</text>
+      <rect x="420" y="111" width="90" height="249" fill="#1F2A44"></rect><text x="465" y="103" text-anchor="middle" font-size="16">587</text>
+      <rect x="580" y="62" width="90" height="298" fill="#1F2A44" fill-opacity="0.55"></rect><text x="625" y="54" text-anchor="middle" font-size="16">702</text>
+      <polyline points="145,250 305,220 465,205 625,175" fill="none" stroke="#CC092F" stroke-width="3"></polyline>
       <text x="145" y="385" text-anchor="middle" font-size="16">2022</text><text x="305" y="385" text-anchor="middle" font-size="16">2023</text>
       <text x="465" y="385" text-anchor="middle" font-size="16">2024</text><text x="625" y="385" text-anchor="middle" font-size="16">2025E</text>
     </svg>
   </figure>
-  <div class="el" data-type="text" data-id="e13" style="left:860px; top:160px; width:356px; height:300px; z-index:3">
-    <p><b>CAGR 2022–25E: 19,6%</b></p>
-    <p class="muted">Margem EBITDA sobe de 18% para 23% com ganho de escala.</p>
-  </div>
+  <div class="el" data-type="text" data-id="e13" style="left: 860px; top: 160px; width: 356px; height: 300px; z-index: 3; font-family: var(--font-body); font-size: 16.5pt; color: rgb(102, 102, 102); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.45;"><p data-list="none" data-level="1" style="--marker-color: var(--color-text);"><span style="color: var(--color-text);"><b>CAGR 2022–25E: 19,6%</b></span></p><p data-list="none" data-level="1">Margem EBITDA sobe de 18% para 23% com ganho de escala.</p></div>
   <aside class="notes">O gráfico será editável na Fase 6; aqui o SVG estático foi desenhado à mão.</aside>
 </section>
 
 <section class="slide" data-slide-id="s5" data-layout="title-content" data-hidden="true">
-  <div class="el" data-type="text" data-id="e14" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Backup: premissas detalhadas</h2></div>
-  <div class="el" data-type="text" data-id="e15" style="left:64px; top:150px; width:1152px; height:300px; z-index:2"><p>Slide oculto: não aparece na apresentação nem na impressão.</p></div>
+  <div class="el" data-type="text" data-id="e14" style="left: 64px; top: 48px; width: 1152px; height: 60px; z-index: 1; font-family: var(--font-heading); font-size: 25.5pt; color: var(--color-accent); font-weight: bold; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.2;"><p data-list="none" data-level="1">Backup: premissas detalhadas</p></div>
+  <div class="el" data-type="text" data-id="e15" style="left: 64px; top: 150px; width: 1152px; height: 300px; z-index: 2; font-family: var(--font-body); font-size: 16.5pt; color: var(--color-text); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.45;"><p data-list="none" data-level="1">Slide oculto: não aparece na apresentação nem na impressão.</p></div>
 </section>
 
 <section class="slide" data-slide-id="s6" data-layout="two-columns">
-  <div class="el" data-type="text" data-id="e16" style="left:64px; top:48px; width:1152px; height:60px; z-index:1"><h2>Próximos passos</h2></div>
-  <div class="el" data-type="text" data-id="e17" style="left:64px; top:150px; width:540px; height:400px; z-index:2">
-    <p><b>Até a assinatura</b></p>
-    <ul><li>Due diligence financeira</li><li>Negociação do SPA</li><li>Aprovação do CADE</li></ul>
-  </div>
-  <div class="el" data-type="text" data-id="e18" style="left:676px; top:150px; width:540px; height:400px; z-index:3">
-    <p><b>Primeiros 100 dias</b></p>
-    <ul><li>Novo CFO</li><li>Plano de compras conjuntas</li><li>Abertura do CD em Campinas</li></ul>
-  </div>
+  <div class="el" data-type="text" data-id="e16" style="left: 64px; top: 48px; width: 1152px; height: 60px; z-index: 1; font-family: var(--font-heading); font-size: 25.5pt; color: var(--color-accent); font-weight: bold; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.2;"><p data-list="none" data-level="1">Próximos passos</p></div>
+  <div class="el" data-type="text" data-id="e17" style="left: 64px; top: 150px; width: 540px; height: 400px; z-index: 2; font-family: var(--font-body); font-size: 16.5pt; color: var(--color-text); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.45; --list-1-indent: 28px; --list-1-space-before: 0px;"><p data-list="none" data-level="1"><b>Até a assinatura</b></p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Due diligence financeira</p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Negociação do SPA</p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Aprovação do CADE</p></div>
+  <div class="el" data-type="text" data-id="e18" style="left: 676px; top: 150px; width: 540px; height: 400px; z-index: 3; font-family: var(--font-body); font-size: 16.5pt; color: var(--color-text); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.45; --list-1-indent: 28px; --list-1-space-before: 0px;"><p data-list="none" data-level="1"><b>Primeiros 100 dias</b></p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Novo CFO</p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Plano de compras conjuntas</p><p data-list="bullet" data-level="1" style="line-height: 1.45;">Abertura do CD em Campinas</p></div>
   <aside class="notes">Pedir aprovação para avançar para a fase vinculante.</aside>
 </section>
 
-</body>
-</html>
+
+
+</body></html>

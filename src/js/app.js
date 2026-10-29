@@ -13,6 +13,10 @@
  */
 
 window.App = {
+    // The deck format this editor writes (<meta name="deck-format">, SPEC 3.3).
+    // 2 = text in the flat-paragraph model (Phase 3); older decks are migrated on open.
+    DECK_FORMAT: 2,
+
     // Shared state that several modules read. Kept small on purpose.
     state: {
         fileName: null,      // name shown in the title bar, e.g. "deck.html"

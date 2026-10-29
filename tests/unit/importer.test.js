@@ -151,17 +151,55 @@ const CONTRACT_DECK =
     '<div class="el" data-type="text" data-id="e2" style="left:10px; top:10px; width:100px; height:50px; z-index:1">Two</div></section>' +
     '</body></html>';
 
-test('import: a contract deck is recognised and left unchanged', async () => {
+test('import: a format-1 contract deck keeps its layout; its text moves to the text model (format 2)', async () => {
     const result = await App.importer.importDeck(CONTRACT_DECK);
     assert(result.report.isContract, 'isContract');
     assertEqual(result.report.slideCount, 2);
     assertEqual(result.report.elementsConverted, 0);
+    assertEqual(result.report.textConverted, 2);
+    assert(App.importer.reportHasChanges(result.report), 'the conversion marks the deck as changed');
     const doc = parseDoc(result.html);
     const e1 = doc.querySelector('[data-id="e1"]');
-    assertEqual(e1.getAttribute('style'), 'left:64px; top:48px; width:1152px; height:80px; z-index:1');
-    assertEqual(e1.innerHTML, '<h1>Título</h1>');
+    ['left', 'top', 'width', 'height', 'zIndex'].forEach((property) => {
+        assertEqual(e1.style[property], { left: '64px', top: '48px', width: '1152px', height: '80px', zIndex: '1' }[property]);
+    });
+    assertEqual(e1.style.fontWeight, 'bold', 'the <h1> look is kept on the box');
+    // The browser's default <h1> margins (0.67em of 32px) were part of the look, so they stay.
+    assertEqual(e1.innerHTML, '<p data-list="none" data-level="1" style="margin-top: 21.44px; margin-bottom: 21.44px;">Título</p>');
+    assertEqual(doc.querySelector('[data-id="e2"]').innerHTML, '<p data-list="none" data-level="1">Two</p>');
     assertEqual(doc.querySelector('[data-slide-id="s2"]').getAttribute('data-hidden'), 'true');
     assertEqual(doc.querySelector('aside.notes').textContent, 'Notas do slide');
+    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '2');
+});
+
+const FORMAT_2_DECK = CONTRACT_DECK
+    .replace('content="1"', 'content="2"')
+    .replace('<h1>Título</h1>', '<p data-list="bullet" data-level="2">Título</p>')
+    .replace('>Two</div>', '><p data-list="none" data-level="1">Two</p></div>');
+
+test('import: a format-2 deck\'s text is left as it is (only tidied)', async () => {
+    const result = await App.importer.importDeck(FORMAT_2_DECK);
+    assertEqual(result.report.textConverted, 0);
+    assert(!App.importer.reportHasChanges(result.report), 'nothing to report');
+    const e1 = parseDoc(result.html).querySelector('[data-id="e1"]');
+    assertEqual(e1.getAttribute('style'), 'left:64px; top:48px; width:1152px; height:80px; z-index:1');
+    assertEqual(e1.innerHTML, '<p data-list="bullet" data-level="2">Título</p>');
+});
+
+test('import: every deck gets the list theme variables and the bullet stylesheet', async () => {
+    const stale = FORMAT_2_DECK.replace('</head>', '<style data-deck-text>/* old */</style></head>');
+    for (const html of [CONTRACT_DECK, stale]) {
+        const doc = parseDoc((await App.importer.importDeck(html)).html);
+        const styles = Array.from(doc.head.querySelectorAll('style'));
+        const lists = doc.head.querySelector('style[data-deck-lists]');
+        assert(lists, 'list variables added');
+        assertIncludes(lists.textContent, '--list-1-bullet: "•"');
+        assert(styles.indexOf(lists) < styles.findIndex((s) => !s.hasAttribute('data-deck-lists')),
+            'before the deck\'s own CSS, so a template can override them');
+        assertEqual(doc.head.querySelectorAll('style[data-deck-text]').length, 1);
+        assertEqual(styles[styles.length - 1].getAttribute('data-deck-text'), '', 'bullet stylesheet comes last');
+        assertEqual(doc.head.querySelector('style[data-deck-text]').textContent, App.text.deckTextCss(), 'always the current one');
+    }
 });
 
 test('import: contract deck missing ids and z-index gets them filled in', async () => {
@@ -207,7 +245,8 @@ test('import: a flow-layout deck is normalized to absolute elements', async () =
     assertIncludes(els[0].getAttribute('style'), 'left: 40px');
     assertIncludes(els[0].getAttribute('style'), 'top: 40px');
     assertIncludes(els[1].getAttribute('style'), 'top: 110px');
-    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '1');
+    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '2');
+    assertEqual(els[0].innerHTML, '<p data-list="none" data-level="1">Title</p>');
 });
 
 test('import: normalized ids are unique and slides get s1..sN', async () => {
@@ -231,14 +270,14 @@ test('import: slides hidden by the deck\'s own CSS (display:none until .active) 
     assertIncludes(second.getAttribute('style'), 'height: 40px');
 });
 
-test('import: styles from ancestor rules are copied inline onto the text', async () => {
+test('import: styles from ancestor rules are kept as the text box look', async () => {
     const html =
         '<html><head><style>section{width:1280px;height:720px}.card p{color:rgb(255, 0, 0);font-size:31px}</style></head>' +
         '<body><section><div class="card"><p>Red text</p></div></section></body></html>';
-    const doc = parseDoc((await App.importer.importDeck(html)).html);
-    const p = doc.querySelector('.el p');
-    assertIncludes(p.getAttribute('style'), 'color: rgb(255, 0, 0)');
-    assertIncludes(p.getAttribute('style'), 'font-size: 31px');
+    const el = parseDoc((await App.importer.importDeck(html)).html).querySelector('.el');
+    assertEqual(el.style.color, 'rgb(255, 0, 0)');
+    assertEqual(el.style.fontSize, '23.5pt');
+    assertEqual(el.innerHTML, '<p data-list="none" data-level="1">Red text</p>');
 });
 
 test('import: a slide\'s own background replaces one inherited from a shared .slide rule', async () => {
@@ -252,13 +291,20 @@ test('import: a slide\'s own background replaces one inherited from a shared .sl
     assertIncludes(light.getAttribute('style'), 'background-image: none');
 });
 
-test('import: flex layout of a text block itself is kept (e.g. gap between icon and heading)', async () => {
+test('import: an icon inside a heading becomes its own element, and the text box starts after it', async () => {
     const html =
-        '<html><head><style>section{width:1280px;height:720px}.col h3{display:flex;align-items:center;gap:10px}</style></head>' +
-        '<body><section><div class="col"><h3><svg width="20" height="20"></svg>Riscos</h3></div></section></body></html>';
-    const h3 = parseDoc((await App.importer.importDeck(html)).html).querySelector('.el h3');
-    assertIncludes(h3.getAttribute('style'), 'gap: 10px');
-    assertIncludes(h3.getAttribute('style'), 'align-items: center');
+        '<html><head><style>body{margin:0}section{width:1280px;height:720px}' +
+        '.col{position:absolute;left:100px;top:100px;width:400px}.col h3{margin:0;display:flex;align-items:center;gap:10px}</style></head>' +
+        '<body><section><div class="col"><h3><svg width="20" height="20"><circle cx="10" cy="10" r="8"/></svg>Riscos</h3></div></section></body></html>';
+    const doc = parseDoc((await App.importer.importDeck(html)).html);
+    const els = [...doc.querySelectorAll('.slide > .el')];
+    assertEqual(els.map((e) => e.getAttribute('data-type')).sort(), ['shape', 'text']);
+    const icon = els.find((e) => e.getAttribute('data-type') === 'shape');
+    const text = els.find((e) => e.getAttribute('data-type') === 'text');
+    assertEqual(icon.tagName.toLowerCase(), 'svg');
+    assertEqual(icon.style.left, '100px');
+    assertEqual(text.style.left, '130px', 'after the 20px icon and the 10px gap');
+    assertEqual(text.innerHTML, '<p data-list="none" data-level="1">Riscos</p>');
 });
 
 test('import: a box with a background becomes a shape behind its text', async () => {
@@ -301,7 +347,7 @@ test('import: a 1920x1080 deck is scaled to 1280x720', async () => {
     assertIncludes(style, 'left: 128px');
     assertIncludes(style, 'top: 64px');
     assertIncludes(style, 'width: 640px');
-    assertIncludes(el.querySelector('h1').getAttribute('style'), 'font-size: 40px');
+    assertEqual(el.style.fontSize, '30pt', '60px scaled by 2/3 = 40px = 30pt');
 });
 
 test('import: speaker notes are kept in aside.notes', async () => {

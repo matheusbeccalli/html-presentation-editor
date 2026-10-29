@@ -9,13 +9,16 @@
  *                (the editor cannot read them), for the report
  *   4. detect    which elements are the slides
  *   5. normalize (normalize.js) measure the real layout and convert it to the
- *                contract: absolute px positions, 1280x720
+ *                contract: absolute px positions, 1280x720; text of older
+ *                decks goes to the text model (text.js), keeping its look
  *   6. render    charts that have JSON but no SVG (charts.js)
+ *   7. text      tidy every text element, add the list variables and the
+ *                bullet stylesheet, mark the deck as format 2
  *
  * The result is { html, report }. The report lists everything that was found,
  * converted or removed, and dialogs.js shows it to the user.
  *
- * Talks to: normalize.js, charts.js, fileio.js (calls importDeck),
+ * Talks to: normalize.js, charts.js, text.js, fileio.js (calls importDeck),
  *           dialogs.js (shows the report), deck.js (removeRemoteRefs).
  */
 
@@ -360,6 +363,7 @@
             remoteRefs: [],           // [{ kind, url }] blocked by the browser
             localRefs: [],            // [{ kind, url }] files next to the deck we cannot read
             chartsRendered: 0,
+            textConverted: 0,         // text elements converted to the text model (Phase 3)
             fixes: [],                // small repairs on contract decks (missing ids ...)
             warnings: [],
         };
@@ -372,7 +376,34 @@
             meta.setAttribute('name', 'deck-format');
             doc.head.prepend(meta);
         }
-        meta.setAttribute('content', '1');
+        meta.setAttribute('content', String(App.DECK_FORMAT));
+    }
+
+    /*
+     * Every deck leaves the importer in the text model (SPEC Phase 3): text is
+     * tidied by the normalizer (it was converted already if the deck was older),
+     * the list theme variables come first in <head> so the deck's own CSS can
+     * override them, and the bullet stylesheet comes last, always the current one.
+     */
+    function finishTextModel(doc) {
+        doc.querySelectorAll('.el[data-type="text"]').forEach((element) => App.text.normalize(element));
+
+        let lists = doc.head.querySelector('style[data-deck-lists]');
+        if (!lists) {
+            lists = doc.createElement('style');
+            lists.setAttribute('data-deck-lists', '');
+            lists.textContent = ':root {\n' + App.text.themeVariablesCss() + '\n}\n';
+        }
+        const firstStyle = doc.head.querySelector('style, link[rel~="stylesheet"]');
+        if (firstStyle !== lists) {
+            doc.head.insertBefore(lists, firstStyle);
+        }
+
+        doc.head.querySelectorAll('style[data-deck-text]').forEach((old) => old.remove());
+        const text = doc.createElement('style');
+        text.setAttribute('data-deck-text', '');
+        text.textContent = App.text.deckTextCss();
+        doc.head.appendChild(text);
     }
 
     /*
@@ -397,6 +428,7 @@
         const deckDoc = await App.normalize.run(doc, detected, report);
 
         report.chartsRendered = App.charts.renderMissing(deckDoc);
+        finishTextModel(deckDoc);
         ensureDeckFormatMeta(deckDoc);
 
         return { html: '<!DOCTYPE html>\n' + deckDoc.documentElement.outerHTML, report: report };
@@ -408,7 +440,8 @@
      */
     App.importer.reportHasChanges = function reportHasChanges(report) {
         return !report.isContract || report.fixes.length > 0 || report.scriptsRemoved.length > 0 ||
-            report.handlersRemoved > 0 || report.otherRemoved.length > 0 || report.chartsRendered > 0;
+            report.handlersRemoved > 0 || report.otherRemoved.length > 0 || report.chartsRendered > 0 ||
+            report.textConverted > 0;
     };
 
     App.importer.reportHasItems = function reportHasItems(report) {

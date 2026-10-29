@@ -28,9 +28,9 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `history.js` | Undo/redo by HTML snapshots of a slide (or the whole deck); dirty tracking; `mergeKey` joins quick repeats (held arrow key) into one step | deck (via `getDoc`) |
 | `charts.js` | Chart JSON → SVG. **Phase 1: placeholder only** | importer |
 | `template.js` | The blank deck for File > New | fileio |
-| `text.js` | The only door to text (SPEC 3.7). Step 1: the flat-paragraph model (`<p data-list data-level>`), `normalize` (messy HTML → allowed set, idempotent), `getModel`, the bullet/number stylesheet (`deckTextCss`) and list theme variables | importer (step 2), editing (later steps) |
+| `text.js` | The only door to text (SPEC 3.7): the flat-paragraph model (`<p data-list data-level>`), `normalize` (messy HTML → allowed set, idempotent), `getModel`, the bullet/number stylesheet (`deckTextCss`) and list theme variables; `fromRendered` converts rendered text (import, format-1 decks) keeping its look | normalize (import), importer, editing (later steps) |
 | `importer.js` | Parse, sanitize (scripts, handlers), find blocked/missing refs, detect slides, run the import | normalize, charts |
-| `normalize.js` | Measures the deck in a hidden iframe and rebuilds it in the contract format | importer |
+| `normalize.js` | Measures the deck in a hidden iframe and rebuilds it in the contract format; converts text to the text model while it can still measure it (text.js); icons inside headings become their own elements | importer, text |
 | `serialize.js` | Clean copy of the deck + player script/CSS → the saved file's text | fileio |
 | `icons.js` | Inline SVG icons | ribbon, ui, dialogs |
 | `dialogs.js` | `<dialog>`-based alert/confirm and the import report | commands |
@@ -69,7 +69,8 @@ so it presents (arrow keys, F = full screen, hidden slides skipped) and prints o
 ```text
 keydown → shortcuts.js → commands.run('open') → fileio.open → showOpenFilePicker (keeps the handle)
   → importer.importDeck(text)
-      sanitize → findExternalRefs → detectSlides → normalize.run (hidden iframe: measure, rebuild) → charts.renderMissing
+      sanitize → findExternalRefs → detectSlides → normalize.run (hidden iframe: measure, rebuild; text → text.fromRendered)
+      → charts.renderMissing → text model finished (normalize every text box, list variables + <style data-deck-text>, format 2)
   → deck.load(html) → iframe srcdoc → 'deck-loaded' event → thumbnails rebuild, title/status update
   → history.reset (+ markDirty if the import changed anything) → dialogs.showImportReport
 ```

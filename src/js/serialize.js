@@ -68,7 +68,7 @@
             format.setAttribute('name', 'deck-format');
             charset.after(format);
         }
-        format.setAttribute('content', '1');
+        format.setAttribute('content', String(App.DECK_FORMAT));
     }
 
     /*

@@ -9,7 +9,9 @@
  * moved out of its original container.
  *
  * What becomes what (option A, agreed with the user):
- *   heading / paragraph / list / text box  -> <div class="el" data-type="text">
+ *   heading / paragraph / list / text box  -> <div class="el" data-type="text">, its text
+ *                                             converted to the text model (text.js fromRendered)
+ *   icon (<svg>/<img>) inside a heading     -> its own element; the text box starts after it
  *   <img>                                  -> <img class="el" data-type="image">
  *   <table>                                -> <div class="el" data-type="table">
  *   <svg> or empty coloured box            -> data-type="shape"
@@ -19,9 +21,11 @@
  *   <canvas> (drawn by a script we removed) -> removed, listed in the report
  *
  * Decks that already follow the contract are only checked and lightly repaired
- * (missing ids, missing z-index) - never rebuilt.
+ * (missing ids, missing z-index) - never rebuilt. If they are older than deck
+ * format 2, their text is converted to the text model in place, while the
+ * measuring iframe can still tell how it looks.
  *
- * Talks to: importer.js (calls run), util.js.
+ * Talks to: importer.js (calls run), text.js (fromRendered), util.js.
  */
 
 (function () {
@@ -233,8 +237,8 @@
         });
     }
 
-    function plural(count, word) {
-        return count + ' ' + word + (count === 1 ? '' : 's');
+    function plural(count, word, pluralWord) {
+        return count + ' ' + (count === 1 ? word : pluralWord || word + 's');
     }
 
     /* Fill in missing or duplicate ids and missing z-index on a contract deck. */
@@ -568,7 +572,11 @@
     }
 
     function placement(element, ctx) {
-        const rect = element.getBoundingClientRect();
+        return placementOf(element.getBoundingClientRect(), ctx);
+    }
+
+    /* A rectangle measured in the iframe -> left/top/width/height on the 1280x720 slide. */
+    function placementOf(rect, ctx) {
         const s = ctx.fit.scale;
         return {
             left: Math.round((rect.left - ctx.box.originX) * s + ctx.fit.offsetX),
@@ -608,7 +616,34 @@
         return wrapper;
     }
 
-    /* text and table: an .el wrapper holding a styled copy of the block. */
+    /*
+     * text: an .el wrapper whose text is converted to the text model (text.js),
+     * keeping the look. The block's padding, border and background stay on the
+     * wrapper, unless pictures were taken out of it (then the box is the text only).
+     */
+    function buildText(out, element, box, ctx, textOnly) {
+        const computed = element.ownerDocument.defaultView.getComputedStyle(element);
+        const wrapper = wrapperElement(out, 'text', box);
+        if (!textOnly) {
+            writeBoxStyles(makeWriter(wrapper, ctx.fit.scale), computed, true);
+        }
+        const opacity = effectiveOpacity(element, ctx.slide);
+        if (opacity < 1) {
+            wrapper.style.setProperty('opacity', String(opacity));
+        }
+        convertText(element, wrapper, ctx, true);
+        return wrapper;
+    }
+
+    function convertText(source, target, ctx, includeSource) {
+        const result = App.text.fromRendered(source, target, { scale: ctx.fit.scale, includeSource: includeSource });
+        ctx.report.textConverted += 1;
+        if (result.layoutFlattened) {
+            ctx.textChecks.push({ node: target, slideNumber: ctx.slideNumber });
+        }
+    }
+
+    /* table: an .el wrapper holding a styled copy of the block. */
     function buildWrapped(out, element, type, box, ctx) {
         const computed = element.ownerDocument.defaultView.getComputedStyle(element);
         const wrapper = wrapperElement(out, type, box);
@@ -623,7 +658,8 @@
     function buildSelf(out, element, type, box, ctx) {
         const view = element.ownerDocument.defaultView;
         const computed = view.getComputedStyle(element);
-        const clone = out.importNode(element, true);
+        const clone = out.importNode(element, type !== 'text');   // text is rebuilt by convertText
+        clone.removeAttribute('data-import-text');
         clone.classList.add('el');
         clone.setAttribute('data-type', type);
         // Remove the old inline position first so ours comes first in the style attribute.
@@ -637,6 +673,8 @@
         if (type === 'image') {
             write('object-fit', computed.objectFit);
             write('object-position', computed.objectPosition);
+        } else if (type === 'text') {
+            convertText(element, clone, ctx, false);
         } else {
             TEXT_PROPS.forEach((property) => write(property, computed.getPropertyValue(property)));
             const cloneChildren = Array.from(clone.children);
@@ -720,14 +758,56 @@
             if (!hasArea(box)) {
                 return;
             }
+            if (kind === 'text' && picturesInside(element).length > 0) {
+                addTextWithPictures(element, ctx);
+                return;
+            }
             addItem(ctx, element, buildElement(kind, element, box, ctx));
         });
+    }
+
+    /* Visible <img>/<svg> inside a text block (icons next to a heading …), outermost only. */
+    function picturesInside(element) {
+        const view = element.ownerDocument.defaultView;
+        return Array.from(element.querySelectorAll('img, svg')).filter((picture) => {
+            return !picture.parentElement.closest('svg') && view.getComputedStyle(picture).display !== 'none';
+        });
+    }
+
+    /*
+     * The text model has no pictures, so each icon becomes its own element at its
+     * measured place, and the text box covers only where the text is (from the
+     * left of the first character to the right edge of the block).
+     */
+    function addTextWithPictures(element, ctx) {
+        picturesInside(element).forEach((picture) => {
+            const box = placement(picture, ctx);
+            if (hasArea(box)) {
+                addItem(ctx, picture, buildElement(tagOf(picture) === 'img' ? 'image' : 'svg', picture, box, ctx));
+            }
+        });
+        const range = element.ownerDocument.createRange();
+        let textLeft = Infinity;
+        const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (node.textContent.trim() === '' || node.parentElement.closest('svg')) {
+                continue;
+            }
+            range.selectNodeContents(node);
+            Array.from(range.getClientRects()).forEach((rect) => { textLeft = Math.min(textLeft, rect.left); });
+        }
+        if (textLeft === Infinity) {
+            return;   // only pictures
+        }
+        const rect = element.getBoundingClientRect();
+        const box = placementOf({ left: textLeft, top: rect.top, width: rect.right - textLeft, height: rect.height }, ctx);
+        addItem(ctx, element, buildText(ctx.out, element, box, ctx, true));
     }
 
     function buildElement(kind, element, box, ctx) {
         const out = ctx.out;
         switch (kind) {
-            case 'text': return buildWrapped(out, element, 'text', box, ctx);
+            case 'text': return buildText(out, element, box, ctx, false);
             case 'table': return buildWrapped(out, element, 'table', box, ctx);
             case 'image': return buildSelf(out, element, 'image', box, ctx);
             case 'svg': return buildSelf(out, element, 'shape', box, ctx);
@@ -790,7 +870,7 @@
         out.head.appendChild(charset);
         const format = out.createElement('meta');
         format.setAttribute('name', 'deck-format');
-        format.setAttribute('content', '1');
+        format.setAttribute('content', String(App.DECK_FORMAT));
         out.head.appendChild(format);
         if (doc.title) {
             const title = out.createElement('title');
@@ -815,6 +895,7 @@
         buildHead(out, doc);
 
         const usedIds = new Set();
+        const textChecks = [];   // text boxes whose side-by-side layout was flattened
         slides.forEach((frameSlide, index) => {
             showOnly(slides, index);
             const box = measureSlideBox(frameSlide);
@@ -831,7 +912,7 @@
 
             const ctx = {
                 out: out, slide: frameSlide, box: box, fit: fit, slideNumber: index + 1,
-                items: [], notes: [], removed: report.otherRemoved,
+                items: [], notes: [], removed: report.otherRemoved, report: report, textChecks: textChecks,
             };
             collect(frameSlide, ctx);
 
@@ -859,7 +940,49 @@
             out.body.appendChild(out.importNode(master, true));
         }
         reportContentOutsideSlides(slides, report);
+        reportTextChecks(textChecks, report);
         return out;
+    }
+
+    /* One warning listing the text boxes to look at (ids are known only once the slide is built). */
+    function reportTextChecks(checks, report) {
+        if (checks.length === 0) {
+            return;
+        }
+        const where = checks.slice(0, 8).map((check) => 'slide ' + check.slideNumber + ' (' + check.node.getAttribute('data-id') + ')');
+        report.warnings.push('Text in ' + plural(checks.length, 'box', 'boxes') + ' sat side by side (columns, a grid) and now ' +
+            'runs as lines one below the other; check ' + (checks.length === 1 ? 'it' : 'them') + ': ' +
+            where.join(', ') + (checks.length > 8 ? ' …' : ''));
+    }
+
+    /*
+     * Format-1 contract decks: convert the text of every text element in place,
+     * slide by slide (a slide must be shown to measure its layout).
+     */
+    function convertContractText(frameDoc, doc, slides, report) {
+        const textChecks = [];
+        const convertIn = (scope, slideNumber) => {
+            scope.querySelectorAll('.el[data-type="text"][data-import-text]').forEach((source) => {
+                const target = doc.querySelector('[data-import-text="' + source.getAttribute('data-import-text') + '"]');
+                const ctx = { fit: { scale: 1 }, report: report, textChecks: textChecks, slideNumber: slideNumber };
+                convertText(source, target, ctx, false);
+            });
+        };
+        slides.forEach((slide, index) => {
+            showOnly(slides, index);
+            convertIn(slide, index + 1);
+        });
+        const master = frameDoc.querySelector('.master');
+        if (master) {
+            convertIn(master, 'master');
+        }
+        reportTextChecks(textChecks, report);
+    }
+
+    /* Decks saved before deck format 2 hold their text as <h1>, <ul> … */
+    function needsTextConversion(doc) {
+        const meta = doc.head && doc.head.querySelector('meta[name="deck-format"]');
+        return !meta || (parseInt(meta.getAttribute('content'), 10) || 1) < App.DECK_FORMAT;
     }
 
     function describeTag(element) {
@@ -936,6 +1059,8 @@
      */
     App.normalize.run = async function run(doc, detected, report) {
         detected.slides.forEach((slide, index) => slide.setAttribute('data-import-slide', String(index)));
+        const textElements = Array.from(doc.querySelectorAll('.el[data-type="text"]'));
+        textElements.forEach((element, index) => element.setAttribute('data-import-text', String(index)));
         const frame = await loadMeasureFrame(buildMeasureHtml(doc));
 
         try {
@@ -960,11 +1085,15 @@
             if (method === 'section.slide' && allSlidesFollowContract(slides)) {
                 report.isContract = true;
                 applyContractFixes(detected.slides, report);
+                if (needsTextConversion(doc)) {
+                    convertContractText(frameDoc, doc, slides, report);
+                }
                 return doc;
             }
             return buildNormalizedDeck(doc, slides, report);
         } finally {
             detected.slides.forEach((slide) => slide.removeAttribute('data-import-slide'));
+            textElements.forEach((element) => element.removeAttribute('data-import-text'));
             frame.remove();
         }
     };

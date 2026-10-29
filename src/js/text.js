@@ -15,11 +15,16 @@
  * paste, import): it rewrites everything inside a text element into the
  * allowed set and is idempotent (running it twice = running it once).
  *
- * Step 1 of Phase 3 provides normalize, getModel and the stylesheet; the
- * editing half of the interface (enterEdit, exitEdit, applyStyle, setLevel,
- * toggleList) arrives with the editing steps.
+ * fromRendered(source, target) converts text that the browser has laid out
+ * (the importer's measuring iframe) into the model, keeping its look: what is
+ * the same for the whole box goes on the text element, the rest becomes inline
+ * formatting; theme fonts/colours become var(--…).
  *
- * Talks to: nobody yet (pure DOM work); importer.js and the editing code will call it.
+ * Done so far: normalize, getModel, the stylesheet, fromRendered. The editing
+ * half of the interface (enterEdit, exitEdit, applyStyle, setLevel,
+ * toggleList) arrives with the editing steps of Phase 3.
+ *
+ * Talks to: normalize.js and importer.js (import); the editing code will call it.
  */
 
 (function () {
@@ -90,7 +95,11 @@
         const rules = [
             '/* Bullets, numbers and indents of the text model (written by the editor). */',
             '.el { counter-reset: list-1 list-2 list-3 list-4 list-5; }',
-            '.el p[data-list] { margin: 0; }',
+            // A line's look comes only from its text box and its inline formatting, so a
+            // deck's own rules for <p> (".el p { font-size: 14px }") cannot restyle it.
+            '.el p[data-list][data-level] { font: inherit; color: inherit; letter-spacing: inherit;' +
+            ' text-transform: inherit; text-align: inherit; text-indent: 0; margin: 0; padding: 0;' +
+            ' border: 0; background: none; }',
         ];
         for (let n = 1; n <= MAX_LEVEL; n++) {
             const level = '[data-level="' + n + '"]';
@@ -293,14 +302,16 @@
 
     /*
      * Walks the element and returns paragraph records:
-     *   { list, level, start, pStyle, wrappers, nodes }
+     *   { list, level, start, pStyle, wrappers, fill, nodes }
      * nodes = the inline content (original nodes, cleaned later); wrappers =
-     * formatting that surrounded the paragraph (an <i> around several blocks,
-     * or a heading's bold/size/colour, or the size/colour an empty line kept).
+     * formatting tags that surrounded the paragraph (an <i> around several
+     * blocks, a heading's bold); fill = span styles of the blocks around it
+     * (a heading's size and colour, or what an empty line kept), given to the
+     * text that has no such style of its own.
      */
     function collectParagraphs(element) {
         const out = [];
-        collectChildren(element, { para: null, listDepth: 0, wrappers: [], pStyle: {} }, out);
+        collectChildren(element, { para: null, listDepth: 0, wrappers: [], fill: {}, pStyle: {} }, out);
         return out;
     }
 
@@ -338,7 +349,7 @@
         const para = ctx.para || { list: 'none', level: 1, start: null };
         const record = {
             list: para.list, level: para.level, start: para.start,
-            pStyle: ctx.pStyle, wrappers: ctx.wrappers, nodes: nodes,
+            pStyle: ctx.pStyle, wrappers: ctx.wrappers, fill: ctx.fill, nodes: nodes,
         };
         if (ctx.para) {
             ctx.para.start = null;   // a start number belongs to the first line only
@@ -347,21 +358,18 @@
     }
 
     /*
-     * Wrappers that carry a block's look (a heading's size, colour, bold …) into
-     * its text. On a model <p> a real font-size/color only exists on an empty
-     * line; text typed into that line gets it as formatting here.
+     * A block's look (a heading's size, colour, bold …), carried into its text:
+     * formatting tags wrap the paragraph; span styles fill in the text that has
+     * none of its own. On a model <p>, a real font-size/color was derived by an
+     * earlier normalize (an empty line, or a line all in one size), so text
+     * typed into it later keeps that look.
      */
-    function lookWrappers(block) {
+    function blockLook(block, ctx) {
         const doc = block.ownerDocument;
-        const wrappers = [];
-        const styles = spanStyles(block);
-        if (Object.keys(styles).length > 0) {
-            const span = doc.createElement('span');
-            span.setAttribute('style', styleText(styles, SPAN_ORDER));
-            wrappers.push(span);
-        }
-        styleFormats(block).forEach((format) => wrappers.push(doc.createElement(format)));
-        return wrappers;
+        return {
+            wrappers: ctx.wrappers.concat(styleFormats(block).map((format) => doc.createElement(format))),
+            fill: Object.assign({}, ctx.fill, spanStyles(block)),
+        };
     }
 
     function collectBlock(block, ctx, out) {
@@ -381,11 +389,14 @@
         } else {
             para = ctx.para;
         }
+        const own = paragraphStyles(block);
+        const look = blockLook(block, ctx);
         const inner = {
             para: para,
             listDepth: ctx.listDepth,
-            wrappers: ctx.wrappers.concat(lookWrappers(block)),
-            pStyle: Object.assign({}, ctx.pStyle, paragraphStyles(block)),
+            wrappers: look.wrappers,
+            fill: look.fill,
+            pStyle: Object.assign({}, ctx.pStyle, withoutMargins(own)),
         };
         const before = out.length;
         collectChildren(block, inner, out);
@@ -393,6 +404,33 @@
             // An empty block is an empty line (as the browser showed it).
             out.push(makeRecord(inner, []));
         }
+        applyBlockMargins(own, out, before);
+    }
+
+    function withoutMargins(styles) {
+        const result = Object.assign({}, styles);
+        delete result['margin-top'];
+        delete result['margin-bottom'];
+        return result;
+    }
+
+    /*
+     * A block's top margin belongs to the first line it produced and its bottom
+     * margin to the last one, never to every nested line. Where a nested line
+     * has its own margin too, the larger wins (as margins collapse in the browser).
+     */
+    function applyBlockMargins(own, out, before) {
+        if (out.length === before) {
+            return;
+        }
+        [['margin-top', out[before]], ['margin-bottom', out[out.length - 1]]].forEach(([property, record]) => {
+            if (!own[property]) {
+                return;
+            }
+            const current = record.pStyle[property];
+            const larger = current && parseFloat(current) > parseFloat(own[property]) ? current : own[property];
+            record.pStyle = Object.assign({}, record.pStyle, { [property]: larger });
+        });
     }
 
     function collectList(list, ctx, out) {
@@ -400,7 +438,17 @@
         const isOrdered = tagOf(list) === 'ol';
         const listType = /none/.test(list.style.getPropertyValue('list-style-type')) ? 'none'
             : isOrdered ? 'number' : 'bullet';
+        // The list's own look (size, colour …) reaches every item; its margins do not.
+        const listLook = blockLook(list, ctx);
+        const ownStyle = paragraphStyles(list);
+        const listStyle = Object.assign({}, ctx.pStyle);
+        ['text-align', 'line-height'].forEach((property) => {
+            if (ownStyle[property]) {
+                listStyle[property] = ownStyle[property];
+            }
+        });
         let first = true;
+        const before = out.length;
         Array.from(list.childNodes).forEach((child) => {
             if (child.nodeType === Node.COMMENT_NODE || DROP_TAGS.has(tagOf(child))) {
                 return;
@@ -419,9 +467,10 @@
             }
             first = false;
             const item = { para: { list: listType, level: level, start: start }, listDepth: level,
-                wrappers: ctx.wrappers, pStyle: ctx.pStyle };
+                wrappers: listLook.wrappers, fill: listLook.fill, pStyle: listStyle };
             collectBlock(child, item, out);
         });
+        applyBlockMargins(ownStyle, out, before);
     }
 
     /*
@@ -637,16 +686,49 @@
         const firstText = items.find((item) => item.nodeType === Node.TEXT_NODE && item.textContent !== '');
         if (firstText) {
             const look = spanLook(firstText.parentElement, paragraph, {});
-            return { '--marker-size': look.size, '--marker-color': look.color };
+            // A line all in one size also gets it as its own size: the line is then exactly as
+            // tall as its text (otherwise the box's default size would set a minimum height).
+            const sizes = items.filter((item) => item.nodeType === Node.TEXT_NODE && item.textContent.trim() !== '')
+                .map((item) => spanLook(item.parentElement, paragraph, {}).size);
+            const uniform = sizes.every((size) => size && size === sizes[0]) ? sizes[0] : null;
+            return { 'font-size': uniform, '--marker-size': look.size, '--marker-color': look.color };
         }
         const look = items.length > 0 ? spanLook(items[0].parentElement, paragraph, {}) : {};
-        // Spans around an empty line were dropped as empty formatting; their look is in the wrappers.
-        record.wrappers.slice().reverse().forEach((wrapper) => {
-            if (tagOf(wrapper) === 'span') {
-                spanLook(wrapper, null, look);
+        // An empty line keeps the look of the blocks around it (its spans were dropped as empty).
+        return { 'font-size': look.size || record.fill['font-size'], color: look.color || record.fill.color };
+    }
+
+    /*
+     * Give span styles (`fill`) to the text that has none of its own: a span gets
+     * the missing properties added, other formatting is wrapped whole when no span
+     * inside it sets any of them. Equivalent to one span around everything (inner
+     * spans win anyway), but without dead nested spans, so normalize stays idempotent.
+     */
+    function fillMissing(node, fill, doc) {
+        Array.from(node.childNodes).forEach((child) => {
+            const tag = tagOf(child);
+            if (child.nodeType === Node.TEXT_NODE) {
+                if (child.textContent !== '') {
+                    wrapInSpan(child, fill, doc);
+                }
+            } else if (tag === 'span') {
+                const own = spanStyles(child);
+                child.setAttribute('style', styleText(Object.assign({}, fill, own), SPAN_ORDER));
+            } else if (child.nodeType === Node.ELEMENT_NODE && tag !== 'br') {
+                if (child.querySelector('span')) {
+                    fillMissing(child, fill, doc);
+                } else {
+                    wrapInSpan(child, fill, doc);
+                }
             }
         });
-        return { 'font-size': look.size, color: look.color };
+    }
+
+    function wrapInSpan(node, styles, doc) {
+        const span = doc.createElement('span');
+        span.setAttribute('style', styleText(styles, SPAN_ORDER));
+        node.replaceWith(span);
+        span.appendChild(node);
     }
 
     function buildParagraph(record, doc) {
@@ -673,6 +755,9 @@
             content = content.concat(cleanInline(child, doc));
         });
         content.forEach((node) => p.appendChild(node));
+        if (hasText && Object.keys(record.fill).length > 0) {
+            fillMissing(p, record.fill, doc);
+        }
 
         collapseWhitespace(p);
         tidy(p);
@@ -685,7 +770,13 @@
             styles['counter-set'] = 'list-' + record.level + ' ' + record.start +
                 (record.level < MAX_LEVEL ? ' ' + resetCounters(record.level + 1) : '');
         }
-        Object.assign(styles, derivedLook(p, record));
+        const look = derivedLook(p, record);
+        if (look['font-size'] && hasText) {
+            // Spaces between the spans take the line's size too (the next normalize would do it anyway).
+            fillMissing(p, { 'font-size': look['font-size'] }, doc);
+            tidy(p);
+        }
+        Object.assign(styles, look);
         const text = styleText(styles, PARAGRAPH_ORDER);
         if (text) {
             p.setAttribute('style', text);
@@ -722,5 +813,419 @@
                 text: text,
             };
         });
+    };
+
+    // ---------------------------------------------------------------
+    // Converting rendered text into the model (import, format-1 decks)
+    // ---------------------------------------------------------------
+
+    // The look of a piece of text, read from the browser's computed style.
+    const LOOK_PROPS = ['font-family', 'font-size', 'color', 'font-weight', 'font-style',
+        'letter-spacing', 'text-transform', 'text-align', 'line-height'];
+
+    function round2(value) {
+        return String(Math.round(value * 100) / 100);
+    }
+
+    /*
+     * The deck's theme fonts and colours ({ fonts: [{ name, value }], colors: [...] }),
+     * as computed values, so text using them can be written back as var(--…).
+     * --color-bg is left out: white text is not "the background colour".
+     */
+    const themeCache = new WeakMap();
+
+    function themeValues(sourceDoc) {
+        if (themeCache.has(sourceDoc)) {
+            return themeCache.get(sourceDoc);
+        }
+        const names = [];
+        Array.from(sourceDoc.styleSheets).forEach((sheet) => {
+            let rules = [];
+            try {
+                rules = Array.from(sheet.cssRules || []);
+            } catch (error) {
+                return;   // a blocked remote stylesheet: the browser will not show its rules
+            }
+            rules.forEach((rule) => {
+                if (rule.selectorText && /(^|,)\s*:root\s*($|,)/.test(rule.selectorText)) {
+                    Array.from(rule.style).forEach((name) => {
+                        if (/^--(font-(heading|body)|color-[a-z0-9-]+)$/.test(name) && !/^--color-(bg|background)/.test(name) &&
+                            names.indexOf(name) === -1) {
+                            names.push(name);
+                        }
+                    });
+                }
+            });
+        });
+        const probe = sourceDoc.createElement('span');
+        sourceDoc.body.appendChild(probe);
+        const view = sourceDoc.defaultView;
+        const theme = { fonts: [], colors: [] };
+        names.forEach((name) => {
+            const isFont = name.indexOf('--font-') === 0;
+            probe.style.cssText = (isFont ? 'font-family' : 'color') + ': var(' + name + ')';
+            const computed = view.getComputedStyle(probe);
+            (isFont ? theme.fonts : theme.colors).push({ name: name, value: isFont ? computed.fontFamily : computed.color });
+        });
+        probe.remove();
+        themeCache.set(sourceDoc, theme);
+        return theme;
+    }
+
+    /* var(--font-heading) / var(--font-body) for a theme font; headings prefer the heading font. */
+    function themeFont(value, element, theme) {
+        const matches = theme.fonts.filter((font) => font.value === value);
+        if (matches.length === 0) {
+            return value;
+        }
+        const wanted = element && element.closest('h1, h2, h3, h4, h5, h6') ? '--font-heading' : '--font-body';
+        const chosen = matches.find((font) => font.name === wanted) || matches[0];
+        return 'var(' + chosen.name + ')';
+    }
+
+    function themeColor(value, theme) {
+        const match = theme.colors.find((color) => color.value === value);
+        return match ? 'var(' + match.name + ')' : value;
+    }
+
+    /* Computed style -> look, with px sizes scaled to the 1280x720 slide and turned into pt. */
+    function lookOf(computed, scale, element) {
+        const theme = element ? themeValues(element.ownerDocument) : { fonts: [], colors: [] };
+        const fontPx = parseFloat(computed.fontSize);
+        const align = { start: 'left', end: 'right', '-webkit-center': 'center', '-webkit-left': 'left',
+            '-webkit-right': 'right' }[computed.textAlign] || computed.textAlign;
+        return {
+            'font-family': themeFont(computed.fontFamily, element, theme),
+            'font-size': toPoints(round2(fontPx * scale) + 'px'),
+            color: themeColor(computed.color, theme),
+            'font-weight': parseInt(computed.fontWeight, 10) >= 600 ? 'bold' : 'normal',
+            'font-style': /italic|oblique/.test(computed.fontStyle) ? 'italic' : 'normal',
+            'letter-spacing': computed.letterSpacing === 'normal' ? 'normal'
+                : round2(parseFloat(computed.letterSpacing) * scale) + 'px',
+            'text-transform': computed.textTransform,
+            'text-align': align,
+            'line-height': computed.lineHeight === 'normal' ? 'normal'
+                : round2(parseFloat(computed.lineHeight) / fontPx),
+        };
+    }
+
+    function isHidden(computed) {
+        return computed.display === 'none' || computed.visibility === 'hidden';
+    }
+
+    /* Text nodes worth reading under `root` (not hidden, not inside dropped tags). */
+    function visibleTextNodes(root) {
+        const view = root.ownerDocument.defaultView;
+        const nodes = [];
+        const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const parent = node.parentElement;
+            if (node.textContent.trim() === '' || !parent || parent.closest('script,style,svg,template') ||
+                isHidden(view.getComputedStyle(parent))) {
+                continue;
+            }
+            nodes.push(node);
+        }
+        return nodes;
+    }
+
+    /*
+     * The look of the whole box: for each property, the value most of the text
+     * has (weighted by length). That goes on the text element; only what
+     * differs from it becomes inline formatting (SPEC 3.4).
+     */
+    function boxLook(textNodes, scale) {
+        const view = textNodes[0].ownerDocument.defaultView;
+        const votes = {};
+        LOOK_PROPS.forEach((property) => { votes[property] = new Map(); });
+        textNodes.forEach((node) => {
+            const look = lookOf(view.getComputedStyle(node.parentElement), scale, node.parentElement);
+            const weight = node.textContent.trim().length;
+            LOOK_PROPS.forEach((property) => {
+                const tally = votes[property];
+                tally.set(look[property], (tally.get(look[property]) || 0) + weight);
+            });
+        });
+        const result = {};
+        LOOK_PROPS.forEach((property) => {
+            let best = null;
+            votes[property].forEach((count, value) => {
+                if (best === null || count > votes[property].get(best)) {
+                    best = value;
+                }
+            });
+            result[property] = best;
+        });
+        return result;
+    }
+
+    function writeBoxLook(target, look) {
+        LOOK_PROPS.forEach((property) => {
+            if (look[property]) {
+                target.style.setProperty(property, look[property]);
+            }
+        });
+    }
+
+    /*
+     * A flex or grid text box (often used to centre a title vertically) becomes a
+     * column of paragraphs that keeps the vertical alignment.
+     */
+    function keepVerticalAlignment(computed, target) {
+        const display = computed.display;
+        if (!/flex|grid/.test(display)) {
+            return;
+        }
+        const isColumn = /flex/.test(display) && /column/.test(computed.flexDirection);
+        const vertical = isColumn ? computed.justifyContent : computed.alignItems;
+        const map = { center: 'center', 'flex-end': 'flex-end', end: 'flex-end', 'self-end': 'flex-end' };
+        target.style.setProperty('display', 'flex');
+        target.style.setProperty('flex-direction', 'column');
+        target.style.setProperty('justify-content', map[vertical] || 'flex-start');
+        target.style.setProperty('align-items', 'stretch');
+    }
+
+    /* Blocks with text that sit side by side (flex row, grid, columns, floats): flattening stacks them. */
+    function hasSideBySideText(parent) {
+        const view = parent.ownerDocument.defaultView;
+        const boxes = Array.from(parent.children).filter((child) => {
+            const computed = view.getComputedStyle(child);
+            return !isHidden(computed) && computed.display !== 'inline' && child.textContent.trim() !== '';
+        }).map((child) => child.getBoundingClientRect());
+        for (let i = 0; i < boxes.length; i++) {
+            for (let j = i + 1; j < boxes.length; j++) {
+                const a = boxes[i];
+                const b = boxes[j];
+                const sameRow = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 2;
+                const apart = a.right <= b.left + 1 || b.right <= a.left + 1;
+                if (sameRow && apart) {
+                    return true;
+                }
+            }
+        }
+        return Array.from(parent.children).some(hasSideBySideText);
+    }
+
+    // Formatting the normalizer understands, written where an element differs from its parent.
+    function differences(look, parentLook, isBlockLevel) {
+        const style = {};
+        ['font-family', 'font-size', 'color'].forEach((property) => {
+            if (look[property] !== parentLook[property]) {
+                style[property] = look[property];
+            }
+        });
+        if (look['font-weight'] === 'bold' && parentLook['font-weight'] !== 'bold') {
+            style['font-weight'] = 'bold';
+        }
+        if (look['font-style'] === 'italic' && parentLook['font-style'] !== 'italic') {
+            style['font-style'] = 'italic';
+        }
+        if (isBlockLevel) {
+            ['text-align', 'line-height'].forEach((property) => {
+                if (look[property] !== parentLook[property]) {
+                    style[property] = look[property];
+                }
+            });
+        }
+        return style;
+    }
+
+    // Attributes that carry meaning for the model or for links.
+    const KEPT_ATTRIBUTES = ['href', 'start', 'value', 'data-list', 'data-level', 'data-start'];
+
+    /*
+     * A copy of `element` (from the rendered deck) in `doc`, whose inline styles
+     * say only what differs from `parentLook`. normalize() then flattens it.
+     */
+    function styledCopy(element, doc, parentLook, options, isRoot) {
+        const view = element.ownerDocument.defaultView;
+        const computed = view.getComputedStyle(element);
+        const tag = tagOf(element);
+        const copy = doc.createElement(tag);
+        KEPT_ATTRIBUTES.forEach((name) => {
+            if (element.hasAttribute(name)) {
+                copy.setAttribute(name, element.getAttribute(name));
+            }
+        });
+
+        const look = lookOf(computed, options.scale, element);
+        const isBlockLevel = computed.display !== 'inline';
+        const style = differences(look, parentLook, isBlockLevel);
+        if (!hasOwnText(element)) {
+            // A container (<ul>, a wrapper <div>): its children say their own look, which
+            // avoids a size on the list that every item overrides anyway.
+            delete style['font-family'];
+            delete style['font-size'];
+            delete style.color;
+        }
+        const decoration = computed.textDecorationLine;
+        if (decoration && decoration !== 'none') {
+            style['text-decoration-line'] = decoration;
+        }
+        if (!isBlockLevel && !/rgba\(.*,\s*0\)$|transparent/.test(computed.backgroundColor)) {
+            style['background-color'] = themeColor(computed.backgroundColor, themeValues(element.ownerDocument));
+        }
+        if (/^(ul|ol)$/.test(tag) && computed.listStyleType === 'none' && !hasMarkerContent(element)) {
+            style['list-style-type'] = 'none';
+        }
+        // List items take their spacing from the box's list settings (writeListSettings), not inline.
+        const marginsCount = isBlockLevel && !isRoot && tag !== 'li';
+        ['margin-top', 'margin-bottom'].forEach((property) => {
+            const px = parseFloat(computed.getPropertyValue(property)) * options.scale;
+            if (marginsCount && px > 0) {
+                style[property] = round2(px) + 'px';
+            }
+        });
+        Object.keys(style).forEach((property) => copy.style.setProperty(property, style[property]));
+
+        // What the copy's children inherit in the output: the parent's look plus what we wrote.
+        const inherited = Object.assign({}, parentLook);
+        Object.keys(style).forEach((property) => {
+            if (property in look) {
+                inherited[property] = look[property];
+            }
+        });
+        appendStyledChildren(element, copy, doc, inherited, options);
+        return copy;
+    }
+
+    function hasOwnText(element) {
+        return Array.from(element.childNodes).some((node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '');
+    }
+
+        function hasMarkerContent(list) {
+        const view = list.ownerDocument.defaultView;
+        return Array.from(list.children).some((item) => {
+            const content = view.getComputedStyle(item, '::before').content;
+            return content && content !== 'none' && content !== 'normal';
+        });
+    }
+
+    function appendStyledChildren(element, copy, doc, parentLook, options) {
+        const view = element.ownerDocument.defaultView;
+        element.childNodes.forEach((child) => {
+            if (child.nodeType === Node.TEXT_NODE) {
+                copy.appendChild(doc.createTextNode(transformedText(child, parentLook)));
+            } else if (child.nodeType === Node.ELEMENT_NODE && !DROP_TAGS.has(tagOf(child)) &&
+                       !isHidden(view.getComputedStyle(child))) {
+                copy.appendChild(tagOf(child) === 'br' ? doc.createElement('br') : styledCopy(child, doc, parentLook, options, false));
+            }
+        });
+    }
+
+    /* Upper/lower case applied to only part of the box is written into the text itself. */
+    function transformedText(node, parentLook) {
+        const transform = node.parentElement
+            ? node.parentElement.ownerDocument.defaultView.getComputedStyle(node.parentElement).textTransform : 'none';
+        if (transform === parentLook['box-transform']) {
+            return node.textContent;
+        }
+        if (transform === 'uppercase') {
+            return node.textContent.toUpperCase();
+        }
+        if (transform === 'lowercase') {
+            return node.textContent.toLowerCase();
+        }
+        return node.textContent;
+    }
+
+    function px(computed, property) {
+        return parseFloat(computed.getPropertyValue(property)) || 0;
+    }
+
+    /*
+     * The deck's own list indent and spacing, kept on this text box as
+     * --list-N-indent / --list-N-space-before when they differ from the theme:
+     * the text stays where it was (and still fits its box), while every other
+     * box follows the theme. Per level, the value most items have wins.
+     */
+    function writeListSettings(source, target, settings) {
+        const view = source.ownerDocument.defaultView;
+        const sourceStyle = view.getComputedStyle(source);
+        const rect = source.getBoundingClientRect();
+        const isList = /^(ul|ol)$/.test(tagOf(source));
+        // Where text starts in the box (a list root's own padding is its indent, not box padding).
+        const contentLeft = rect.left + px(sourceStyle, 'border-left-width') +
+            (settings.includeSource && isList ? 0 : px(sourceStyle, 'padding-left'));
+        const votes = {};
+        source.querySelectorAll('li').forEach((item) => {
+            const computed = view.getComputedStyle(item);
+            if (isHidden(computed)) {
+                return;
+            }
+            let level = 0;
+            for (let node = item.parentElement; node && (node === source || source.contains(node)); node = node.parentElement) {
+                if (/^(ul|ol)$/.test(tagOf(node))) {
+                    level += 1;
+                }
+                if (node === source) {
+                    break;
+                }
+            }
+            level = Math.min(Math.max(level, 1), MAX_LEVEL);
+            const indent = round2((item.getBoundingClientRect().left + px(computed, 'padding-left') - contentLeft) * settings.scale) + 'px';
+            // Space between items: an item's top or bottom margin, whichever is larger (they collapse).
+            const space = round2(Math.max(px(computed, 'margin-top'), px(computed, 'margin-bottom')) * settings.scale) + 'px';
+            votes[level] = votes[level] || { indent: new Map(), space: new Map() };
+            votes[level].indent.set(indent, (votes[level].indent.get(indent) || 0) + 1);
+            votes[level].space.set(space, (votes[level].space.get(space) || 0) + 1);
+        });
+        Object.keys(votes).forEach((level) => {
+            const defaults = App.text.LIST_DEFAULTS[level - 1];
+            const indent = mostVoted(votes[level].indent);
+            const space = mostVoted(votes[level].space);
+            if (parseFloat(indent) !== parseFloat(defaults.indent)) {
+                target.style.setProperty('--list-' + level + '-indent', indent);
+            }
+            if (parseFloat(space) !== parseFloat(defaults.spaceBefore) * 4 / 3) {
+                target.style.setProperty('--list-' + level + '-space-before', space);
+            }
+        });
+    }
+
+    function mostVoted(tally) {
+        let best = null;
+        tally.forEach((count, value) => {
+            if (best === null || count > tally.get(best)) {
+                best = value;
+            }
+        });
+        return best;
+    }
+
+    /*
+     * Convert the text of a rendered element into the text model, keeping its look
+     * (SPEC 3.4). `source` lives in a laid-out document (the importer's measuring
+     * iframe), so computed styles are real. `target` is the text element in the
+     * deck being built: it receives the box-wide look and the flat paragraphs.
+     *   options.scale          slide scale (e.g. 2/3 for a 1920x1080 deck)
+     *   options.includeSource  true: `source` is a block (heading, list …) that becomes
+     *                          the text; false: `source` is a text element, its children are the text
+     * Returns { layoutFlattened }: true when blocks of text sat side by side and
+     * are now stacked lines (the import report asks the user to check the box).
+     */
+    App.text.fromRendered = function fromRendered(source, target, options) {
+        const settings = Object.assign({ scale: 1, includeSource: false }, options || {});
+        const view = source.ownerDocument.defaultView;
+        const doc = target.ownerDocument;
+        const sourceStyle = view.getComputedStyle(source);
+        const textNodes = visibleTextNodes(source);
+
+        const box = textNodes.length > 0 ? boxLook(textNodes, settings.scale) : lookOf(sourceStyle, settings.scale, source);
+        writeBoxLook(target, box);
+        keepVerticalAlignment(sourceStyle, target);
+        const layoutFlattened = hasSideBySideText(source);
+
+        const parentLook = Object.assign({}, box, { 'box-transform': box['text-transform'] });
+        const holder = doc.createElement('div');
+        if (settings.includeSource) {
+            holder.appendChild(styledCopy(source, doc, parentLook, settings, true));
+        } else {
+            appendStyledChildren(source, holder, doc, parentLook, settings);
+        }
+        target.replaceChildren(...Array.from(holder.childNodes));
+        App.text.normalize(target);
+        writeListSettings(source, target, settings);
+        return { layoutFlattened: layoutFlattened };
     };
 })();

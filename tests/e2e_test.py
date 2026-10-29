@@ -34,6 +34,7 @@ SAMPLES = ROOT / "samples"
 OUTPUT = ROOT / "tests" / "output"
 
 CONTRACT = SAMPLES / "contract-deck.html"
+CONTRACT_FORMAT1 = SAMPLES / "contract-deck-format1.html"   # the same deck before the text model
 MESSY = SAMPLES / "copilot-messy-deck.html"
 APPENDIX_A = SAMPLES / "copilot-appendix-a-deck.html"
 WIDE = SAMPLES / "deck-1920x1080.html"
@@ -274,6 +275,42 @@ def test_contract_deck_round_trip_is_exact(browser):
     editor.close()
 
 
+def test_format1_deck_text_is_converted(browser):
+    """A deck saved before the text model (deck-format 1) is converted on open, keeping its layout."""
+    editor = Editor(browser)
+    editor.open(CONTRACT_FORMAT1)
+    report = editor.report_dialog_text() or ""
+    check("converted to the editor's text format" in report, "the import report says the text was converted")
+    editor.close_dialog_if_open()
+    check(editor.title().startswith("● "), "the converted deck is marked unsaved")
+    page = editor.page
+    model = page.evaluate("""() => Array.from(App.deck.getDocument().querySelectorAll('.el[data-type="text"]'))
+        .map((el) => Array.from(el.children).every((c) => c.matches('p[data-list][data-level]')))""")
+    check(model and all(model), f"every text element is in the text model: {model}")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('.el ul, .el ol, .el li, .el h1, .el h2').length") == 0,
+          "no lists or headings left inside text elements")
+    check(page.evaluate("App.text.getModel(App.deck.getDocument().querySelector('[data-id=\"e7\"]')).filter(p => p.list === 'bullet').length") == 4,
+          "the 4 bullets of slide 2 are bullet paragraphs")
+
+    saved = editor.save_as_download("format1-converted.html")
+    positions = page.evaluate("""([a, b]) => {
+        const parse = (t) => new DOMParser().parseFromString(t, 'text/html');
+        const box = (d) => Array.from(d.querySelectorAll('.el')).map((el) =>
+            [el.getAttribute('data-id'), el.style.left, el.style.top, el.style.width, el.style.height, el.style.zIndex].join(' '));
+        return [box(parse(a)), box(parse(b))];
+    }""", [CONTRACT_FORMAT1.read_text(encoding="utf-8"), saved.read_text(encoding="utf-8")])
+    check(positions[0] == positions[1], "every element kept its id, position, size and stacking order")
+    check('<meta name="deck-format" content="2">' in saved.read_text(encoding="utf-8"), "saved as format 2")
+
+    # Reopened, it is a format-2 deck: nothing to convert, and saving again changes nothing.
+    editor.open(saved)
+    check(editor.report_dialog_text() is None, "the converted deck reopens without a report")
+    resaved = editor.save_as_download("format1-resaved.html")
+    check(resaved.read_text(encoding="utf-8") == saved.read_text(encoding="utf-8"), "second save is byte-identical")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -302,6 +339,9 @@ def test_saved_deck_presents_on_its_own(browser):
         .filter(s => getComputedStyle(s).display !== 'none').length""")
     check(printed == 5, f"print shows 5 slides, got {printed}")
     page.pdf(path=str(OUTPUT / "contract-saved.pdf"), prefer_css_page_size=True, print_background=True)
+    # Bullets and indents print as on screen (Phase 3 done-when): read what the print layout draws.
+    printed_text = rendered_text(page, 'section.slide[data-slide-id="s2"]')
+    check("•Alfa Alimentos" in printed_text, f"the printed slide has its bullets: {printed_text[:120]!r}")
     check(errors == [], f"player has no errors: {errors}")
     page.context.close()
 
@@ -1117,6 +1157,9 @@ def test_heavy_deck_stays_responsive(browser):
     started = time.time()
     editor.open(HEAVY, timeout=120000)
     seconds = time.time() - started
+    # The generated deck is format 1 on purpose: opening it also converts the text of 50 slides.
+    check("converted to the editor's text format" in (editor.report_dialog_text() or ""), "text conversion reported")
+    editor.close_dialog_if_open()
     check(editor.slide_count() == 50, "50 slides")
     drawn = editor.page.evaluate("document.querySelectorAll('.thumb[data-drawn]').length")
     check(drawn < 50, f"thumbnails are drawn lazily (drawn {drawn} of 50)")
@@ -1194,6 +1237,7 @@ TESTS = [
     test_browser_banner_only_outside_chromium,
     test_new_blank_deck,
     test_contract_deck_round_trip_is_exact,
+    test_format1_deck_text_is_converted,
     test_saved_deck_presents_on_its_own,
     test_messy_copilot_deck,
     test_appendix_a_deck_gets_charts_and_fixes,

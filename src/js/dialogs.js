@@ -106,6 +106,11 @@
         } else {
             lines.push(report.elementsConverted + ' blocks were converted into movable elements with exact positions.');
         }
+        if (report.textConverted) {
+            lines.push('Text in ' + report.textConverted + (report.textConverted === 1 ? ' box was' : ' boxes were') +
+                ' converted to the editor\'s text format: every line is a paragraph with its bullet or number ' +
+                'and its level, and the look was kept.');
+        }
         if (report.scaledFrom) {
             lines.push('Slides were scaled from ' + report.scaledFrom + ' to 1280×720.');
         }

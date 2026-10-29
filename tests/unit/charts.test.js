@@ -53,8 +53,13 @@ test('charts: renderMissing adds an SVG only where it is missing', () => {
 
 test('template: the blank deck follows the contract', () => {
     const doc = parseDoc(App.template.newDeckHtml());
-    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '1');
+    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '2');
     assertEqual(doc.documentElement.getAttribute('lang'), 'pt-BR');
+    doc.querySelectorAll('.el[data-type="text"]').forEach((el) => {
+        assert(el.children.length > 0 && Array.from(el.children).every((c) => c.matches('p[data-list][data-level]')),
+            'text uses the flat paragraph model: ' + el.innerHTML);
+    });
+    assert(doc.querySelector('.el p[data-list="bullet"]'), 'the content slide has bullets');
     const slides = doc.querySelectorAll('section.slide');
     assert(slides.length >= 1, 'has slides');
     slides.forEach((s) => assert(s.getAttribute('data-slide-id'), 'slide id'));
@@ -67,4 +72,6 @@ test('template: the blank deck imports as a contract deck with no fixes', async 
     const result = await App.importer.importDeck(App.template.newDeckHtml());
     assert(result.report.isContract, 'contract');
     assertEqual(result.report.fixes, []);
+    assertEqual(result.report.textConverted, 0, 'already in the text model');
+    assert(!App.importer.reportHasChanges(result.report), 'a new deck opens clean');
 });

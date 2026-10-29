@@ -97,11 +97,11 @@ Nested bullets are the top priority of this phase.
 *Interface and model*
 - [ ] `text.js` interface (3.7): `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`; no other module touches text internals
 - [x] Text model: one `<p data-list="bullet|number|none" data-level="1..5">` per line, optional `data-start`; no `<ul>/<ol>/<li>` or headings inside text elements
-- [ ] Bullets and numbers drawn with CSS (`::before` + counters) from `<style data-deck-text>`, with a hanging indent; numbering per level, reset by a higher level (1, 2, a, b, 3)
-- [ ] Per-level list theme variables `--list-N-bullet / -number / -bullet-color / -bullet-size / -indent / -space-before` (defaults • – ▪ · ·, 1. a. i.; bullet color/size unset = follow the text)
+- [x] Bullets and numbers drawn with CSS (`::before` + counters) from `<style data-deck-text>`, with a hanging indent; numbering per level, reset by a higher level (1, 2, a, b, 3)
+- [x] Per-level list theme variables `--list-N-bullet / -number / -bullet-color / -bullet-size / -indent / -space-before` (defaults • – ▪ · ·, 1. a. i.; bullet color/size unset = follow the text)
 - [x] `data-start` mirrored to an inline `counter-set` by the normalizer; each `<p>` gets `--marker-size` / `--marker-color` from its first character (the bullet follows the text, the rest of the line is unchanged); an empty line keeps a real `font-size` / `color`
-- [ ] `deck-format` bumped to 2; format-1 decks migrated on open (lists and headings converted, list variables and stylesheet added), noted in the import report
-- [ ] Import: nested `<ul>/<ol>/<li>` → flat paragraphs with levels; headings → `<p>`, their look kept (box-wide look on the `.el`, differences as inline formatting); boxes with flex/grid/column layout flattened and listed in the import report
+- [x] `deck-format` bumped to 2; format-1 decks migrated on open (lists and headings converted, list variables and stylesheet added), noted in the import report
+- [x] Import: nested `<ul>/<ol>/<li>` → flat paragraphs with levels; headings → `<p>`, their look kept (box-wide look on the `.el`, differences as inline formatting); boxes with flex/grid/column layout flattened and listed in the import report *(also: theme fonts/colors written as `var(--…)`, the deck's own list indent/spacing kept per box, icons inside headings become their own elements)*
 - [ ] Import/paste: Word/Outlook `mso-list` levelN paragraphs → flat paragraphs (glyph spans removed); PowerPoint text keeps bullets and levels
 - [ ] Copy out of a text element also puts nested `<ul>/<ol>` HTML on the clipboard (bullets survive in Outlook/Word)
 
@@ -152,6 +152,8 @@ Nested bullets are the top priority of this phase.
 - [ ] Automated key-sequence table for the bullet behavior (start paragraphs + keys → expected paragraphs, types, levels)
 
 - [ ] **Done when:** a 3-level bulleted slide imported from a Copilot deck and a 3-level list pasted from Word both become editable flat paragraphs; every behavior in the bullet table works; a slide title and a bulleted paragraph can be fully reformatted without touching code; the saved deck prints to PDF (Ctrl+P on the saved file) with bullets, numbers and indents as on screen.
+  - [ ] In Edge: open a deck you saved with the Phase 1–2 editor (or `samples/contract-deck-format1.html`): the import report says its text was converted; slides look as before (only the bullet dots may look slightly different); Save, close, reopen: no report
+  - [ ] Open a real Copilot deck from `private/`: titles and bullets look as before; any box listed under "Warnings" as side by side is worth a look
 
 ## Phase 4: Tables
 

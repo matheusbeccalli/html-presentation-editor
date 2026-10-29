@@ -134,7 +134,7 @@ test('text: messy execCommand output is cleaned', () => {
     assertEqual(normalized(messy),
         '<p data-list="none" data-level="1">Receita <b>alta</b><i> e <u>crescente</u></i></p>' +
         '<p data-list="none" data-level="1"><br></p>' +
-        '<p data-list="none" data-level="1" style="--marker-size: 24pt; --marker-color: rgb(204, 9, 47);">' +
+        '<p data-list="none" data-level="1" style="font-size: 24pt; --marker-size: 24pt; --marker-color: rgb(204, 9, 47);">' +
         '<span style="font-size: 24pt; color: rgb(204, 9, 47);">Título</span></p>');
 });
 
@@ -190,7 +190,7 @@ test('text: paragraph styles are limited to alignment, line height and spacing',
 
 test('text: the look of a foreign block is kept as inline formatting', () => {
     assertEqual(normalized('<h3 style="font-weight: bold; color: rgb(31, 42, 68); font-size: 20pt; text-align: right">Título</h3>'),
-        '<p data-list="none" data-level="1" style="text-align: right; --marker-size: 20pt; --marker-color: rgb(31, 42, 68);">' +
+        '<p data-list="none" data-level="1" style="text-align: right; font-size: 20pt; --marker-size: 20pt; --marker-color: rgb(31, 42, 68);">' +
         '<span style="font-size: 20pt; color: rgb(31, 42, 68);"><b>Título</b></span></p>');
 });
 
@@ -222,6 +222,11 @@ test('text: data-start is mirrored into counter-set (with deeper levels reset)',
         '<p data-list="number" data-level="2" data-start="4" style="counter-set: list-2 4 list-3 0 list-4 0 list-5 0;">x</p>');
 });
 
+test('text: a line all in one size also gets that size itself (its height matches its text)', () => {
+    assertEqual(normalized('<p data-list="bullet" data-level="1"><span style="font-size: 9pt">a</span> <span style="font-size: 9pt">b</span></p>'),
+        '<p data-list="bullet" data-level="1" style="font-size: 9pt; --marker-size: 9pt;"><span style="font-size: 9pt;">a b</span></p>');
+});
+
 test('text: each line passes the size and color of its first character to its bullet only', () => {
     // --marker-* are read by the bullet/number alone; "resto" keeps the box's default look.
     assertEqual(normalized('<p data-list="bullet" data-level="1" style="--marker-size: 10pt; --marker-color: blue">' +
@@ -234,7 +239,7 @@ test('text: each line passes the size and color of its first character to its bu
 
 test('text: text typed into an empty line that had a size and color keeps them', () => {
     assertEqual(normalized('<p data-list="bullet" data-level="1" style="font-size: 28pt; color: red">novo</p>'),
-        '<p data-list="bullet" data-level="1" style="--marker-size: 28pt; --marker-color: red;">' +
+        '<p data-list="bullet" data-level="1" style="font-size: 28pt; --marker-size: 28pt; --marker-color: red;">' +
         '<span style="font-size: 28pt; color: red;">novo</span></p>');
 });
 
@@ -256,6 +261,8 @@ test('text: normalizing twice gives the same result as once, for every fixture',
         '<p><span style="color: red"></span><span style="color: red">a</span><span style="color: red">b</span></p>',
         '<p data-list="number" data-level="2" data-start="4"><span style="font-size: 28pt; color: red">x</span> y</p>',
         'solto <i>texto</i><p>e</p> mais',
+        '<p data-list="bullet" data-level="1"><span style="font-size: 9pt">a</span> <span style="font-size: 9pt">b</span></p>',
+        '<p data-list="bullet" data-level="1" style="font-size: 28pt; color: red">novo <b>texto</b></p>',
     ];
     fixtures.forEach((fixture, index) => {
         const element = textElement(fixture);
@@ -339,4 +346,190 @@ test('text: the bullet takes the size and color of the first character, the rest
     assertEqual(styles[0].beforeColor, 'rgb(204, 9, 47)');
     assertEqual(styles[0].fontSize, '24px', 'the paragraph keeps the box size');
     assertEqual(styles[0].color, 'rgb(0, 0, 0)', 'the paragraph keeps the box color');
+});
+
+// ---------------------------------------------------------------
+// Converting rendered text (import and format-1 migration, SPEC 3.4)
+// ---------------------------------------------------------------
+
+// Renders `css` + a 1280x720 slide with one text element holding `inner`; returns the live frame.
+async function renderedBox(css, inner, elStyle) {
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:fixed; left:-5000px; top:0; width:1280px; height:720px';
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    doc.open();
+    doc.write('<!DOCTYPE html><html><head><style>body{margin:0;font-family:Arial,sans-serif}' +
+        '.slide{position:relative;width:1280px;height:720px}.el{position:absolute;box-sizing:border-box}' + css +
+        '</style></head><body><section class="slide"><div class="el" data-type="text" data-id="e1" ' +
+        'style="left:64px; top:48px; width:900px; height:400px;' + (elStyle || '') + '">' + inner +
+        '</div></section></body></html>');
+    doc.close();
+    return frame;
+}
+
+// Converts the frame's text element into a fresh copy of it (as the importer does) and returns that copy.
+function convertBox(frame, options) {
+    const source = frame.contentDocument.querySelector('.el');
+    const out = parseDoc('<!DOCTYPE html><html><head></head><body></body></html>');
+    const target = out.importNode(source, false);
+    out.body.appendChild(target);
+    const result = App.text.fromRendered(source, target, Object.assign({ scale: 1 }, options || {}));
+    return { target: target, result: result };
+}
+
+// What every piece of text looks like on screen: [text, size, color, weight, style, transform].
+function runLooks(element) {
+    const view = element.ownerDocument.defaultView;
+    const looks = [];
+    const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.textContent.trim() === '') {
+            continue;
+        }
+        const c = view.getComputedStyle(node.parentElement);
+        const weight = parseInt(c.fontWeight, 10) >= 600 ? 'bold' : 'normal';
+        const text = c.textTransform === 'uppercase' ? node.textContent.trim().toUpperCase() : node.textContent.trim();
+        const range = element.ownerDocument.createRange();
+        range.selectNodeContents(node);
+        const rect = range.getBoundingClientRect();
+        // Where the text sits, to the pixel (the bullet glyph itself may move; the text must not).
+        looks.push([text, c.fontSize, c.color, weight, c.fontStyle, c.fontFamily, Math.round(rect.left), Math.round(rect.top)]);
+    }
+    return looks;
+}
+
+// Renders the converted element again, with the same deck CSS plus the deck-text stylesheet.
+async function rerendered(css, target) {
+    const frame = await renderedBox(css + App.text.deckTextCss(), '');
+    const doc = frame.contentDocument;
+    const el = doc.querySelector('.el');
+    el.replaceWith(doc.importNode(target, true));
+    return frame;
+}
+
+test('text import: the look shared by the whole box goes on the text element itself', async () => {
+    const css = '.el h2{font-family:Georgia,serif;font-size:32px;font-weight:700;color:rgb(31, 42, 68);' +
+        'letter-spacing:1px;text-transform:uppercase;text-align:center;line-height:1.2;margin:0}';
+    const frame = await renderedBox(css, '<h2>Sumário executivo</h2>');
+    const { target } = convertBox(frame);
+    frame.remove();
+    const style = target.style;
+    assertEqual(style.fontFamily, 'Georgia, serif');
+    assertEqual(style.fontSize, '24pt');
+    assertEqual(style.fontWeight, 'bold');
+    assertEqual(style.color, 'rgb(31, 42, 68)');
+    assertEqual(style.letterSpacing, '1px');
+    assertEqual(style.textTransform, 'uppercase');
+    assertEqual(style.textAlign, 'center');
+    assertEqual(style.lineHeight, '1.2');
+    assertEqual(style.left, '64px', 'position untouched');
+    assertEqual(target.innerHTML, '<p data-list="none" data-level="1">Sumário executivo</p>');
+});
+
+test('text import: what differs inside the box becomes inline formatting', async () => {
+    const css = '.el p{margin:0;font-size:22px;color:rgb(34, 34, 34)}.el strong{color:rgb(204, 9, 47)}';
+    const frame = await renderedBox(css, '<p>Receita de <strong>R$ 480 mi</strong> em 2025</p>');
+    const { target } = convertBox(frame);
+    frame.remove();
+    assertEqual(target.style.fontSize, '16.5pt');
+    assertEqual(target.style.color, 'rgb(34, 34, 34)');
+    assertEqual(target.innerHTML, '<p data-list="none" data-level="1">Receita de ' +
+        '<span style="color: rgb(204, 9, 47);"><b>R$ 480 mi</b></span> em 2025</p>');
+});
+
+test('text import: the box look is the one most of the text has', async () => {
+    const css = '.el h1{margin:0;font-size:40px;font-weight:700}.el p{margin:0;font-size:16px}';
+    const frame = await renderedBox(css, '<h1>Atlas</h1><p>Apresentação ao Comitê de Investimentos</p>');
+    const { target } = convertBox(frame);
+    frame.remove();
+    assertEqual(target.style.fontSize, '12pt');
+    assertEqual(target.style.fontWeight, 'normal');
+    assertEqual(target.innerHTML,
+        '<p data-list="none" data-level="1" style="font-size: 30pt; --marker-size: 30pt;"><span style="font-size: 30pt;"><b>Atlas</b></span></p>' +
+        '<p data-list="none" data-level="1">Apresentação ao Comitê de Investimentos</p>');
+});
+
+test('text import: nested lists keep their levels; custom ::before bullets stay bullets', async () => {
+    const css = '.el ul{margin:0}.el ul.check{list-style:none}.el ul.check li::before{content:"✓ "}' +
+        '.el ul.plain{list-style:none}';
+    const frame = await renderedBox(css, '<ul><li>Um<ul><li>Dois</li></ul></li></ul>' +
+        '<ul class="check"><li>Feito</li></ul><ul class="plain"><li>Sem marcador</li></ul>');
+    const { target } = convertBox(frame);
+    frame.remove();
+    assertEqual(App.text.getModel(target).map((p) => [p.list, p.level, p.text]),
+        [['bullet', 1, 'Um'], ['bullet', 2, 'Dois'], ['bullet', 1, 'Feito'], ['none', 1, 'Sem marcador']]);
+});
+
+test('text import: per-word upper case is written out; sizes are scaled with the slide', async () => {
+    const css = '.el p{margin:0;font-size:48px;letter-spacing:3px}.el .tag{text-transform:uppercase}';
+    const frame = await renderedBox(css, '<p>Projeto <span class="tag">atlas</span> em revisão</p>');
+    const { target } = convertBox(frame, { scale: 2 / 3 });
+    frame.remove();
+    assertEqual(target.style.fontSize, '24pt');
+    assertEqual(target.style.letterSpacing, '2px');
+    assertEqual(App.text.getModel(target)[0].text, 'Projeto ATLAS em revisão');
+});
+
+test('text import: side-by-side layouts are flattened and reported; a flex box keeps its vertical centring', async () => {
+    const css = '.el .row{display:flex;gap:20px}.el p{margin:0}';
+    const frame = await renderedBox(css, '<div class="row"><p>Esquerda</p><p>Direita</p></div>');
+    const { target, result } = convertBox(frame);
+    frame.remove();
+    assert(result.layoutFlattened, 'reported');
+    assertEqual(App.text.getModel(target).map((p) => p.text), ['Esquerda', 'Direita']);
+
+    const centred = await renderedBox('.el p{margin:0}', '<p>Título</p>', ' display:flex; align-items:center;');
+    const converted = convertBox(centred);
+    centred.remove();
+    assert(!converted.result.layoutFlattened, 'a centred title is not a layout problem');
+    assertEqual(converted.target.style.display, 'flex');
+    assertEqual(converted.target.style.flexDirection, 'column');
+    assertEqual(converted.target.style.justifyContent, 'center');
+});
+
+test('text import: the converted text looks the same, even with deck CSS that targets <p>', async () => {
+    const css = '.el p{margin:0 0 6px;font-size:18px;color:rgb(102, 102, 102)}' +
+        '.el h2{margin:0 0 8px;font-size:30px;font-weight:700;color:rgb(31, 42, 68)}' +
+        '.el li{font-size:20px}.el strong{color:rgb(204, 9, 47)}.el em{font-style:italic}';
+    const inner = '<h2>Sumário</h2><p>Visão <em>geral</em> do <strong>Projeto Atlas</strong></p>' +
+        '<ul><li>Receita de R$ 480 mi<ul><li>Crescimento de <strong>12%</strong></li></ul></li></ul>';
+    const before = await renderedBox(css, inner);
+    const expected = runLooks(before.contentDocument.querySelector('.el'));
+    const { target } = convertBox(before);
+    before.remove();
+    const after = await rerendered(css, target);
+    const actual = runLooks(after.contentDocument.querySelector('.el'));
+    after.remove();
+    assertEqual(actual, expected);
+});
+
+test('text import: theme fonts and colours are written as theme variables (rebranding keeps working)', async () => {
+    const css = ':root{--font-heading:Georgia, serif;--font-body:Georgia, serif;--color-accent:#1F2A44;' +
+        '--color-primary:#CC092F;--color-bg:#fff}' +
+        '.el h2{margin:0;font-family:var(--font-heading);color:var(--color-accent)}' +
+        '.el p{margin:0;font-family:var(--font-body);color:rgb(255, 255, 255)}.el b{color:var(--color-primary)}';
+    const title = await renderedBox(css, '<h2>Sumário</h2>');
+    const titleBox = convertBox(title).target;
+    title.remove();
+    assertEqual(titleBox.style.fontFamily, 'var(--font-heading)');
+    assertEqual(titleBox.style.color, 'var(--color-accent)');
+
+    const body = await renderedBox(css, '<p>Texto <b>forte</b></p>');
+    const bodyBox = convertBox(body).target;
+    body.remove();
+    assertEqual(bodyBox.style.fontFamily, 'var(--font-body)', 'same font as the heading, but this is body text');
+    assertEqual(bodyBox.style.color, 'rgb(255, 255, 255)', 'white text is not the background colour');
+    assertIncludes(bodyBox.innerHTML, '<span style="color: var(--color-primary);"><b>forte</b></span>');
+});
+
+test('text import: a deck\'s own list indent and spacing stay on that text box', async () => {
+    const css = '.el ul{margin:0;padding-left:28px}.el ul ul{padding-left:20px}.el li{margin:0}';
+    const frame = await renderedBox(css, '<ul><li>Um<ul><li>Dois</li></ul></li><li>Três</li></ul>');
+    const { target } = convertBox(frame);
+    frame.remove();
+    assertEqual(target.style.getPropertyValue('--list-1-indent'), '28px');
+    assertEqual(target.style.getPropertyValue('--list-2-indent'), '48px');
+    assertEqual(target.style.getPropertyValue('--list-1-space-before'), '0px');
+    assertEqual(target.style.getPropertyValue('--list-3-indent'), '', 'levels the box does not use follow the theme');
 });

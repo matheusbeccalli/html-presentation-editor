@@ -23,7 +23,7 @@
 
     const EDITOR_ATTRIBUTE_PREFIX = 'data-editor-';
     const EDITOR_CLASS_PREFIX = 'editor-';
-    const EDITOR_ONLY_ATTRIBUTES = ['contenteditable'];
+    const EDITOR_ONLY_ATTRIBUTES = ['contenteditable', 'spellcheck'];   // spellcheck: set while editing text
 
     function stripEditorMarks(root) {
         root.querySelectorAll('[data-editor-only]').forEach((node) => node.remove());
@@ -79,6 +79,8 @@
         const root = doc.documentElement.cloneNode(true);
         stripEditorMarks(root);
         root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
+        // Text is saved in the text model, even if the user is still typing (SPEC: normalize before save).
+        root.querySelectorAll('.el[data-type="text"]').forEach((element) => App.text.normalize(element));
         return root;
     };
 

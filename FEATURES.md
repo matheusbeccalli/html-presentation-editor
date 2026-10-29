@@ -106,15 +106,15 @@ Nested bullets are the top priority of this phase.
 - [ ] Copy out of a text element also puts nested `<ul>/<ol>` HTML on the clipboard (bullets survive in Outlook/Word)
 
 *Editing*
-- [ ] Double-click a text element to edit (`contenteditable`)
-- [ ] Insert text box, PowerPoint style: click the button, then click on the slide (grows as you type) or drag to set the width
+- [x] Double-click a text element to edit (`contenteditable`) *(also Enter / F2 on a selected text box; Esc or a click outside stops)*
+- [x] Insert text box, PowerPoint style: click the button, then click on the slide (grows as you type) or drag to set the width *(click = 360 px wide, grows in height; an empty new box is removed)*
 - [ ] Toolbar: bold, italic, underline, strikethrough, superscript, subscript
 - [ ] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting; theme fonts and theme colors stored as `var(--…)`
 - [ ] Toolbar: align left / center / right / justify
 - [ ] Line spacing and paragraph spacing
 - [ ] Format painter (copy the style of one text, apply to another)
 - [ ] Autofit (`data-autofit="shrink|resize|off"`): shrink text to fit, or grow the box; new boxes `resize`, imported boxes `off`
-- [ ] Spell check in Portuguese (`spellcheck="true"`, `lang="pt-BR"`)
+- [x] Spell check in Portuguese (`spellcheck="true"`, `lang="pt-BR"`)
 - [ ] Find & replace across all slides
 
 *Bullet behavior (key table in SPEC Phase 3)*
@@ -143,9 +143,9 @@ Nested bullets are the top priority of this phase.
 - [ ] Works for paste from Word, Outlook, PowerPoint, Copilot's chat window and web pages (fixtures captured with `tests/clipboard-capture.html`)
 
 *Undo*
-- [ ] Browser text undo intercepted (`beforeinput` historyUndo / historyRedo) and routed to `history.js`: one undo stack
+- [x] Browser text undo intercepted (`beforeinput` historyUndo / historyRedo) and routed to `history.js`: one undo stack
 - [ ] Typing grouped into steps (1-second pause or new paragraph); every formatting/list command is its own step
-- [ ] Undo/redo while editing restores the cursor position
+- [x] Undo/redo while editing restores the cursor position
 
 *Tests*
 - [ ] Unit fixtures (fake text): messy execCommand output, Word paste with `mso-list` levels, Copilot 3-level nested `<ul>`, mixed numbered/bulleted lists
@@ -154,6 +154,10 @@ Nested bullets are the top priority of this phase.
 - [ ] **Done when:** a 3-level bulleted slide imported from a Copilot deck and a 3-level list pasted from Word both become editable flat paragraphs; every behavior in the bullet table works; a slide title and a bulleted paragraph can be fully reformatted without touching code; the saved deck prints to PDF (Ctrl+P on the saved file) with bullets, numbers and indents as on screen.
   - [ ] In Edge: open a deck you saved with the Phase 1–2 editor (or `samples/contract-deck-format1.html`): the import report says its text was converted; slides look as before (only the bullet dots may look slightly different); Save, close, reopen: no report
   - [ ] Open a real Copilot deck from `private/`: titles and bullets look as before; any box listed under "Warnings" as side by side is worth a look
+  - [ ] Double-click a bullet, type, press Esc: the text is there and the box stays selected; Ctrl+Z removes the typing in one step, Ctrl+Y brings it back
+  - [ ] While typing: arrow keys move the cursor (not the box); type, wait 2 s, type again, Ctrl+Z: only the second part goes and the cursor goes back to where it was
+  - [ ] Insert > Text box, click on the slide, type two lines (Shift+Enter): the box grows; Insert > Text box, drag, Esc without typing: no box is left
+  - [ ] Type a misspelled Portuguese word (e.g. "recieta"): it gets a red underline (Edge needs Portuguese under Settings > Languages > Spell check)
 
 ## Phase 4: Tables
 

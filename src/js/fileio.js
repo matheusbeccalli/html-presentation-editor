@@ -407,6 +407,7 @@
             return App.fileio.saveAs();
         }
         return exclusive(async () => {
+            App.text.commitTyping();   // typing so far becomes an undo step before the save
             const stateId = App.history.stateId();
             const used = await writing(() =>
                 App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile));
@@ -436,6 +437,7 @@
             if (!force && await App.fileio.changedOnDisk(handle, App.state.diskLastModified)) {
                 return 'conflict';
             }
+            App.text.commitTyping();   // typing so far becomes an undo step before the save
             const stateId = App.history.stateId();
             await writing(() => App.fileio.writeToHandle(handle, App.fileio.currentHtml()));
             await recordDiskVersion(handle);
@@ -491,6 +493,7 @@
             return Promise.resolve();
         }
         return exclusive(async () => {
+            App.text.commitTyping();   // typing so far becomes an undo step before the save
             const stateId = App.history.stateId();
             const html = App.fileio.currentHtml();
             const suggestedName = App.state.fileName || NEW_DECK_NAME;

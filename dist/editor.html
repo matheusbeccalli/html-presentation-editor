@@ -319,6 +319,12 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     user-select: none;
     touch-action: none;
 }
+/* Editing text (text.js): the mouse goes through to the text in the deck; the box is dashed, no handles. */
+#overlay.editing, #overlay.editing * { pointer-events: none; }
+#overlay.editing .selection-box { outline-style: dashed; }
+#overlay.editing .selection-handle { display: none; }
+/* Insert > Text box: the next click or drag on the slide places the box. */
+#overlay.inserting { cursor: crosshair; }
 .selection-box {
     position: absolute;
     outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
@@ -759,6 +765,7 @@ App.start = function start() {
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
+    App.text.init();
     App.fileio.init();
     App.autosave.init();
     App.drafts.init();
@@ -1097,6 +1104,11 @@ App.createEventBus = function createEventBus() {
             if (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping) {
                 return false;
             }
+            // Enter and Space press a focused button or menu item; they are not shortcuts there.
+            if ((entry.combo === 'Enter' || entry.combo === 'Space') && event.target && event.target.closest &&
+                event.target.closest('button, a[href], summary, [role="menuitem"], [role="tab"]')) {
+                return false;
+            }
             // An open dialog owns the keyboard (Escape closes it, Enter presses its button).
             if (event.target && event.target.closest && event.target.closest('dialog')) {
                 return false;
@@ -1135,6 +1147,8 @@ App.createEventBus = function createEventBus() {
         ['Home', 'firstSlide'],
         ['End', 'lastSlide'],
         ['Escape', 'deselect'],
+        ['Enter', 'editText'],
+        ['F2', 'editText'],
         ['ArrowLeft', 'nudgeLeft'],
         ['ArrowRight', 'nudgeRight'],
         ['ArrowUp', 'nudgeUp'],
@@ -1210,6 +1224,14 @@ App.createEventBus = function createEventBus() {
  *   'deck'             -> snapshot of the whole <head> and <body> (theme,
  *                         adding/removing slides, removing blocked fonts ...)
  *
+ * Meta (Phase 3): a step may carry `meta`, any object the caller wants back
+ * when the step is undone or redone (text editing keeps the cursor position
+ * there). The 'undo' / 'redo' events include it.
+ *
+ * A pending step (begin() without commit(), e.g. typing in a text box) is
+ * committed automatically before any other change, undo or redo, so steps
+ * always stay in the order they happened.
+ *
  * Dirty tracking: every state gets a number. The state saved to disk is
  * remembered; the deck is "dirty" (has unsaved changes) when the current
  * state number differs from the saved one. So undoing back to the saved
@@ -1269,11 +1291,11 @@ App.createHistory = function createHistory(options) {
 
     // ---- Recording ----
 
-    function push(label, scope, before, mergeKey) {
+    function push(label, scope, before, mergeKey, meta) {
         const entry = {
             label: label, scope: scope, before: before, after: null,
             stateBefore: currentState, stateAfter: nextStateNumber,
-            mergeKey: mergeKey || null, time: now(),
+            mergeKey: mergeKey || null, time: now(), meta: meta || null,
         };
         nextStateNumber += 1;
         currentState = entry.stateAfter;
@@ -1300,11 +1322,13 @@ App.createHistory = function createHistory(options) {
     /*
      * Run `fn`, which changes the deck, as one undoable step.
      * If `fn` throws, the deck is put back as it was and nothing is recorded.
-     * options.mergeKey: see "Merging" at the top of this file.
+     * options.mergeKey: see "Merging" at the top of this file; options.meta: see "Meta".
      */
     function change(label, scope, fn, changeOptions) {
         validateScope(scope);
+        commit();   // a pending step (typing) happened first
         const mergeKey = changeOptions && changeOptions.mergeKey;
+        const meta = changeOptions && changeOptions.meta;
         const before = takeSnapshot(scope);
         try {
             fn();
@@ -1318,12 +1342,21 @@ App.createHistory = function createHistory(options) {
             onChange({ action: 'change', label: label, scope: scope, merged: true });
             return;
         }
-        push(label, scope, before, mergeKey);
+        push(label, scope, before, mergeKey, meta);
     }
 
-    function begin(label, scope) {
+    /*
+     * Start a step whose changes happen later (a drag, typing). options.meta is
+     * stored with the step; options.onCommit() runs just before it is recorded
+     * (text editing notes where the cursor ended up).
+     */
+    function begin(label, scope, beginOptions) {
         validateScope(scope);
-        pending = { label: label, scope: scope, before: takeSnapshot(scope) };
+        commit();
+        pending = {
+            label: label, scope: scope, before: takeSnapshot(scope),
+            meta: beginOptions && beginOptions.meta, onCommit: beginOptions && beginOptions.onCommit,
+        };
     }
 
     function commit() {
@@ -1332,7 +1365,10 @@ App.createHistory = function createHistory(options) {
         }
         const p = pending;
         pending = null;
-        push(p.label, p.scope, p.before);
+        if (p.onCommit) {
+            p.onCommit();
+        }
+        push(p.label, p.scope, p.before, null, p.meta);
     }
 
     function cancel() {
@@ -1346,6 +1382,7 @@ App.createHistory = function createHistory(options) {
     // ---- Undo / redo ----
 
     function undo() {
+        commit();
         const entry = undoStack.pop();
         if (!entry) {
             return false;
@@ -1354,11 +1391,12 @@ App.createHistory = function createHistory(options) {
         restoreSnapshot(entry.scope, entry.before);
         currentState = entry.stateBefore;
         redoStack.push(entry);
-        onChange({ action: 'undo', label: entry.label, scope: entry.scope });
+        onChange({ action: 'undo', label: entry.label, scope: entry.scope, meta: entry.meta });
         return true;
     }
 
     function redo() {
+        commit();
         const entry = redoStack.pop();
         if (!entry) {
             return false;
@@ -1366,7 +1404,7 @@ App.createHistory = function createHistory(options) {
         restoreSnapshot(entry.scope, entry.after);
         currentState = entry.stateAfter;
         undoStack.push(entry);
-        onChange({ action: 'redo', label: entry.label, scope: entry.scope });
+        onChange({ action: 'redo', label: entry.label, scope: entry.scope, meta: entry.meta });
         return true;
     }
 
@@ -1592,11 +1630,13 @@ App.template.newDeckHtml = function newDeckHtml() {
  * the same for the whole box goes on the text element, the rest becomes inline
  * formatting; theme fonts/colours become var(--…).
  *
- * Done so far: normalize, getModel, the stylesheet, fromRendered. The editing
- * half of the interface (enterEdit, exitEdit, applyStyle, setLevel,
- * toggleList) arrives with the editing steps of Phase 3.
+ * Editing: enterEdit / exitEdit make a text element contenteditable inside
+ * the deck iframe; typing becomes history steps that remember the cursor
+ * (getCaret / setCaret as line + character). Still to come in Phase 3:
+ * applyStyle, setLevel, toggleList.
  *
- * Talks to: normalize.js and importer.js (import); the editing code will call it.
+ * Talks to: normalize.js and importer.js (import), history.js (typing steps),
+ *           selection.js (selected box), commands.js (undo/redo while typing).
  */
 
 (function () {
@@ -2799,6 +2839,437 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.text.normalize(target);
         writeListSettings(source, target, settings);
         return { layoutFlattened: layoutFlattened };
+    };
+
+    // ---------------------------------------------------------------
+    // The cursor as data: { anchor: { p, o }, focus: { p, o } }
+    // ---------------------------------------------------------------
+    //
+    // p = which line (child of the text element), o = how many characters into
+    // it, a <br> counting as one. Unlike DOM nodes, this survives the slide being
+    // rebuilt from a snapshot (undo), so undo can put the cursor back.
+
+    function lineOf(element, node) {
+        let current = node;
+        while (current && current.parentNode !== element) {
+            current = current.parentNode;
+        }
+        return current;
+    }
+
+    function positionOf(element, container, offset) {
+        const lines = Array.from(element.children);
+        if (container === element) {
+            if (offset >= lines.length) {
+                const last = lines.length - 1;
+                return { p: Math.max(last, 0), o: last >= 0 ? lineLength(lines[last]) : 0 };
+            }
+            return { p: offset, o: 0 };
+        }
+        const line = lineOf(element, container);
+        const index = lines.indexOf(line);
+        if (index === -1) {
+            return { p: 0, o: 0 };
+        }
+        const range = element.ownerDocument.createRange();
+        range.setStart(line, 0);
+        range.setEnd(container, offset);
+        let o = 0;
+        for (const item of inlineItems(line)) {
+            if (item === container) {
+                o += offset;   // the cursor is inside this text
+                break;
+            }
+            const isText = item.nodeType === Node.TEXT_NODE;
+            // Is the end of this item at or before the cursor?
+            const end = isText ? [item, item.length] : [item.parentNode, Array.prototype.indexOf.call(item.parentNode.childNodes, item) + 1];
+            if (range.comparePoint(end[0], end[1]) > 0) {
+                break;
+            }
+            o += isText ? item.length : 1;
+        }
+        return { p: index, o: o };
+    }
+
+    function lineLength(line) {
+        return inlineItems(line).reduce((sum, item) => sum + (item.nodeType === Node.TEXT_NODE ? item.length : 1), 0);
+    }
+
+    /* The DOM point { node, offset } for a position; out of range means the end of the text. */
+    function pointOf(element, position) {
+        const lines = Array.from(element.children);
+        if (lines.length === 0) {
+            return { node: element, offset: 0 };
+        }
+        const line = lines[Math.min(position.p, lines.length - 1)];
+        let remaining = position.p >= lines.length ? Infinity : position.o;
+        const items = inlineItems(line);
+        for (const item of items) {
+            if (item.nodeType === Node.TEXT_NODE) {
+                if (remaining <= item.length) {
+                    return { node: item, offset: remaining };
+                }
+                remaining -= item.length;
+            } else {
+                if (remaining === 0) {
+                    return { node: item.parentNode, offset: Array.prototype.indexOf.call(item.parentNode.childNodes, item) };
+                }
+                remaining -= 1;
+            }
+        }
+        // The end of the line: after its last text (a final <br> only keeps the line open).
+        const lastText = items.filter((item) => item.nodeType === Node.TEXT_NODE).pop();
+        return lastText ? { node: lastText, offset: lastText.length } : { node: line, offset: 0 };
+    }
+
+    /* The selection inside `element` as positions, or null when the selection is elsewhere. */
+    App.text.getCaret = function getCaret(element) {
+        const selection = element.ownerDocument.getSelection();
+        if (!selection || selection.rangeCount === 0 || !element.contains(selection.anchorNode) ||
+            !element.contains(selection.focusNode)) {
+            return null;
+        }
+        return {
+            anchor: positionOf(element, selection.anchorNode, selection.anchorOffset),
+            focus: positionOf(element, selection.focusNode, selection.focusOffset),
+        };
+    };
+
+    App.text.setCaret = function setCaret(element, caret) {
+        const anchor = pointOf(element, caret.anchor);
+        const focus = pointOf(element, caret.focus);
+        element.ownerDocument.getSelection().setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+    };
+
+    const END_OF_TEXT = { anchor: { p: Infinity, o: 0 }, focus: { p: Infinity, o: 0 } };
+
+    // ---------------------------------------------------------------
+    // New text boxes and boxes that grow with their text
+    // ---------------------------------------------------------------
+
+    /*
+     * A new, empty text box at rect { left, top, width } (slide px). It takes the
+     * deck's body font and colour, and grows with its text (data-autofit="resize",
+     * like PowerPoint's inserted text boxes).
+     */
+    App.text.createTextElement = function createTextElement(doc, rect, id) {
+        const element = doc.createElement('div');
+        element.setAttribute('class', 'el');
+        element.setAttribute('data-type', 'text');
+        if (id) {
+            element.setAttribute('data-id', id);
+        }
+        element.setAttribute('data-autofit', 'resize');
+        element.setAttribute('style', 'left: ' + rect.left + 'px; top: ' + rect.top + 'px; width: ' + rect.width +
+            'px; height: 40px; font-size: 18pt; line-height: 1.2;');
+        element.innerHTML = '<p data-list="none" data-level="1"><br></p>';
+        return element;
+    };
+
+    /* A data-autofit="resize" box takes exactly the height of its text. Returns true if it changed. */
+    App.text.fitHeight = function fitHeight(element) {
+        if (element.getAttribute('data-autofit') !== 'resize') {
+            return false;
+        }
+        const old = element.style.height;
+        element.style.height = 'auto';
+        const height = element.offsetHeight + 'px';
+        element.style.height = height;
+        return height !== old;
+    };
+
+    // ---------------------------------------------------------------
+    // Edit mode
+    // ---------------------------------------------------------------
+    //
+    // The text element itself becomes contenteditable inside the deck iframe;
+    // the overlay lets the mouse through to it (CSS: #overlay.editing). The
+    // browser only types characters; everything structural goes through here.
+    // Typing is recorded as history steps: one step per run of typing, split
+    // by a 1-second pause or a new paragraph; each step keeps the cursor
+    // before and after it (history meta), so undo/redo put the cursor back.
+
+    const TYPING_PAUSE_MS = 1000;
+    let editing = null;   // { element, id, slideId, isNew, doc }
+    let typing = null;    // { meta, timer } while a typing step is open
+
+    App.text.isEditing = function isEditing() {
+        return editing !== null;
+    };
+
+    App.text.editingElement = function editingElement() {
+        return editing ? editing.element : null;
+    };
+
+    function markEditable(element) {
+        element.setAttribute('contenteditable', 'true');
+        element.setAttribute('spellcheck', 'true');
+        element.classList.add('editor-editing');
+    }
+
+    function unmarkEditable(element) {
+        element.removeAttribute('contenteditable');
+        element.removeAttribute('spellcheck');
+        element.classList.remove('editor-editing');
+    }
+
+    function overlayElement() {
+        return document.getElementById('overlay');
+    }
+
+    /*
+     * Start editing `element`. options.point { x, y } (slide px) puts the cursor
+     * where the user double-clicked; options.caret 'start' or (default) the end.
+     * options.isNew: a box just inserted, removed again if left empty.
+     */
+    App.text.enterEdit = function enterEdit(element, options) {
+        const settings = options || {};
+        if (editing && editing.element === element) {
+            return;
+        }
+        if (editing) {
+            App.text.exitEdit({ select: false });
+        }
+        const doc = element.ownerDocument;
+        editing = {
+            element: element, id: element.getAttribute('data-id'), doc: doc, isNew: !!settings.isNew,
+            slideId: element.closest('section.slide').getAttribute('data-slide-id'),
+        };
+        if (!doc.documentElement.getAttribute('lang')) {
+            doc.documentElement.setAttribute('lang', 'pt-BR');   // spell check in Portuguese (SPEC Phase 3)
+        }
+        doc.execCommand('defaultParagraphSeparator', false, 'p');
+        attachToElement(element);
+        doc.addEventListener('keydown', onKeyDown, true);
+        doc.addEventListener('pointerdown', onDeckPointerDown, true);
+        window.addEventListener('pointerdown', onEditorPointerDown, true);
+        overlayElement().classList.add('editing');
+
+        element.focus({ preventScroll: true });
+        placeInitialCaret(element, settings);
+        App.events.emit('text-edit-changed', { editing: true, id: editing.id });
+    };
+
+    function attachToElement(element) {
+        markEditable(element);
+        element.addEventListener('beforeinput', onBeforeInput);
+        element.addEventListener('input', onInput);
+    }
+
+    function detachFromElement(element) {
+        element.removeEventListener('beforeinput', onBeforeInput);
+        element.removeEventListener('input', onInput);
+        unmarkEditable(element);
+    }
+
+    function placeInitialCaret(element, settings) {
+        const doc = element.ownerDocument;
+        if (settings.point && doc.caretRangeFromPoint) {
+            const range = doc.caretRangeFromPoint(settings.point.x, settings.point.y);
+            if (range && element.contains(range.startContainer)) {
+                doc.getSelection().removeAllRanges();
+                doc.getSelection().addRange(range);
+                return;
+            }
+        }
+        App.text.setCaret(element, settings.caret === 'start'
+            ? { anchor: { p: 0, o: 0 }, focus: { p: 0, o: 0 } } : END_OF_TEXT);
+    }
+
+    /*
+     * Leave edit mode: the typing step is closed, the text normalized, and a new
+     * box left empty is removed. options.select (default true) keeps the box selected.
+     */
+    App.text.exitEdit = function exitEdit(options) {
+        if (!editing) {
+            return;
+        }
+        App.text.commitTyping();
+        const state = editing;
+        editing = null;
+        state.doc.removeEventListener('keydown', onKeyDown, true);
+        state.doc.removeEventListener('pointerdown', onDeckPointerDown, true);
+        window.removeEventListener('pointerdown', onEditorPointerDown, true);
+        overlayElement().classList.remove('editing');
+        const element = state.element;
+        if (element.isConnected) {
+            detachFromElement(element);
+            App.text.normalize(element);
+            App.text.fitHeight(element);
+            element.blur();
+            state.doc.getSelection().removeAllRanges();
+            if (state.isNew && element.textContent.trim() === '') {
+                App.history.change('Delete empty text box', { slideId: state.slideId }, () => element.remove());
+            } else if (!options || options.select !== false) {
+                App.selection.select(element);
+            }
+        }
+        window.focus();
+        App.events.emit('text-edit-changed', { editing: false, id: state.id });
+    };
+
+    /* Close the open typing step now (before saving, a command, leaving edit mode). */
+    App.text.commitTyping = function commitTyping() {
+        if (typing && App.history.isPending()) {
+            App.history.commit();   // runs the step's onCommit, which clears `typing`
+        }
+        typing = null;
+    };
+
+    function startTyping() {
+        const element = editing.element;
+        const meta = { textId: editing.id, caretBefore: App.text.getCaret(element), caretAfter: null };
+        typing = { meta: meta, timer: null };
+        App.history.begin('Typing', { slideId: editing.slideId }, {
+            meta: meta,
+            onCommit: () => {
+                if (editing && editing.element.isConnected) {
+                    meta.caretAfter = App.text.getCaret(editing.element);
+                }
+                if (typing) {
+                    clearTimeout(typing.timer);
+                }
+                typing = null;
+            },
+        });
+    }
+
+    function onBeforeInput(event) {
+        if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+            // The browser's own text undo is replaced by the editor's (one undo stack).
+            event.preventDefault();
+            App.commands.run(event.inputType === 'historyUndo' ? 'undo' : 'redo');
+            return;
+        }
+        if (event.inputType === 'insertParagraph') {
+            App.text.commitTyping();   // a new paragraph starts a new undo step
+        }
+        if (!typing) {
+            startTyping();
+        }
+        clearTimeout(typing.timer);
+        typing.timer = setTimeout(App.text.commitTyping, TYPING_PAUSE_MS);
+    }
+
+    function onInput() {
+        const element = editing && editing.element;
+        if (!element) {
+            return;
+        }
+        ensureLines(element);
+        if (App.text.fitHeight(element)) {
+            App.selection.refresh();
+        }
+    }
+
+    /*
+     * The browser can leave text outside any <p> (e.g. after deleting everything).
+     * Only then is the text normalized during typing, keeping the cursor.
+     */
+    function ensureLines(element) {
+        const broken = element.children.length === 0 || Array.from(element.childNodes).some((node) =>
+            (node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '') ||
+            (node.nodeType === Node.ELEMENT_NODE && tagOf(node) !== 'p'));
+        if (!broken) {
+            return;
+        }
+        const caret = App.text.getCaret(element);
+        App.text.normalize(element);
+        if (element.children.length === 0) {
+            element.innerHTML = '<p data-list="none" data-level="1"><br></p>';
+        }
+        App.text.setCaret(element, caret || END_OF_TEXT);
+    }
+
+    function onKeyDown(event) {
+        if (event.isComposing) {
+            return;
+        }
+        const ctrl = event.ctrlKey || event.metaKey;
+        const key = event.key.toLowerCase();
+        let command = null;
+        if (event.key === 'Escape') {
+            command = 'exit';
+        } else if (ctrl && !event.altKey && key === 'z') {
+            command = event.shiftKey ? 'redo' : 'undo';
+        } else if (ctrl && !event.altKey && !event.shiftKey && key === 'y') {
+            command = 'redo';
+        }
+        if (!command) {
+            return;
+        }
+        // Ours, not the browser's: its text undo would bypass the editor's history.
+        event.preventDefault();
+        event.stopPropagation();
+        if (command === 'exit') {
+            App.text.exitEdit();
+        } else {
+            App.commands.run(command);
+        }
+    }
+
+    /* A press on the slide outside the text: leave edit mode and select what is there. */
+    function onDeckPointerDown(event) {
+        if (!editing || editing.element.contains(event.target)) {
+            return;
+        }
+        event.preventDefault();
+        App.text.exitEdit({ select: false });
+        // The deck iframe shows the slide at 1:1, so its coordinates are slide pixels.
+        App.selection.select(App.selection.elementAt(event.clientX, event.clientY));
+    }
+
+    /* A press anywhere in the editor outside the deck (rail, ribbon …) leaves edit mode,
+       except on controls that work on the text being edited (marked data-keep-edit). */
+    function onEditorPointerDown(event) {
+        if (editing && !(event.target.closest && event.target.closest('[data-keep-edit]'))) {
+            App.text.exitEdit();
+        }
+    }
+
+    /* After undo/redo the slide was rebuilt: find the box again and put the cursor back. */
+    function afterHistoryChange(info) {
+        const doc = App.deck.getDocument();
+        if (!editing) {
+            // A snapshot taken while editing may bring editing marks back; they do not belong there.
+            if (doc && (info.action === 'undo' || info.action === 'redo')) {
+                doc.querySelectorAll('[contenteditable]').forEach(unmarkEditable);
+            }
+            return;
+        }
+        if (editing.element.isConnected) {
+            return;
+        }
+        const found = doc && doc.querySelector('[data-slide-id="' + CSS.escape(editing.slideId) + '"] [data-id="' +
+            CSS.escape(editing.id) + '"]');
+        if (!found) {
+            App.text.exitEdit({ select: false });
+            return;
+        }
+        editing.element = found;
+        attachToElement(found);
+        found.focus({ preventScroll: true });
+        const meta = info.meta && info.meta.textId === editing.id ? info.meta : null;
+        const caret = meta && (info.action === 'undo' ? meta.caretBefore : meta.caretAfter);
+        App.text.setCaret(found, caret || END_OF_TEXT);
+        App.selection.select(found);
+    }
+
+    /* Wiring, called once from App.start(). */
+    App.text.init = function init() {
+        App.events.on('history-changed', afterHistoryChange);
+        // deck.js also re-marks the same slide after undo; only a real slide change ends editing.
+        App.events.on('slide-changed', () => {
+            const slide = App.deck.getCurrentSlide();
+            if (editing && (!slide || slide.getAttribute('data-slide-id') !== editing.slideId)) {
+                App.text.exitEdit({ select: false });
+            }
+        });
+        App.events.on('deck-loaded', () => {
+            editing = null;
+            typing = null;
+            overlayElement().classList.remove('editing');
+        });
     };
 })();
 
@@ -4397,7 +4868,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     const EDITOR_ATTRIBUTE_PREFIX = 'data-editor-';
     const EDITOR_CLASS_PREFIX = 'editor-';
-    const EDITOR_ONLY_ATTRIBUTES = ['contenteditable'];
+    const EDITOR_ONLY_ATTRIBUTES = ['contenteditable', 'spellcheck'];   // spellcheck: set while editing text
 
     function stripEditorMarks(root) {
         root.querySelectorAll('[data-editor-only]').forEach((node) => node.remove());
@@ -4453,6 +4924,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         const root = doc.documentElement.cloneNode(true);
         stripEditorMarks(root);
         root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
+        // Text is saved in the text model, even if the user is still typing (SPEC: normalize before save).
+        root.querySelectorAll('.el[data-type="text"]').forEach((element) => App.text.normalize(element));
         return root;
     };
 
@@ -4515,6 +4988,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         warning: '<path d="M10 2.5l8 14.5H2z"/><path d="M10 8v4.5"/><circle cx="10" cy="14.8" r="0.4"/>',
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
         check: '<path d="M4 10.5l4 4 8-9"/>',
+        textBox: '<rect x="2.5" y="4" width="15" height="12" stroke-dasharray="2 1.5"/><path d="M6.5 7.5h7M10 7.5v6"/>',
         close: '<path d="M5 5l10 10M15 5L5 15"/>',
         slides: '<rect x="2.5" y="4" width="15" height="9.5"/><path d="M6 16.5h8"/>',
         hidden: '<path d="M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z"/><path d="M3.5 16.5l13-13"/>',
@@ -5245,11 +5719,15 @@ App.template.newDeckHtml = function newDeckHtml() {
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
+ * Double-click on a text box starts editing it (text.js). Insert mode
+ * (armInsert): the next click or drag on the slide gives a spot to a callback,
+ * e.g. Insert > Text box.
+ *
  * Events: emits 'selection-changed' and, during a drag, 'selection-dragged'.
  * Listens to deck-loaded, slide-changed,
  * history-changed and zoom-changed.
  *
- * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom).
+ * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom), text.js (edit mode).
  */
 
 (function () {
@@ -5266,6 +5744,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     let selectedId = null;
     let selectedSlideIndex = -1;
     let dragging = false;
+    let insertCallback = null;   // set by armInsert: the next click/drag places something
 
     App.selection.init = function init() {
         overlay = document.getElementById('overlay');
@@ -5274,6 +5753,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
         overlay.addEventListener('pointerdown', onPointerDown);
         overlay.addEventListener('pointermove', updateHoverCursor);
+        overlay.addEventListener('dblclick', onDoubleClick);
 
         App.events.on('deck-loaded', () => App.selection.clear());
         App.events.on('slide-changed', (info) => {
@@ -5372,8 +5852,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         return hit === null ? null : elements[hit];
     };
 
+    /* Double-click on a text box: edit its text, with the cursor where the click was. */
+    function onDoubleClick(event) {
+        const point = toSlidePoint(event);
+        const element = App.selection.elementAt(point.x, point.y);
+        if (element && element.getAttribute('data-type') === 'text') {
+            App.selection.select(element);
+            App.text.enterEdit(element, { point: point });
+        }
+    }
+
     function updateHoverCursor(event) {
-        if (dragging) {
+        if (dragging || insertCallback) {
             return;
         }
         const point = toSlidePoint(event);
@@ -5388,6 +5878,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (document.activeElement && document.activeElement !== document.body) {
             document.activeElement.blur();
         }
+        if (insertCallback) {
+            if (event.button === 0) {
+                startInsertGesture(event);
+            }
+            return;
+        }
         const handle = event.target.getAttribute && event.target.getAttribute('data-handle');
         if (handle && event.button === 0) {
             startDrag(event, 'resize', handle);
@@ -5399,6 +5895,71 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (element && event.button === 0) {
             startDrag(event, 'move', null);
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Insert mode
+    // ---------------------------------------------------------------
+
+    /*
+     * The next press on the slide places something: a click gives
+     * callback({ left, top, width: null }), a drag gives the dragged left/top/width
+     * (slide px). Escape cancels.
+     */
+    App.selection.armInsert = function armInsert(callback) {
+        insertCallback = callback;
+        overlay.classList.add('inserting');
+        overlay.style.cursor = '';
+        window.addEventListener('keydown', onInsertKey, true);
+    };
+
+    App.selection.isInserting = function isInserting() {
+        return insertCallback !== null;
+    };
+
+    function disarmInsert() {
+        insertCallback = null;
+        overlay.classList.remove('inserting');
+        window.removeEventListener('keydown', onInsertKey, true);
+    }
+
+    function onInsertKey(event) {
+        if (event.key === 'Escape') {
+            event.stopPropagation();
+            event.preventDefault();
+            disarmInsert();
+            App.selection.refresh();
+            App.ui.setStatus('Insert cancelled');
+        }
+    }
+
+    function startInsertGesture(downEvent) {
+        const callback = insertCallback;
+        const start = toSlidePoint(downEvent);
+        const zoom = App.canvas.getZoom();
+        let spot = { left: start.x, top: start.y, width: null };
+        overlay.setPointerCapture(downEvent.pointerId);
+
+        function onMove(event) {
+            const point = toSlidePoint(event);
+            if (Math.abs(point.x - start.x) * zoom < DRAG_THRESHOLD) {
+                return;
+            }
+            spot = { left: Math.min(start.x, point.x), top: start.y, width: Math.abs(point.x - start.x) };
+            // The selection box shows where the new box will go.
+            App.transform.writeRect(box, { left: spot.left, top: spot.top, width: spot.width, height: 40 });
+            box.hidden = false;
+        }
+
+        function onUp() {
+            overlay.removeEventListener('pointermove', onMove);
+            overlay.removeEventListener('pointerup', onUp);
+            disarmInsert();
+            callback({ left: Math.round(spot.left), top: Math.round(spot.top), width: spot.width === null ? null : Math.round(spot.width) });
+        }
+
+        overlay.addEventListener('pointermove', onMove);
+        overlay.addEventListener('pointerup', onUp);
     }
 
     /*
@@ -5521,6 +6082,36 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         result.splice(target, 0, id);
         return result;
+    };
+
+    const NEW_TEXT_WIDTH = 360;   // px, a click-placed text box (a drag sets the width)
+
+    /*
+     * Insert > Text box at spot { left, top, width|null } (slide px): one undo
+     * step, then the box is selected and in edit mode (text.js removes it again
+     * if it is left empty).
+     */
+    App.elements.insertTextBox = function insertTextBox(spot) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        const doc = slide.ownerDocument;
+        const left = Math.max(0, Math.min(1240, spot.left));
+        const width = Math.max(40, Math.min(1280 - left, spot.width && spot.width >= 20 ? spot.width : NEW_TEXT_WIDTH));
+        const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+        let element = null;
+        App.history.change('Insert text box', { slideId: slide.getAttribute('data-slide-id') }, () => {
+            element = App.text.createTextElement(doc, { left: left, top: Math.max(0, Math.min(700, spot.top)), width: width },
+                App.util.uniqueId('e', used));
+            const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
+            element.style.zIndex = String(top + 1);
+            slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+        });
+        App.selection.select(element);
+        App.text.enterEdit(element, { caret: 'start', isNew: true });
+        App.text.fitHeight(element);
+        App.selection.refresh();
     };
 
     /* Give `element` and every element inside it that has a data-id a new, unused id. */
@@ -6581,6 +7172,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             return App.fileio.saveAs();
         }
         return exclusive(async () => {
+            App.text.commitTyping();   // typing so far becomes an undo step before the save
             const stateId = App.history.stateId();
             const used = await writing(() =>
                 App.fileio.writeOrReplaceHandle(App.state.fileHandle, App.fileio.currentHtml(), askForWritableFile));
@@ -6610,6 +7202,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (!force && await App.fileio.changedOnDisk(handle, App.state.diskLastModified)) {
                 return 'conflict';
             }
+            App.text.commitTyping();   // typing so far becomes an undo step before the save
             const stateId = App.history.stateId();
             await writing(() => App.fileio.writeToHandle(handle, App.fileio.currentHtml()));
             await recordDiskVersion(handle);
@@ -6665,6 +7258,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             return Promise.resolve();
         }
         return exclusive(async () => {
+            App.text.commitTyping();   // typing so far becomes an undo step before the save
             const stateId = App.history.stateId();
             const html = App.fileio.currentHtml();
             const suggestedName = App.state.fileName || NEW_DECK_NAME;
@@ -8199,6 +8793,25 @@ App.template.newDeckHtml = function newDeckHtml() {
             });
         });
         App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
+
+        // ---- Text (text.js) ----
+        const selectedText = () => {
+            const element = App.selection.getElement();
+            return element && element.getAttribute('data-type') === 'text' ? element : null;
+        };
+        App.commands.define('editText', {
+            label: 'Edit text', isEnabled: () => !!selectedText() && !App.text.isEditing(),
+            run: () => App.text.enterEdit(selectedText(), { caret: 'end' }),
+        });
+        App.commands.define('insertTextBox', {
+            label: 'Text box', isEnabled: hasDeck,
+            run: () => {
+                App.text.exitEdit({ select: false });
+                App.selection.clear();
+                App.selection.armInsert((spot) => App.elements.insertTextBox(spot));
+                App.ui.setStatus('Click on the slide to place the text box, or drag to set its width (Esc cancels)');
+            },
+        });
         App.commands.define('cut', { label: 'Cut', isEnabled: hasSelection, run: () => App.elements.cut() });
         App.commands.define('copy', { label: 'Copy', isEnabled: hasSelection, run: () => App.elements.copy() });
         App.commands.define('paste', { label: 'Paste', isEnabled: () => App.elements.canPaste(), run: () => App.elements.paste() });
@@ -8263,9 +8876,14 @@ App.template.newDeckHtml = function newDeckHtml() {
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
-            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions); arrow keys nudge it. Text formatting arrives in Phase 3.',
+            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). ' +
+                'Double-click a text box (or press Enter) to type in it; Esc stops typing.',
         },
-        { id: 'insert', label: 'Insert', note: 'Text boxes, tables, images, shapes and charts arrive in Phases 3 to 6.' },
+        {
+            id: 'insert', label: 'Insert',
+            groups: [{ label: 'Text', commands: [['insertTextBox', 'textBox']] }],
+            note: 'Click Text box, then click on the slide (or drag to set its width). Tables, images, shapes and charts arrive in Phases 4 to 6.',
+        },
         {
             id: 'arrange', label: 'Arrange',
             groups: [

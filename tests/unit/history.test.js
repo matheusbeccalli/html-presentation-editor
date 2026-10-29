@@ -248,3 +248,48 @@ test('history: isPending is true between begin and commit (a drag in progress)',
     history.commit();
     assert(!history.isPending());
 });
+
+// ---- Phase 3: text steps carry the cursor (meta) and typing is a pending step ----
+
+test('history: undo and redo report the step\'s meta (e.g. where the text cursor was)', () => {
+    const doc = deckWithTwoSlides();
+    const events = [];
+    const history = App.createHistory({ getDoc: () => doc, onChange: (info) => events.push(info) });
+    const meta = { caretBefore: 1, caretAfter: 2 };
+    history.change('Bold', { slideId: 's1' }, () => {
+        doc.querySelector('[data-id="e1"]').textContent = 'B';
+    }, { meta: meta });
+    history.undo();
+    history.redo();
+    assertEqual(events.filter((e) => e.action === 'undo' || e.action === 'redo').map((e) => [e.action, e.meta]),
+        [['undo', meta], ['redo', meta]]);
+});
+
+test('history: a pending step runs its onCommit and is committed before another change', () => {
+    const doc = deckWithTwoSlides();
+    const history = App.createHistory({ getDoc: () => doc });
+    const meta = {};
+    history.begin('Typing', { slideId: 's1' }, { meta: meta, onCommit: () => { meta.caretAfter = 5; } });
+    doc.querySelector('[data-id="e1"]').textContent = 'typed';
+    history.change('Other', { slideId: 's2' }, () => {
+        doc.querySelector('[data-id="e2"]').textContent = 'other';
+    });
+    assert(!history.isPending(), 'the typing step was committed');
+    assertEqual(meta.caretAfter, 5);
+    assertEqual(history.undoLabel(), 'Other');
+    history.undo();
+    assertEqual(history.undoLabel(), 'Typing', 'typing is its own step, before the other change');
+    history.undo();
+    assertEqual(textOf(doc, 'e1'), 'One');
+});
+
+test('history: undo commits a pending step first, then undoes it', () => {
+    const doc = deckWithTwoSlides();
+    const history = App.createHistory({ getDoc: () => doc });
+    history.begin('Typing', { slideId: 's1' });
+    doc.querySelector('[data-id="e1"]').textContent = 'typed';
+    assert(history.undo(), 'there was something to undo');
+    assertEqual(textOf(doc, 'e1'), 'One');
+    assert(history.redo(), 'and redo brings the typing back');
+    assertEqual(textOf(doc, 'e1'), 'typed');
+});

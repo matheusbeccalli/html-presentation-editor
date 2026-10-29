@@ -49,6 +49,7 @@ App.start = function start() {
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
+    App.text.init();
     App.fileio.init();
     App.autosave.init();
     App.drafts.init();

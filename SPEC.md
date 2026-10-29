@@ -201,7 +201,7 @@ The interface follows PowerPoint: a ribbon with tabs (Home, Insert, Arrange, Sli
 
 Nested bullets are on almost every slide the user makes, so they are the top priority of this phase.
 
-- Double-click a text element to edit (`contenteditable`). Insert text box, PowerPoint style: click the button, then click on the slide (the box grows as you type) or drag to set its width.
+- Double-click a text element to edit (`contenteditable`); Enter or F2 edits the selected text box; Esc or a click outside stops editing (the box stays selected). Insert text box, PowerPoint style: click the button, then click on the slide (a 360 px wide box that grows in height as you type) or drag to set its width; a new box left empty is removed.
 - Toolbar: bold, italic, underline, strikethrough, superscript, subscript, font family (Windows fonts from 2.1), font size (see "Font sizes"), color, highlight, clear formatting, align left/center/right/justify. The font list starts with "Heading font (theme)" and "Body font (theme)", and the color pickers start with a row of theme colors; these are stored as `var(--font-heading)`, `var(--color-primary)` …, so changing the theme (Phase 7) restyles the text.
 - Bullets and numbering with five indent levels (see "Text model" and "Bullet behavior"), line spacing and paragraph spacing.
 - Format painter (copy the style of one text, apply to another).

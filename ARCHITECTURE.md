@@ -25,10 +25,10 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `util.js` | Pure helpers: px↔inch, scaling px values, escaping, ids, debounce, `el()` | — |
 | `events.js` | Tiny publish/subscribe bus (`App.events.on/emit`) | — |
 | `shortcuts.js` | The one key → command registry; ignores keys while typing | commands |
-| `history.js` | Undo/redo by HTML snapshots of a slide (or the whole deck); dirty tracking; `mergeKey` joins quick repeats (held arrow key) into one step | deck (via `getDoc`) |
+| `history.js` | Undo/redo by HTML snapshots of a slide (or the whole deck); dirty tracking; `mergeKey` joins quick repeats (held arrow key) into one step; `meta` travels with a step (text: the cursor); a pending step (typing) is committed before any other change | deck (via `getDoc`) |
 | `charts.js` | Chart JSON → SVG. **Phase 1: placeholder only** | importer |
 | `template.js` | The blank deck for File > New | fileio |
-| `text.js` | The only door to text (SPEC 3.7): the flat-paragraph model (`<p data-list data-level>`), `normalize` (messy HTML → allowed set, idempotent), `getModel`, the bullet/number stylesheet (`deckTextCss`) and list theme variables; `fromRendered` converts rendered text (import, format-1 decks) keeping its look | normalize (import), importer, editing (later steps) |
+| `text.js` | The only door to text (SPEC 3.7): the flat-paragraph model (`<p data-list data-level>`), `normalize` (messy HTML → allowed set, idempotent), `getModel`, the bullet/number stylesheet (`deckTextCss`) and list theme variables; `fromRendered` converts rendered text (import, format-1 decks) keeping its look; edit mode (`enterEdit`/`exitEdit`), typing as undo steps, the cursor as line + character (`getCaret`/`setCaret`), new text boxes that grow with their text | normalize, importer, history, selection, commands |
 | `importer.js` | Parse, sanitize (scripts, handlers), find blocked/missing refs, detect slides, run the import | normalize, charts |
 | `normalize.js` | Measures the deck in a hidden iframe and rebuilds it in the contract format; converts text to the text model while it can still measure it (text.js); icons inside headings become their own elements | importer, text |
 | `serialize.js` | Clean copy of the deck + player script/CSS → the saved file's text | fileio |
@@ -37,10 +37,10 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `deck.js` | Loads the deck into the canvas iframe; current slide; editor-only view CSS | shortcuts, fileio |
 | `canvas.js` | Zoom of the 1280×720 stage: fit mode (follows the window) or manual 50–400% (Ctrl+wheel around the mouse, status-bar slider, −/+, Fit); scrolls when zoomed | deck, selection (via `zoom-changed`) |
 | `transform.js` | Pure maths: move/resize a `{left, top, width, height}` box, hit-test, stacking order | — |
-| `selection.js` | The overlay catches mouse actions: click selects, drag moves, handles resize; draws the selection box | transform, history, deck, canvas |
+| `selection.js` | The overlay catches mouse actions: click selects, drag moves, handles resize; draws the selection box; double-click edits text; insert mode (next click/drag places a new box) | transform, history, deck, canvas |
 | `formatpane.js` | Format pane: "Size & position" X/Y/W/H fields for the selection, one undo step per applied value | selection, transform, history |
 | `contextmenu.js` | Right-click menu (and Shift+F10): element actions, or only Paste on empty slide; items name commands | commands, selection, shortcuts |
-| `elements.js` | Actions on the selected element: nudge (merged undo), delete, cut/copy/paste/duplicate (own clipboard, fresh ids), stacking order | selection, transform, history, deck |
+| `elements.js` | Actions on the selected element: nudge (merged undo), delete, cut/copy/paste/duplicate (own clipboard, fresh ids), stacking order; insert a text box | selection, transform, history, deck |
 | `thumbnails.js` | Slide rail; one small sandboxed iframe per slide, drawn lazily, refreshed debounced | deck, history events |
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |
 | `autosave.js` | AutoSave to the file (SPEC 6.1): the title-bar switch, the save-first banner until it is on, a scheduler (5 s after the last change, max 30 s, never during a drag/IME, never two writes), the changed-on-disk question | fileio, history, dialogs |
@@ -91,6 +91,17 @@ pointerdown on #overlay → selection.js hit-tests the slide's elements (transfo
   → mouse moved 3 px → history.begin('Move' | 'Resize', slide) → every move: transform.moveRect/resizeRect → element style
   → pointerup → history.commit()  (one undo step)   ·   Escape → history.cancel()
 'history-changed' → selection.refresh() finds the element again by data-id (undo rebuilt the slide)
+```
+
+**Editing text** (Phase 3)
+
+```text
+dblclick on #overlay (or Enter/F2) → selection.js → text.enterEdit: the .el becomes contenteditable in the deck iframe,
+  #overlay.editing lets the mouse through, keys in the iframe reach the text (shortcuts skip typing targets)
+first keystroke → beforeinput → history.begin('Typing', slide, { meta: cursor before }) … 1 s pause / Enter → history.commit (cursor after)
+Ctrl+Z while typing → text.js keydown (capture) → commands 'undo' → history.undo (commits the typing first) → slide rebuilt
+  → 'history-changed' {meta} → text.js finds the box again by data-id, makes it editable, puts the cursor back
+Esc / click outside → text.exitEdit → normalize → box selected   ·   Save → text.commitTyping, serialize normalizes the copy
 ```
 
 **AutoSave** (Phase 2)

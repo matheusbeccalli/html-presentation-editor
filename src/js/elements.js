@@ -46,6 +46,36 @@
         return result;
     };
 
+    const NEW_TEXT_WIDTH = 360;   // px, a click-placed text box (a drag sets the width)
+
+    /*
+     * Insert > Text box at spot { left, top, width|null } (slide px): one undo
+     * step, then the box is selected and in edit mode (text.js removes it again
+     * if it is left empty).
+     */
+    App.elements.insertTextBox = function insertTextBox(spot) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        const doc = slide.ownerDocument;
+        const left = Math.max(0, Math.min(1240, spot.left));
+        const width = Math.max(40, Math.min(1280 - left, spot.width && spot.width >= 20 ? spot.width : NEW_TEXT_WIDTH));
+        const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+        let element = null;
+        App.history.change('Insert text box', { slideId: slide.getAttribute('data-slide-id') }, () => {
+            element = App.text.createTextElement(doc, { left: left, top: Math.max(0, Math.min(700, spot.top)), width: width },
+                App.util.uniqueId('e', used));
+            const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
+            element.style.zIndex = String(top + 1);
+            slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+        });
+        App.selection.select(element);
+        App.text.enterEdit(element, { caret: 'start', isNew: true });
+        App.text.fitHeight(element);
+        App.selection.refresh();
+    };
+
     /* Give `element` and every element inside it that has a data-id a new, unused id. */
     App.elements.giveFreshIds = function giveFreshIds(element, usedIds) {
         [element].concat(Array.from(element.querySelectorAll('[data-id]'))).forEach((node) => {

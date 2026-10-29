@@ -15,11 +15,15 @@
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
+ * Double-click on a text box starts editing it (text.js). Insert mode
+ * (armInsert): the next click or drag on the slide gives a spot to a callback,
+ * e.g. Insert > Text box.
+ *
  * Events: emits 'selection-changed' and, during a drag, 'selection-dragged'.
  * Listens to deck-loaded, slide-changed,
  * history-changed and zoom-changed.
  *
- * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom).
+ * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom), text.js (edit mode).
  */
 
 (function () {
@@ -36,6 +40,7 @@
     let selectedId = null;
     let selectedSlideIndex = -1;
     let dragging = false;
+    let insertCallback = null;   // set by armInsert: the next click/drag places something
 
     App.selection.init = function init() {
         overlay = document.getElementById('overlay');
@@ -44,6 +49,7 @@
 
         overlay.addEventListener('pointerdown', onPointerDown);
         overlay.addEventListener('pointermove', updateHoverCursor);
+        overlay.addEventListener('dblclick', onDoubleClick);
 
         App.events.on('deck-loaded', () => App.selection.clear());
         App.events.on('slide-changed', (info) => {
@@ -142,8 +148,18 @@
         return hit === null ? null : elements[hit];
     };
 
+    /* Double-click on a text box: edit its text, with the cursor where the click was. */
+    function onDoubleClick(event) {
+        const point = toSlidePoint(event);
+        const element = App.selection.elementAt(point.x, point.y);
+        if (element && element.getAttribute('data-type') === 'text') {
+            App.selection.select(element);
+            App.text.enterEdit(element, { point: point });
+        }
+    }
+
     function updateHoverCursor(event) {
-        if (dragging) {
+        if (dragging || insertCallback) {
             return;
         }
         const point = toSlidePoint(event);
@@ -158,6 +174,12 @@
         if (document.activeElement && document.activeElement !== document.body) {
             document.activeElement.blur();
         }
+        if (insertCallback) {
+            if (event.button === 0) {
+                startInsertGesture(event);
+            }
+            return;
+        }
         const handle = event.target.getAttribute && event.target.getAttribute('data-handle');
         if (handle && event.button === 0) {
             startDrag(event, 'resize', handle);
@@ -169,6 +191,71 @@
         if (element && event.button === 0) {
             startDrag(event, 'move', null);
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Insert mode
+    // ---------------------------------------------------------------
+
+    /*
+     * The next press on the slide places something: a click gives
+     * callback({ left, top, width: null }), a drag gives the dragged left/top/width
+     * (slide px). Escape cancels.
+     */
+    App.selection.armInsert = function armInsert(callback) {
+        insertCallback = callback;
+        overlay.classList.add('inserting');
+        overlay.style.cursor = '';
+        window.addEventListener('keydown', onInsertKey, true);
+    };
+
+    App.selection.isInserting = function isInserting() {
+        return insertCallback !== null;
+    };
+
+    function disarmInsert() {
+        insertCallback = null;
+        overlay.classList.remove('inserting');
+        window.removeEventListener('keydown', onInsertKey, true);
+    }
+
+    function onInsertKey(event) {
+        if (event.key === 'Escape') {
+            event.stopPropagation();
+            event.preventDefault();
+            disarmInsert();
+            App.selection.refresh();
+            App.ui.setStatus('Insert cancelled');
+        }
+    }
+
+    function startInsertGesture(downEvent) {
+        const callback = insertCallback;
+        const start = toSlidePoint(downEvent);
+        const zoom = App.canvas.getZoom();
+        let spot = { left: start.x, top: start.y, width: null };
+        overlay.setPointerCapture(downEvent.pointerId);
+
+        function onMove(event) {
+            const point = toSlidePoint(event);
+            if (Math.abs(point.x - start.x) * zoom < DRAG_THRESHOLD) {
+                return;
+            }
+            spot = { left: Math.min(start.x, point.x), top: start.y, width: Math.abs(point.x - start.x) };
+            // The selection box shows where the new box will go.
+            App.transform.writeRect(box, { left: spot.left, top: spot.top, width: spot.width, height: 40 });
+            box.hidden = false;
+        }
+
+        function onUp() {
+            overlay.removeEventListener('pointermove', onMove);
+            overlay.removeEventListener('pointerup', onUp);
+            disarmInsert();
+            callback({ left: Math.round(spot.left), top: Math.round(spot.top), width: spot.width === null ? null : Math.round(spot.width) });
+        }
+
+        overlay.addEventListener('pointermove', onMove);
+        overlay.addEventListener('pointerup', onUp);
     }
 
     /*

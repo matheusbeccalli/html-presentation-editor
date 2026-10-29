@@ -25,6 +25,14 @@
  *   'deck'             -> snapshot of the whole <head> and <body> (theme,
  *                         adding/removing slides, removing blocked fonts ...)
  *
+ * Meta (Phase 3): a step may carry `meta`, any object the caller wants back
+ * when the step is undone or redone (text editing keeps the cursor position
+ * there). The 'undo' / 'redo' events include it.
+ *
+ * A pending step (begin() without commit(), e.g. typing in a text box) is
+ * committed automatically before any other change, undo or redo, so steps
+ * always stay in the order they happened.
+ *
  * Dirty tracking: every state gets a number. The state saved to disk is
  * remembered; the deck is "dirty" (has unsaved changes) when the current
  * state number differs from the saved one. So undoing back to the saved
@@ -84,11 +92,11 @@ App.createHistory = function createHistory(options) {
 
     // ---- Recording ----
 
-    function push(label, scope, before, mergeKey) {
+    function push(label, scope, before, mergeKey, meta) {
         const entry = {
             label: label, scope: scope, before: before, after: null,
             stateBefore: currentState, stateAfter: nextStateNumber,
-            mergeKey: mergeKey || null, time: now(),
+            mergeKey: mergeKey || null, time: now(), meta: meta || null,
         };
         nextStateNumber += 1;
         currentState = entry.stateAfter;
@@ -115,11 +123,13 @@ App.createHistory = function createHistory(options) {
     /*
      * Run `fn`, which changes the deck, as one undoable step.
      * If `fn` throws, the deck is put back as it was and nothing is recorded.
-     * options.mergeKey: see "Merging" at the top of this file.
+     * options.mergeKey: see "Merging" at the top of this file; options.meta: see "Meta".
      */
     function change(label, scope, fn, changeOptions) {
         validateScope(scope);
+        commit();   // a pending step (typing) happened first
         const mergeKey = changeOptions && changeOptions.mergeKey;
+        const meta = changeOptions && changeOptions.meta;
         const before = takeSnapshot(scope);
         try {
             fn();
@@ -133,12 +143,21 @@ App.createHistory = function createHistory(options) {
             onChange({ action: 'change', label: label, scope: scope, merged: true });
             return;
         }
-        push(label, scope, before, mergeKey);
+        push(label, scope, before, mergeKey, meta);
     }
 
-    function begin(label, scope) {
+    /*
+     * Start a step whose changes happen later (a drag, typing). options.meta is
+     * stored with the step; options.onCommit() runs just before it is recorded
+     * (text editing notes where the cursor ended up).
+     */
+    function begin(label, scope, beginOptions) {
         validateScope(scope);
-        pending = { label: label, scope: scope, before: takeSnapshot(scope) };
+        commit();
+        pending = {
+            label: label, scope: scope, before: takeSnapshot(scope),
+            meta: beginOptions && beginOptions.meta, onCommit: beginOptions && beginOptions.onCommit,
+        };
     }
 
     function commit() {
@@ -147,7 +166,10 @@ App.createHistory = function createHistory(options) {
         }
         const p = pending;
         pending = null;
-        push(p.label, p.scope, p.before);
+        if (p.onCommit) {
+            p.onCommit();
+        }
+        push(p.label, p.scope, p.before, null, p.meta);
     }
 
     function cancel() {
@@ -161,6 +183,7 @@ App.createHistory = function createHistory(options) {
     // ---- Undo / redo ----
 
     function undo() {
+        commit();
         const entry = undoStack.pop();
         if (!entry) {
             return false;
@@ -169,11 +192,12 @@ App.createHistory = function createHistory(options) {
         restoreSnapshot(entry.scope, entry.before);
         currentState = entry.stateBefore;
         redoStack.push(entry);
-        onChange({ action: 'undo', label: entry.label, scope: entry.scope });
+        onChange({ action: 'undo', label: entry.label, scope: entry.scope, meta: entry.meta });
         return true;
     }
 
     function redo() {
+        commit();
         const entry = redoStack.pop();
         if (!entry) {
             return false;
@@ -181,7 +205,7 @@ App.createHistory = function createHistory(options) {
         restoreSnapshot(entry.scope, entry.after);
         currentState = entry.stateAfter;
         undoStack.push(entry);
-        onChange({ action: 'redo', label: entry.label, scope: entry.scope });
+        onChange({ action: 'redo', label: entry.label, scope: entry.scope, meta: entry.meta });
         return true;
     }
 

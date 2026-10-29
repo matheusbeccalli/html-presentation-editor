@@ -20,11 +20,13 @@
  * the same for the whole box goes on the text element, the rest becomes inline
  * formatting; theme fonts/colours become var(--…).
  *
- * Done so far: normalize, getModel, the stylesheet, fromRendered. The editing
- * half of the interface (enterEdit, exitEdit, applyStyle, setLevel,
- * toggleList) arrives with the editing steps of Phase 3.
+ * Editing: enterEdit / exitEdit make a text element contenteditable inside
+ * the deck iframe; typing becomes history steps that remember the cursor
+ * (getCaret / setCaret as line + character). Still to come in Phase 3:
+ * applyStyle, setLevel, toggleList.
  *
- * Talks to: normalize.js and importer.js (import); the editing code will call it.
+ * Talks to: normalize.js and importer.js (import), history.js (typing steps),
+ *           selection.js (selected box), commands.js (undo/redo while typing).
  */
 
 (function () {
@@ -1227,5 +1229,436 @@
         App.text.normalize(target);
         writeListSettings(source, target, settings);
         return { layoutFlattened: layoutFlattened };
+    };
+
+    // ---------------------------------------------------------------
+    // The cursor as data: { anchor: { p, o }, focus: { p, o } }
+    // ---------------------------------------------------------------
+    //
+    // p = which line (child of the text element), o = how many characters into
+    // it, a <br> counting as one. Unlike DOM nodes, this survives the slide being
+    // rebuilt from a snapshot (undo), so undo can put the cursor back.
+
+    function lineOf(element, node) {
+        let current = node;
+        while (current && current.parentNode !== element) {
+            current = current.parentNode;
+        }
+        return current;
+    }
+
+    function positionOf(element, container, offset) {
+        const lines = Array.from(element.children);
+        if (container === element) {
+            if (offset >= lines.length) {
+                const last = lines.length - 1;
+                return { p: Math.max(last, 0), o: last >= 0 ? lineLength(lines[last]) : 0 };
+            }
+            return { p: offset, o: 0 };
+        }
+        const line = lineOf(element, container);
+        const index = lines.indexOf(line);
+        if (index === -1) {
+            return { p: 0, o: 0 };
+        }
+        const range = element.ownerDocument.createRange();
+        range.setStart(line, 0);
+        range.setEnd(container, offset);
+        let o = 0;
+        for (const item of inlineItems(line)) {
+            if (item === container) {
+                o += offset;   // the cursor is inside this text
+                break;
+            }
+            const isText = item.nodeType === Node.TEXT_NODE;
+            // Is the end of this item at or before the cursor?
+            const end = isText ? [item, item.length] : [item.parentNode, Array.prototype.indexOf.call(item.parentNode.childNodes, item) + 1];
+            if (range.comparePoint(end[0], end[1]) > 0) {
+                break;
+            }
+            o += isText ? item.length : 1;
+        }
+        return { p: index, o: o };
+    }
+
+    function lineLength(line) {
+        return inlineItems(line).reduce((sum, item) => sum + (item.nodeType === Node.TEXT_NODE ? item.length : 1), 0);
+    }
+
+    /* The DOM point { node, offset } for a position; out of range means the end of the text. */
+    function pointOf(element, position) {
+        const lines = Array.from(element.children);
+        if (lines.length === 0) {
+            return { node: element, offset: 0 };
+        }
+        const line = lines[Math.min(position.p, lines.length - 1)];
+        let remaining = position.p >= lines.length ? Infinity : position.o;
+        const items = inlineItems(line);
+        for (const item of items) {
+            if (item.nodeType === Node.TEXT_NODE) {
+                if (remaining <= item.length) {
+                    return { node: item, offset: remaining };
+                }
+                remaining -= item.length;
+            } else {
+                if (remaining === 0) {
+                    return { node: item.parentNode, offset: Array.prototype.indexOf.call(item.parentNode.childNodes, item) };
+                }
+                remaining -= 1;
+            }
+        }
+        // The end of the line: after its last text (a final <br> only keeps the line open).
+        const lastText = items.filter((item) => item.nodeType === Node.TEXT_NODE).pop();
+        return lastText ? { node: lastText, offset: lastText.length } : { node: line, offset: 0 };
+    }
+
+    /* The selection inside `element` as positions, or null when the selection is elsewhere. */
+    App.text.getCaret = function getCaret(element) {
+        const selection = element.ownerDocument.getSelection();
+        if (!selection || selection.rangeCount === 0 || !element.contains(selection.anchorNode) ||
+            !element.contains(selection.focusNode)) {
+            return null;
+        }
+        return {
+            anchor: positionOf(element, selection.anchorNode, selection.anchorOffset),
+            focus: positionOf(element, selection.focusNode, selection.focusOffset),
+        };
+    };
+
+    App.text.setCaret = function setCaret(element, caret) {
+        const anchor = pointOf(element, caret.anchor);
+        const focus = pointOf(element, caret.focus);
+        element.ownerDocument.getSelection().setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+    };
+
+    const END_OF_TEXT = { anchor: { p: Infinity, o: 0 }, focus: { p: Infinity, o: 0 } };
+
+    // ---------------------------------------------------------------
+    // New text boxes and boxes that grow with their text
+    // ---------------------------------------------------------------
+
+    /*
+     * A new, empty text box at rect { left, top, width } (slide px). It takes the
+     * deck's body font and colour, and grows with its text (data-autofit="resize",
+     * like PowerPoint's inserted text boxes).
+     */
+    App.text.createTextElement = function createTextElement(doc, rect, id) {
+        const element = doc.createElement('div');
+        element.setAttribute('class', 'el');
+        element.setAttribute('data-type', 'text');
+        if (id) {
+            element.setAttribute('data-id', id);
+        }
+        element.setAttribute('data-autofit', 'resize');
+        element.setAttribute('style', 'left: ' + rect.left + 'px; top: ' + rect.top + 'px; width: ' + rect.width +
+            'px; height: 40px; font-size: 18pt; line-height: 1.2;');
+        element.innerHTML = '<p data-list="none" data-level="1"><br></p>';
+        return element;
+    };
+
+    /* A data-autofit="resize" box takes exactly the height of its text. Returns true if it changed. */
+    App.text.fitHeight = function fitHeight(element) {
+        if (element.getAttribute('data-autofit') !== 'resize') {
+            return false;
+        }
+        const old = element.style.height;
+        element.style.height = 'auto';
+        const height = element.offsetHeight + 'px';
+        element.style.height = height;
+        return height !== old;
+    };
+
+    // ---------------------------------------------------------------
+    // Edit mode
+    // ---------------------------------------------------------------
+    //
+    // The text element itself becomes contenteditable inside the deck iframe;
+    // the overlay lets the mouse through to it (CSS: #overlay.editing). The
+    // browser only types characters; everything structural goes through here.
+    // Typing is recorded as history steps: one step per run of typing, split
+    // by a 1-second pause or a new paragraph; each step keeps the cursor
+    // before and after it (history meta), so undo/redo put the cursor back.
+
+    const TYPING_PAUSE_MS = 1000;
+    let editing = null;   // { element, id, slideId, isNew, doc }
+    let typing = null;    // { meta, timer } while a typing step is open
+
+    App.text.isEditing = function isEditing() {
+        return editing !== null;
+    };
+
+    App.text.editingElement = function editingElement() {
+        return editing ? editing.element : null;
+    };
+
+    function markEditable(element) {
+        element.setAttribute('contenteditable', 'true');
+        element.setAttribute('spellcheck', 'true');
+        element.classList.add('editor-editing');
+    }
+
+    function unmarkEditable(element) {
+        element.removeAttribute('contenteditable');
+        element.removeAttribute('spellcheck');
+        element.classList.remove('editor-editing');
+    }
+
+    function overlayElement() {
+        return document.getElementById('overlay');
+    }
+
+    /*
+     * Start editing `element`. options.point { x, y } (slide px) puts the cursor
+     * where the user double-clicked; options.caret 'start' or (default) the end.
+     * options.isNew: a box just inserted, removed again if left empty.
+     */
+    App.text.enterEdit = function enterEdit(element, options) {
+        const settings = options || {};
+        if (editing && editing.element === element) {
+            return;
+        }
+        if (editing) {
+            App.text.exitEdit({ select: false });
+        }
+        const doc = element.ownerDocument;
+        editing = {
+            element: element, id: element.getAttribute('data-id'), doc: doc, isNew: !!settings.isNew,
+            slideId: element.closest('section.slide').getAttribute('data-slide-id'),
+        };
+        if (!doc.documentElement.getAttribute('lang')) {
+            doc.documentElement.setAttribute('lang', 'pt-BR');   // spell check in Portuguese (SPEC Phase 3)
+        }
+        doc.execCommand('defaultParagraphSeparator', false, 'p');
+        attachToElement(element);
+        doc.addEventListener('keydown', onKeyDown, true);
+        doc.addEventListener('pointerdown', onDeckPointerDown, true);
+        window.addEventListener('pointerdown', onEditorPointerDown, true);
+        overlayElement().classList.add('editing');
+
+        element.focus({ preventScroll: true });
+        placeInitialCaret(element, settings);
+        App.events.emit('text-edit-changed', { editing: true, id: editing.id });
+    };
+
+    function attachToElement(element) {
+        markEditable(element);
+        element.addEventListener('beforeinput', onBeforeInput);
+        element.addEventListener('input', onInput);
+    }
+
+    function detachFromElement(element) {
+        element.removeEventListener('beforeinput', onBeforeInput);
+        element.removeEventListener('input', onInput);
+        unmarkEditable(element);
+    }
+
+    function placeInitialCaret(element, settings) {
+        const doc = element.ownerDocument;
+        if (settings.point && doc.caretRangeFromPoint) {
+            const range = doc.caretRangeFromPoint(settings.point.x, settings.point.y);
+            if (range && element.contains(range.startContainer)) {
+                doc.getSelection().removeAllRanges();
+                doc.getSelection().addRange(range);
+                return;
+            }
+        }
+        App.text.setCaret(element, settings.caret === 'start'
+            ? { anchor: { p: 0, o: 0 }, focus: { p: 0, o: 0 } } : END_OF_TEXT);
+    }
+
+    /*
+     * Leave edit mode: the typing step is closed, the text normalized, and a new
+     * box left empty is removed. options.select (default true) keeps the box selected.
+     */
+    App.text.exitEdit = function exitEdit(options) {
+        if (!editing) {
+            return;
+        }
+        App.text.commitTyping();
+        const state = editing;
+        editing = null;
+        state.doc.removeEventListener('keydown', onKeyDown, true);
+        state.doc.removeEventListener('pointerdown', onDeckPointerDown, true);
+        window.removeEventListener('pointerdown', onEditorPointerDown, true);
+        overlayElement().classList.remove('editing');
+        const element = state.element;
+        if (element.isConnected) {
+            detachFromElement(element);
+            App.text.normalize(element);
+            App.text.fitHeight(element);
+            element.blur();
+            state.doc.getSelection().removeAllRanges();
+            if (state.isNew && element.textContent.trim() === '') {
+                App.history.change('Delete empty text box', { slideId: state.slideId }, () => element.remove());
+            } else if (!options || options.select !== false) {
+                App.selection.select(element);
+            }
+        }
+        window.focus();
+        App.events.emit('text-edit-changed', { editing: false, id: state.id });
+    };
+
+    /* Close the open typing step now (before saving, a command, leaving edit mode). */
+    App.text.commitTyping = function commitTyping() {
+        if (typing && App.history.isPending()) {
+            App.history.commit();   // runs the step's onCommit, which clears `typing`
+        }
+        typing = null;
+    };
+
+    function startTyping() {
+        const element = editing.element;
+        const meta = { textId: editing.id, caretBefore: App.text.getCaret(element), caretAfter: null };
+        typing = { meta: meta, timer: null };
+        App.history.begin('Typing', { slideId: editing.slideId }, {
+            meta: meta,
+            onCommit: () => {
+                if (editing && editing.element.isConnected) {
+                    meta.caretAfter = App.text.getCaret(editing.element);
+                }
+                if (typing) {
+                    clearTimeout(typing.timer);
+                }
+                typing = null;
+            },
+        });
+    }
+
+    function onBeforeInput(event) {
+        if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+            // The browser's own text undo is replaced by the editor's (one undo stack).
+            event.preventDefault();
+            App.commands.run(event.inputType === 'historyUndo' ? 'undo' : 'redo');
+            return;
+        }
+        if (event.inputType === 'insertParagraph') {
+            App.text.commitTyping();   // a new paragraph starts a new undo step
+        }
+        if (!typing) {
+            startTyping();
+        }
+        clearTimeout(typing.timer);
+        typing.timer = setTimeout(App.text.commitTyping, TYPING_PAUSE_MS);
+    }
+
+    function onInput() {
+        const element = editing && editing.element;
+        if (!element) {
+            return;
+        }
+        ensureLines(element);
+        if (App.text.fitHeight(element)) {
+            App.selection.refresh();
+        }
+    }
+
+    /*
+     * The browser can leave text outside any <p> (e.g. after deleting everything).
+     * Only then is the text normalized during typing, keeping the cursor.
+     */
+    function ensureLines(element) {
+        const broken = element.children.length === 0 || Array.from(element.childNodes).some((node) =>
+            (node.nodeType === Node.TEXT_NODE && node.textContent.trim() !== '') ||
+            (node.nodeType === Node.ELEMENT_NODE && tagOf(node) !== 'p'));
+        if (!broken) {
+            return;
+        }
+        const caret = App.text.getCaret(element);
+        App.text.normalize(element);
+        if (element.children.length === 0) {
+            element.innerHTML = '<p data-list="none" data-level="1"><br></p>';
+        }
+        App.text.setCaret(element, caret || END_OF_TEXT);
+    }
+
+    function onKeyDown(event) {
+        if (event.isComposing) {
+            return;
+        }
+        const ctrl = event.ctrlKey || event.metaKey;
+        const key = event.key.toLowerCase();
+        let command = null;
+        if (event.key === 'Escape') {
+            command = 'exit';
+        } else if (ctrl && !event.altKey && key === 'z') {
+            command = event.shiftKey ? 'redo' : 'undo';
+        } else if (ctrl && !event.altKey && !event.shiftKey && key === 'y') {
+            command = 'redo';
+        }
+        if (!command) {
+            return;
+        }
+        // Ours, not the browser's: its text undo would bypass the editor's history.
+        event.preventDefault();
+        event.stopPropagation();
+        if (command === 'exit') {
+            App.text.exitEdit();
+        } else {
+            App.commands.run(command);
+        }
+    }
+
+    /* A press on the slide outside the text: leave edit mode and select what is there. */
+    function onDeckPointerDown(event) {
+        if (!editing || editing.element.contains(event.target)) {
+            return;
+        }
+        event.preventDefault();
+        App.text.exitEdit({ select: false });
+        // The deck iframe shows the slide at 1:1, so its coordinates are slide pixels.
+        App.selection.select(App.selection.elementAt(event.clientX, event.clientY));
+    }
+
+    /* A press anywhere in the editor outside the deck (rail, ribbon …) leaves edit mode,
+       except on controls that work on the text being edited (marked data-keep-edit). */
+    function onEditorPointerDown(event) {
+        if (editing && !(event.target.closest && event.target.closest('[data-keep-edit]'))) {
+            App.text.exitEdit();
+        }
+    }
+
+    /* After undo/redo the slide was rebuilt: find the box again and put the cursor back. */
+    function afterHistoryChange(info) {
+        const doc = App.deck.getDocument();
+        if (!editing) {
+            // A snapshot taken while editing may bring editing marks back; they do not belong there.
+            if (doc && (info.action === 'undo' || info.action === 'redo')) {
+                doc.querySelectorAll('[contenteditable]').forEach(unmarkEditable);
+            }
+            return;
+        }
+        if (editing.element.isConnected) {
+            return;
+        }
+        const found = doc && doc.querySelector('[data-slide-id="' + CSS.escape(editing.slideId) + '"] [data-id="' +
+            CSS.escape(editing.id) + '"]');
+        if (!found) {
+            App.text.exitEdit({ select: false });
+            return;
+        }
+        editing.element = found;
+        attachToElement(found);
+        found.focus({ preventScroll: true });
+        const meta = info.meta && info.meta.textId === editing.id ? info.meta : null;
+        const caret = meta && (info.action === 'undo' ? meta.caretBefore : meta.caretAfter);
+        App.text.setCaret(found, caret || END_OF_TEXT);
+        App.selection.select(found);
+    }
+
+    /* Wiring, called once from App.start(). */
+    App.text.init = function init() {
+        App.events.on('history-changed', afterHistoryChange);
+        // deck.js also re-marks the same slide after undo; only a real slide change ends editing.
+        App.events.on('slide-changed', () => {
+            const slide = App.deck.getCurrentSlide();
+            if (editing && (!slide || slide.getAttribute('data-slide-id') !== editing.slideId)) {
+                App.text.exitEdit({ select: false });
+            }
+        });
+        App.events.on('deck-loaded', () => {
+            editing = null;
+            typing = null;
+            overlayElement().classList.remove('editing');
+        });
     };
 })();

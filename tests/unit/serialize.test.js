@@ -7,7 +7,7 @@ function editedDeck() {
         '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Deck</title>' +
         '<style data-editor-only>.slide{display:none}</style><style>.el{position:absolute}</style></head><body>' +
         '<section class="slide editor-current" data-slide-id="s1" data-editor-current="true">' +
-        '<div class="el editor-selected" data-type="text" data-id="e1" contenteditable="true" data-editor-temp="7" style="left:1px">Olá</div>' +
+        '<div class="el editor-selected" data-type="text" data-id="e1" contenteditable="true" spellcheck="true" data-editor-temp="7" style="left:1px">Olá</div>' +
         '</section><div data-editor-only class="overlay"></div></body></html>'
     );
 }
@@ -18,8 +18,10 @@ test('serialize: strips editor-only elements, attributes and classes', () => {
     assertNotIncludes(html, 'editor-current');
     assertNotIncludes(html, 'editor-selected');
     assertNotIncludes(html, 'contenteditable');
+    assertNotIncludes(html, 'spellcheck');
     assertNotIncludes(html, 'overlay');
-    assertIncludes(html, '<div class="el" data-type="text" data-id="e1" style="left:1px">Olá</div>');
+    // Text is also normalized into the text model on save (SPEC Phase 3).
+    assertIncludes(html, '<div class="el" data-type="text" data-id="e1" style="left:1px"><p data-list="none" data-level="1">Olá</p></div>');
 });
 
 test('serialize: does not modify the live document', () => {

@@ -147,6 +147,11 @@
             if (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping) {
                 return false;
             }
+            // Enter and Space press a focused button or menu item; they are not shortcuts there.
+            if ((entry.combo === 'Enter' || entry.combo === 'Space') && event.target && event.target.closest &&
+                event.target.closest('button, a[href], summary, [role="menuitem"], [role="tab"]')) {
+                return false;
+            }
             // An open dialog owns the keyboard (Escape closes it, Enter presses its button).
             if (event.target && event.target.closest && event.target.closest('dialog')) {
                 return false;
@@ -185,6 +190,8 @@
         ['Home', 'firstSlide'],
         ['End', 'lastSlide'],
         ['Escape', 'deselect'],
+        ['Enter', 'editText'],
+        ['F2', 'editText'],
         ['ArrowLeft', 'nudgeLeft'],
         ['ArrowRight', 'nudgeRight'],
         ['ArrowUp', 'nudgeUp'],

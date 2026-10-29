@@ -311,6 +311,117 @@ def test_format1_deck_text_is_converted(browser):
     editor.close()
 
 
+TEXT_OF = """id => App.text.getModel(App.deck.getDocument().querySelector('[data-id="' + id + '"]')).map(p => p.text)"""
+
+
+def editing_id(page):
+    return page.evaluate("App.text.isEditing() ? App.text.editingElement().getAttribute('data-id') : null")
+
+
+def test_text_editing(browser):
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")   # slide 2: title e5, bullets e7
+    before = page.evaluate(TEXT_OF, "e7")
+
+    # Double-click a bullet: edit mode with the cursor where the click was; spell check in Portuguese.
+    page.mouse.dblclick(*slide_to_screen(page, 70 + 24 + 2, 165))   # just before "Alfa"
+    check(editing_id(page) == "e7", "double-click starts editing")
+    check(page.evaluate("App.text.editingElement().isContentEditable && App.text.editingElement().spellcheck"),
+          "editable, with spell check")
+    check(page.evaluate("App.deck.getDocument().documentElement.lang") == "pt-BR", "the deck says it is Portuguese")
+    page.keyboard.type("Nova ")
+    check(page.evaluate(TEXT_OF, "e7")[0] == "Nova " + before[0], "typed at the click position")
+
+    # Keys act on the text while editing: arrows move the cursor, not the box; Delete deletes a character.
+    rect = element_rect(page, "e7")
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("Delete")
+    check(element_rect(page, "e7") == rect, "arrow keys did not move the box")
+    check(page.evaluate(TEXT_OF, "e7")[0] == "Nova" + before[0], "Delete removed the space")
+
+    # Escape leaves edit mode; the box stays selected; the text is in the model.
+    page.keyboard.press("Escape")
+    check(editing_id(page) is None, "Escape leaves edit mode")
+    check(page.evaluate("App.selection.selectedId()") == "e7", "the text box stays selected")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('[contenteditable], [spellcheck]').length") == 0,
+          "no editing attributes left in the deck")
+    check(editor.title().startswith("● "), "typing made the deck dirty")
+
+    # One undo stack: Ctrl+Z after leaving edit mode undoes the typing as one step.
+    page.keyboard.press("Control+z")
+    check(page.evaluate(TEXT_OF, "e7") == before, "Ctrl+Z undoes the typing")
+    page.keyboard.press("Control+y")
+    check(page.evaluate(TEXT_OF, "e7")[0] == "Nova" + before[0], "Ctrl+Y redoes it")
+
+    # Enter starts editing the selected box (cursor at the end); typing pauses split undo steps;
+    # Ctrl+Z inside the text undoes the last group and puts the cursor back.
+    page.keyboard.press("Enter")
+    check(editing_id(page) == "e7", "Enter edits the selected text box")
+    page.keyboard.type(" abc")
+    page.wait_for_timeout(1300)
+    page.keyboard.type(" def")
+    last = page.evaluate(TEXT_OF, "e7")[-1]
+    check(last.endswith(" abc def"), f"typed at the end: {last!r}")
+    page.keyboard.press("Control+z")
+    check(editing_id(page) == "e7", "still editing after Ctrl+Z")
+    check(page.evaluate(TEXT_OF, "e7")[-1].endswith(" abc"), "Ctrl+Z undid only the last group of typing")
+    caret = page.evaluate("App.text.getCaret(App.text.editingElement())")
+    check(caret["focus"] == {"p": 3, "o": len(before[3]) + 4}, f"the cursor is back after ' abc': {caret}")
+    page.keyboard.type("!")
+    check(page.evaluate(TEXT_OF, "e7")[-1].endswith(" abc!"), "typing continues at the restored cursor")
+
+    # Clicking another element leaves edit mode and selects that element.
+    page.mouse.click(*slide_to_screen(page, 100, 70))   # the title
+    check(editing_id(page) is None, "a click outside leaves edit mode")
+    check(page.evaluate("App.selection.selectedId()") == "e5", "and selects what was clicked")
+    page.keyboard.press("F2")
+    check(editing_id(page) == "e5", "F2 edits the selected text box")
+    page.keyboard.press("Escape")
+
+    # Insert > Text box, PowerPoint style: click places a box (it grows as you type), drag sets its width.
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click("button[data-command='insertTextBox']")
+    page.mouse.click(*slide_to_screen(page, 200, 560))
+    new_id = editing_id(page)
+    check(new_id is not None, "the new text box is in edit mode")
+    new_rect = element_rect(page, new_id)
+    check((new_rect["left"], new_rect["top"]) == (200, 560), f"placed at the click: {new_rect}")
+    page.keyboard.type("Primeira linha")
+    page.keyboard.press("Shift+Enter")
+    page.keyboard.type("segunda linha")
+    check(element_rect(page, new_id)["height"] > new_rect["height"], "the box grew with its text")
+    page.keyboard.press("Escape")
+    check(page.evaluate(TEXT_OF, new_id) == ["Primeira linha\nsegunda linha"], "the text is in the new box")
+    check(page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').getAttribute('data-autofit')",
+                        new_id) == "resize", "new boxes grow with their text")
+
+    page.click("button[data-command='insertTextBox']")
+    drag(page, slide_to_screen(page, 700, 520), slide_to_screen(page, 1000, 540))
+    dragged = editing_id(page)
+    check(element_rect(page, dragged)["width"] == 300, f"dragging set the width: {element_rect(page, dragged)}")
+    page.keyboard.press("Escape")
+    check(page.evaluate("id => !App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]')", dragged),
+          "a new text box left empty is removed")
+
+    page.click("button[data-command='insertTextBox']")
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 640, 690))
+    check(editing_id(page) is None, "Escape cancelled the insert")
+
+    # Saving while editing: the file has the typed text and no editing marks.
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    page.keyboard.press("Enter")
+    page.keyboard.type(" salvo")
+    saved = editor.save_as_download("text-editing-saved.html").read_text(encoding="utf-8")
+    check("abc! salvo" in saved, "the typed text is saved")
+    check("contenteditable" not in saved and "spellcheck" not in saved and "editor-" not in saved,
+          "no editing marks in the saved file")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1254,6 +1365,7 @@ TESTS = [
     test_recovery_unavailable_when_storage_is_blocked,
     test_settings_recent_files_and_status,
     test_text_lists_render_bullets_and_numbers,
+    test_text_editing,
 ]
 
 

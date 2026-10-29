@@ -533,3 +533,74 @@ test('text import: a deck\'s own list indent and spacing stay on that text box',
     assertEqual(target.style.getPropertyValue('--list-1-space-before'), '0px');
     assertEqual(target.style.getPropertyValue('--list-3-indent'), '', 'levels the box does not use follow the theme');
 });
+
+// ---------------------------------------------------------------
+// Editing helpers (step 3)
+// ---------------------------------------------------------------
+
+function placeCaret(doc, node, offset) {
+    const range = doc.createRange();
+    range.setStart(node, offset);
+    range.collapse(true);
+    doc.getSelection().removeAllRanges();
+    doc.getSelection().addRange(range);
+}
+
+test('text editing: the cursor is remembered as line + character, so it survives a rebuilt slide', async () => {
+    const frame = await renderedBox('', '<p data-list="bullet" data-level="1">Um</p>' +
+        '<p data-list="bullet" data-level="1">Dois <b>tr</b>ês<br>quatro</p>');
+    const doc = frame.contentDocument;
+    let el = doc.querySelector('.el');
+    placeCaret(doc, el.querySelectorAll('p')[1].childNodes[2], 1);   // inside "ês", after the "ê"
+    assertEqual(App.text.getCaret(el), { anchor: { p: 1, o: 8 }, focus: { p: 1, o: 8 } });
+
+    el.outerHTML = el.outerHTML;   // like undo: the element is rebuilt from HTML
+    el = doc.querySelector('.el');
+    App.text.setCaret(el, { anchor: { p: 1, o: 12 }, focus: { p: 1, o: 12 } });   // "Dois três" + line break + "qu"
+    const range = doc.getSelection().getRangeAt(0);
+    assertEqual([range.startContainer.textContent, range.startOffset], ['quatro', 2]);
+
+    App.text.setCaret(el, { anchor: { p: 0, o: 1 }, focus: { p: 1, o: 3 } });
+    const selected = doc.getSelection().getRangeAt(0);
+    assertEqual([selected.startContainer.textContent, selected.startOffset, selected.endContainer.textContent, selected.endOffset],
+        ['Um', 1, 'Dois ', 3]);
+    App.text.setCaret(el, { anchor: { p: 9, o: 99 }, focus: { p: 9, o: 99 } });
+    assertEqual(App.text.getCaret(el).focus, { p: 1, o: 16 }, 'out of range goes to the end of the text');
+    frame.remove();
+});
+
+test('text editing: a cursor right after a line break or between elements is counted correctly', async () => {
+    const frame = await renderedBox('', '<p data-list="none" data-level="1">ab<br>cd</p>');
+    const doc = frame.contentDocument;
+    const p = doc.querySelector('p');
+    placeCaret(doc, p, 2);   // container = the <p>, after "ab" and the <br>
+    assertEqual(App.text.getCaret(doc.querySelector('.el')).anchor, { p: 0, o: 3 });
+    frame.remove();
+});
+
+test('text editing: a new text box is an empty plain line, positioned, that grows with its text', () => {
+    const doc = parseDoc('<!DOCTYPE html><html><head></head><body><section class="slide"></section></body></html>');
+    const el = App.text.createTextElement(doc, { left: 100, top: 200, width: 400 });
+    assertEqual(el.getAttribute('class'), 'el');
+    assertEqual(el.getAttribute('data-type'), 'text');
+    assertEqual(el.getAttribute('data-autofit'), 'resize');
+    assertEqual([el.style.left, el.style.top, el.style.width], ['100px', '200px', '400px']);
+    assert(parseFloat(el.style.height) > 0, 'has a height');
+    assertEqual(el.innerHTML, '<p data-list="none" data-level="1"><br></p>');
+});
+
+test('text editing: a "resize" box takes the height of its text, growing and shrinking', async () => {
+    const frame = await renderedBox('.el p{margin:0}', '<p data-list="none" data-level="1">Um</p>', ' font-size:20px; line-height:30px; height:10px;');
+    const el = frame.contentDocument.querySelector('.el');
+    el.setAttribute('data-autofit', 'resize');
+    App.text.fitHeight(el);
+    assertEqual(el.style.height, '30px');
+    el.insertAdjacentHTML('beforeend', '<p data-list="none" data-level="1">Dois</p><p data-list="none" data-level="1">Três</p>');
+    App.text.fitHeight(el);
+    assertEqual(el.style.height, '90px');
+    el.removeAttribute('data-autofit');
+    el.lastElementChild.remove();
+    App.text.fitHeight(el);
+    assertEqual(el.style.height, '90px', 'boxes without autofit keep their size');
+    frame.remove();
+});

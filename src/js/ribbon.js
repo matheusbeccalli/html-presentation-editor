@@ -23,9 +23,14 @@
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
-            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions); arrow keys nudge it. Text formatting arrives in Phase 3.',
+            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). ' +
+                'Double-click a text box (or press Enter) to type in it; Esc stops typing.',
         },
-        { id: 'insert', label: 'Insert', note: 'Text boxes, tables, images, shapes and charts arrive in Phases 3 to 6.' },
+        {
+            id: 'insert', label: 'Insert',
+            groups: [{ label: 'Text', commands: [['insertTextBox', 'textBox']] }],
+            note: 'Click Text box, then click on the slide (or drag to set its width). Tables, images, shapes and charts arrive in Phases 4 to 6.',
+        },
         {
             id: 'arrange', label: 'Arrange',
             groups: [

@@ -123,6 +123,25 @@
             });
         });
         App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
+
+        // ---- Text (text.js) ----
+        const selectedText = () => {
+            const element = App.selection.getElement();
+            return element && element.getAttribute('data-type') === 'text' ? element : null;
+        };
+        App.commands.define('editText', {
+            label: 'Edit text', isEnabled: () => !!selectedText() && !App.text.isEditing(),
+            run: () => App.text.enterEdit(selectedText(), { caret: 'end' }),
+        });
+        App.commands.define('insertTextBox', {
+            label: 'Text box', isEnabled: hasDeck,
+            run: () => {
+                App.text.exitEdit({ select: false });
+                App.selection.clear();
+                App.selection.armInsert((spot) => App.elements.insertTextBox(spot));
+                App.ui.setStatus('Click on the slide to place the text box, or drag to set its width (Esc cancels)');
+            },
+        });
         App.commands.define('cut', { label: 'Cut', isEnabled: hasSelection, run: () => App.elements.cut() });
         App.commands.define('copy', { label: 'Copy', isEnabled: hasSelection, run: () => App.elements.copy() });
         App.commands.define('paste', { label: 'Paste', isEnabled: () => App.elements.canPaste(), run: () => App.elements.paste() });

@@ -136,3 +136,17 @@ test('shortcuts: keysFor names the first shortcut of a command, for menus and to
     assertEqual(App.shortcuts.keysFor('delete'), 'Delete');
     assertEqual(App.shortcuts.keysFor('bringToFront'), '');
 });
+
+test('shortcuts: Enter on a focused button or menu item presses it instead of running a shortcut', () => {
+    const registry = App.shortcuts.createRegistry();
+    registry.register('Enter', 'editText');
+    const ran = [];
+    const button = document.createElement('button');
+    const item = document.createElement('div');
+    item.setAttribute('role', 'menuitem');
+    registry.handle(fakeKey('Enter', {}, button), (c) => ran.push(c));
+    registry.handle(fakeKey('Enter', {}, item), (c) => ran.push(c));
+    assertEqual(ran, []);
+    registry.handle(fakeKey('Enter', {}, document.body), (c) => ran.push(c));
+    assertEqual(ran, ['editText'], 'elsewhere Enter is the shortcut');
+});

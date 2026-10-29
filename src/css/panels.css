@@ -74,6 +74,12 @@
     user-select: none;
     touch-action: none;
 }
+/* Editing text (text.js): the mouse goes through to the text in the deck; the box is dashed, no handles. */
+#overlay.editing, #overlay.editing * { pointer-events: none; }
+#overlay.editing .selection-box { outline-style: dashed; }
+#overlay.editing .selection-handle { display: none; }
+/* Insert > Text box: the next click or drag on the slide places the box. */
+#overlay.inserting { cursor: crosshair; }
 .selection-box {
     position: absolute;
     outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);

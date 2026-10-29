@@ -128,9 +128,9 @@ Nested bullets are the top priority of this phase.
 - [x] No list behavior during IME composition
 
 *Font sizes*
-- [ ] Size in pt: dropdown (8 … 96) plus a typed-value field; blank when the selection mixes sizes
-- [ ] Increase / decrease size buttons; Ctrl+Shift+> / Ctrl+Shift+< and Ctrl+] / Ctrl+[
-- [ ] Stored as `font-size` in pt on a `<span>`; never `execCommand('fontSize')`; px sizes shown as pt
+- [x] Size in pt: dropdown (8 … 96) plus a typed-value field; blank when the selection mixes sizes
+- [x] Increase / decrease size buttons; Ctrl+Shift+> / Ctrl+Shift+< and Ctrl+] / Ctrl+[ *(each piece of text steps from its own size)*
+- [x] Stored as `font-size` in pt on a `<span>`; never `execCommand('fontSize')`; px sizes shown as pt *(one size for all the text of a box goes on the box itself)*
 
 *Normalizer*
 - [x] `App.text.normalize(element)` rewrites to the allowed tags/attributes/styles; strong→b, em→i, font→span, div→p, lists→flat paragraphs; unknown tags unwrapped; empty spans removed; identical adjacent spans merged; only http/https/mailto links
@@ -161,6 +161,7 @@ Nested bullets are the top priority of this phase.
   - [ ] In a bulleted box: End, Enter, Tab, type, Enter, Enter, Enter (level 2 → level 1 → plain text); type "- " (bullet) then Ctrl+Z ("- " stays as text); Backspace at the start of a bullet removes it; select three lines and Shift+Tab
   - [ ] Home > Paragraph: select two bullets, click Numbering (1., 2.; the button lights up), Increase indent (a., b.), type: the cursor is still in the text; put the cursor on b. and click Restart numbering (a.); in a later numbered line after a bullet, Continue numbering goes on from the run above; Esc, then Bullets acts on the whole box; Ctrl+Z undoes each click
   - [ ] Home > Font: select a word, Ctrl+B, then the Italic button (both light up); click inside another word and Ctrl+U underlines the word; at the end of a line Ctrl+B then type: only the new text is bold; select a box (not typing) and Ctrl+B: all its text; Clear formatting removes it; Ctrl+Z undoes each step
+  - [ ] Home > Font, sizes and fonts: select a word, Ctrl+] twice (the size box counts up the list), type 30 in the size box + Enter (the word stays selected, typing goes on in the text), pick 40 from the size list, pick Georgia and then the "(Headings)" theme font from the font list; select a whole line with mixed sizes: the size box is blank; with the box selected (not typing) Ctrl+[ makes all its text one step smaller
 
 ## Phase 4: Tables
 

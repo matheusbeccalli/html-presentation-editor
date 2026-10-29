@@ -212,6 +212,11 @@
         ['Ctrl+I', 'italic', { whileTyping: true }],
         // Ctrl+U would otherwise show the page source.
         ['Ctrl+U', 'underline', { whileTyping: true, blockBrowserDefault: true }],
+        // Font size: Ctrl+] / Ctrl+[ and, as in PowerPoint, Ctrl+Shift+> / Ctrl+Shift+<.
+        ['Ctrl+]', 'growFont', { whileTyping: true }],
+        ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
+        ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],
+        ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
         ['Shift+F10', 'contextMenu'],
         ['ContextMenu', 'contextMenu'],
     ];

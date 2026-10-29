@@ -49,6 +49,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `drafts.js` | Crash-recovery drafts (SPEC 6.2): a draft 30 s after unsaved changes (last 5 per deck), deleted on save/clean state/discard/after 1 day; Recover / Compare / Discard dialogs | storage, autosave (scheduler), fileio, importer, deck, thumbnails |
 | `recent.js` | Recent files (off by default): remembers file handles on open/save, last 10; welcome list and File > Open recent… open the picker in the file's folder | storage, settings, fileio |
 | `commands.js` | Every user action by name; one place that reports errors; toggle commands (`isChecked`) and commands that keep text editing (`keepsEdit`) | fileio, history, deck, text |
+| `fontcontrols.js` | Home > Font's font list and size box: show the selection's font and size (blank when mixed), theme fonts first (stored as `var(--font-…)`); choosing runs `setFontFamily` / `setFontSize` | commands, text, deck |
 | `ribbon.js` | File menu and tabs; buttons only name commands; toggle buttons show `aria-pressed`; `keepsEdit` buttons do not take the focus out of the text | commands |
 | `ui.js` | Title bar, status bar (save state per SPEC 6.4 + last message), notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events, fileio, autosave, drafts |
 

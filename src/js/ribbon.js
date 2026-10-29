@@ -24,7 +24,8 @@
                 // Text groups: rows of small buttons (the name shows on hover), as in PowerPoint.
                 {
                     label: 'Font',
-                    rows: [[['clearFormatting', 'clearFormatting']],
+                    rows: [[{ control: 'fontFamily' }, { control: 'fontSize' }, ['growFont', 'growFont'],
+                        ['shrinkFont', 'shrinkFont'], ['clearFormatting', 'clearFormatting']],
                         [['bold', 'bold'], ['italic', 'italic'], ['underline', 'underline'],
                             ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript']]],
                 },
@@ -113,7 +114,8 @@
             let buttonsNode;
             if (group.rows) {
                 buttonsNode = el('div', { class: 'ribbon-rows' }, group.rows.map((row) =>
-                    el('div', { class: 'ribbon-row' }, row.map(([command, icon]) => commandButton(command, icon, true)))));
+                    el('div', { class: 'ribbon-row' }, row.map((item) => (item.control
+                        ? App.fontControls.create(item.control) : commandButton(item[0], item[1], true))))));
             } else {
                 buttonsNode = el('div', { class: 'ribbon-group-buttons' });
                 group.commands.forEach(([command, icon]) => buttonsNode.appendChild(commandButton(command, icon)));
@@ -223,5 +225,6 @@
                 button.setAttribute('aria-pressed', checked ? 'true' : 'false');
             }
         });
+        App.fontControls.refresh();
     };
 })();

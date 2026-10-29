@@ -995,3 +995,74 @@ test('formatting: styleState says which formatting every selected character has'
     assertEqual([state.superscript, state.subscript], [true, false]);
     box.frame.remove();
 });
+
+test('font size: a size on a selection goes on a span, in pt', async () => {
+    const result = await styled(['Alfa [Beta]'], 'font-size', '24pt');
+    assertEqual(result.lines, ['Alfa <span style="font-size: 24pt;">Beta</span>']);
+    assertEqual(result.action, 'Font size');
+});
+
+test('font size: one size for all the text of the box goes on the box itself', async () => {
+    const box = await formatBox(['Al|fa', '<span style="font-size: 30pt">Beta</span>'], 'font-size: 18pt;');
+    App.text.runAction(box.el, App.text.styleAction(box.el, 'font-size', '24pt', null));
+    assertEqual(Array.from(box.el.children).map((p) => p.innerHTML), ['Alfa', 'Beta']);
+    assertEqual(box.el.style.fontSize, '24pt');
+    box.frame.remove();
+});
+
+test('font size: an empty line gets the size itself (it keeps its height, and typing there uses it)', async () => {
+    const box = await formatBox(['Alfa', '|']);
+    App.text.runAction(box.el, App.text.styleAction(box.el, 'font-size', '32pt', box.caret));
+    assertEqual(box.el.lastElementChild.style.fontSize, '32pt');
+    assertEqual(box.el.firstElementChild.innerHTML, 'Alfa', 'the other line is unchanged');
+    box.frame.remove();
+});
+
+test('font size: grow and shrink step through the size list, each piece from its own size', async () => {
+    const result = await styled(['[Alfa <span style="font-size: 24pt">Beta</span>]'], 'grow', null, 'font-size: 18pt;');
+    assertEqual(result.lines, ['<span style="font-size: 20pt;">Alfa </span><span style="font-size: 28pt;">Beta</span>']);
+    const shrunk = await styled(['[Alfa <span style="font-size: 13pt">Beta</span>]'], 'shrink', null, 'font-size: 10.5pt;');
+    assertEqual(shrunk.lines, ['<span style="font-size: 10pt;">Alfa </span><span style="font-size: 12pt;">Beta</span>']);
+    const ends = await styled(['[Alfa]', 'Beta'], 'grow', null, 'font-size: 96pt;');
+    assertEqual(ends.lines, ['Alfa', 'Beta'], 'nothing above 96');
+    assertEqual(ends.action, null);
+});
+
+test('font size: px sizes count as pt (x 0.75, to the half point)', async () => {
+    const result = await styled(['[Alfa]', 'Beta'], 'grow', null, 'font-size: 15px;');   // 11.25pt -> 11.5 -> next: 12
+    assertEqual(result.lines, ['<span style="font-size: 12pt;">Alfa</span>', 'Beta']);
+});
+
+test('font: a font on a selection; a theme font is stored as its variable', async () => {
+    assertEqual((await styled(['Alfa [Beta]'], 'font-family', 'Georgia, serif')).lines,
+        ['Alfa <span style="font-family: Georgia, serif;">Beta</span>']);
+    assertEqual((await styled(['Alfa [Beta]'], 'font-family', 'var(--font-heading)')).lines,
+        ['Alfa <span style="font-family: var(--font-heading);">Beta</span>']);
+});
+
+test('font size and font: styleState shows one value, or null when the selection mixes them', async () => {
+    let box = await formatBox(['[Alfa <span style="font-size: 24pt; font-family: Georgia, serif">Be]ta</span>'],
+        'font-size: 18pt; font-family: var(--font-body);');
+    let state = App.text.styleState(box.el, box.caret);
+    assertEqual([state.fontSize, state.fontFamily], [null, null]);
+    box.frame.remove();
+    box = await formatBox(['Alfa <span style="font-size: 24pt; font-family: Georgia, serif">B|eta</span>'], 'font-size: 18pt;');
+    state = App.text.styleState(box.el, box.caret);
+    assertEqual([state.fontSize, state.fontFamily], [24, 'Georgia, serif']);
+    box.frame.remove();
+    box = await formatBox(['Al|fa'], 'font-size: 15px; font-family: var(--font-body);');
+    state = App.text.styleState(box.el, box.caret);
+    assertEqual([state.fontSize, state.fontFamily], [11.5, 'var(--font-body)'], 'the box look, px shown as pt');
+    box.frame.remove();
+    box = await formatBox(['x<sup>[2]</sup>'], 'font-size: 20pt;');
+    assertEqual(App.text.styleState(box.el, box.caret).fontSize, 20, 'superscript shows the size of its text');
+    box.frame.remove();
+});
+
+test('font size: when the size moves onto the box, an empty line outside the selection keeps its size', async () => {
+    const box = await formatBox(['[Alfa]', '<br>'], 'font-size: 18pt;');
+    App.text.runAction(box.el, App.text.styleAction(box.el, 'font-size', '24pt', box.caret));
+    assertEqual(box.el.style.fontSize, '24pt');
+    assertEqual(box.el.lastElementChild.style.fontSize, '18pt');
+    box.frame.remove();
+});

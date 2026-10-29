@@ -58,7 +58,7 @@
      * Run a command by name. Commands may be async (open, save); any error
      * ends up in one dialog instead of failing silently.
      */
-    App.commands.run = function run(name) {
+    App.commands.run = function run(name, value) {
         const command = registry.get(name);
         if (!command) {
             throw new Error('Unknown command: ' + name);
@@ -67,7 +67,7 @@
             return Promise.resolve();
         }
         return Promise.resolve()
-            .then(() => command.run())
+            .then(() => command.run(value))
             .catch((error) => {
                 App.ui.setBusy(null);
                 console.error(error);
@@ -160,6 +160,23 @@
                 isEnabled: () => App.text.canStyle(),
                 isChecked: () => !!App.text.currentStyleState()[name],
             });
+        });
+        // The font list and size box pass the chosen value (fontcontrols.js).
+        App.commands.define('setFontFamily', {
+            label: 'Font', keepsEdit: true, run: (value) => App.text.applyStyle('font-family', value),
+            isEnabled: () => App.text.canStyle(),
+        });
+        App.commands.define('setFontSize', {
+            label: 'Font size', keepsEdit: true, run: (value) => App.text.applyStyle('font-size', value),
+            isEnabled: () => App.text.canStyle(),
+        });
+        App.commands.define('growFont', {
+            label: 'Increase font size', keepsEdit: true, run: () => App.text.applyStyle('grow'),
+            isEnabled: () => App.text.canStyle(),
+        });
+        App.commands.define('shrinkFont', {
+            label: 'Decrease font size', keepsEdit: true, run: () => App.text.applyStyle('shrink'),
+            isEnabled: () => App.text.canStyle(),
         });
         App.commands.define('clearFormatting', {
             label: 'Clear formatting', keepsEdit: true, run: () => App.text.applyStyle('clear'),

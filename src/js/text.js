@@ -1689,19 +1689,59 @@
 
     const TOGGLES = { bold: 'b', italic: 'i', underline: 'u', strikethrough: 's', superscript: 'sup', subscript: 'sub' };
     const STYLE_LABELS = { bold: 'Bold', italic: 'Italic', underline: 'Underline', strikethrough: 'Strikethrough',
-        superscript: 'Superscript', subscript: 'Subscript', clear: 'Clear formatting' };
+        superscript: 'Superscript', subscript: 'Subscript', clear: 'Clear formatting', 'font-family': 'Font',
+        'font-size': 'Font size', grow: 'Increase font size', shrink: 'Decrease font size' };
+    // Commands that set a size: an empty line takes it too (its height, and what is typed there later).
+    const SIZE_STYLES = ['font-size', 'grow', 'shrink'];
+    // The font size list (SPEC Phase 3, "Font sizes"); Increase / Decrease step through it.
+    App.text.FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
     // Bold and italic can also come from the box itself (.el font-weight / font-style).
     const BOX_FORMATS = { b: ['font-weight', 'bold'], i: ['font-style', 'italic'] };
     const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
 
-    /* Bold / italic as the browser shows them (null in a document that is not displayed). */
-    function shownFormats(element) {
+    /*
+     * Bold, italic and size (pt) as the browser shows them, or null in a document
+     * that is not displayed. The size is that of the text around a superscript
+     * (which the browser draws smaller), as PowerPoint shows it.
+     */
+    function shownLook(element) {
         const view = element.ownerDocument.defaultView;
         if (!view) {
             return null;
         }
         const computed = view.getComputedStyle(element);
-        return { b: parseInt(computed.fontWeight, 10) >= 600, i: /italic|oblique/.test(computed.fontStyle) };
+        let sized = element;
+        while ((tagOf(sized) === 'sup' || tagOf(sized) === 'sub') && sized.parentElement) {
+            sized = sized.parentElement;
+        }
+        const points = parseFloat(view.getComputedStyle(sized).fontSize) * 0.75;
+        return { b: parseInt(computed.fontWeight, 10) >= 600, i: /italic|oblique/.test(computed.fontStyle),
+            size: Math.round(points * 2) / 2 };
+    }
+
+    /* The next size in the list above (direction 1) or below (-1) `size`; the same size at the ends. */
+    function stepSize(size, direction) {
+        const sizes = App.text.FONT_SIZES;
+        if (direction > 0) {
+            const next = sizes.find((candidate) => candidate > size);
+            return next !== undefined ? next : size;
+        }
+        const smaller = sizes.filter((candidate) => candidate < size);
+        return smaller.length > 0 ? smaller[smaller.length - 1] : size;
+    }
+
+    /* A run's size in pt: its own, else what the browser shows. */
+    function sizeOf(run) {
+        const own = run.styles['font-size'] ? parseFloat(toPoints(run.styles['font-size'])) : NaN;
+        return !isNaN(own) ? own : run.shown ? run.shown.size : null;
+    }
+
+    /* The size a command gives text (or an empty line) whose size is now `size`. */
+    function newSize(style, value, size) {
+        if (style === 'font-size') {
+            return toPoints(value);
+        }
+        return size === null ? null : stepSize(size, style === 'grow' ? 1 : -1) + 'pt';
     }
 
     /* The runs of a line. Text without its own size or colour takes the line's (see derivedLook). */
@@ -1717,7 +1757,7 @@
             if (item.nodeType !== Node.TEXT_NODE) {
                 return { br: true };
             }
-            const run = { text: item.data, formats: new Set(), styles: {}, href: null, shown: shownFormats(item.parentElement) };
+            const run = { text: item.data, formats: new Set(), styles: {}, href: null, shown: shownLook(item.parentElement) };
             for (let node = item.parentElement; node && node !== line; node = node.parentElement) {
                 const tag = tagOf(node);
                 if (TAG_FORMATS[tag]) {
@@ -1852,6 +1892,9 @@
         const ordered = [caret.anchor, caret.focus].sort(comparePositions);
         const [from, to] = ordered;
         if (comparePositions(from, to) === 0) {
+            if (lines[from.p] && isEmptyLine(lines[from.p])) {
+                return [{ index: from.p, start: 0, end: Infinity }];   // an empty line: the line itself
+            }
             const word = lines[from.p] ? wordAround(lines[from.p], from.o) : null;
             return word ? [{ index: from.p, start: word.start, end: word.end }] : null;
         }
@@ -1871,7 +1914,7 @@
      * written on the box itself (the box's look, as after an import) instead
      * of on each piece.
      */
-    function liftToBox(element, allRuns) {
+    function liftToBox(element, allRuns, lines) {
         const texts = allRuns.filter((run) => !run.br && run.text !== '');
         if (texts.length === 0) {
             return;
@@ -1882,6 +1925,22 @@
                 texts.forEach((run) => run.formats.delete(format));
             }
         });
+        ['font-family', 'font-size'].forEach((property) => {
+            const value = texts[0].styles[property];
+            if (value && texts.every((run) => run.styles[property] === value)) {
+                if (property === 'font-size') {
+                    // Empty lines that follow the box's size keep the one they have now.
+                    lines.filter((line) => isEmptyLine(line) && !line.style.getPropertyValue('font-size')).forEach((line) => {
+                        const look = shownLook(line);
+                        if (look) {
+                            line.style.setProperty('font-size', look.size + 'pt');
+                        }
+                    });
+                }
+                element.style.setProperty(property, value);
+                texts.forEach((run) => { delete run.styles[property]; });
+            }
+        });
     }
 
     /* Changes the selected runs for one command; allRuns = every run of the box (bold can move off the box). */
@@ -1890,6 +1949,19 @@
             selected.forEach((run) => {
                 run.formats.clear();
                 run.styles = {};
+            });
+            return;
+        }
+        if (style === 'font-family') {
+            selected.forEach((run) => { run.styles['font-family'] = value; });
+            return;
+        }
+        if (SIZE_STYLES.indexOf(style) !== -1) {
+            selected.forEach((run) => {
+                const size = newSize(style, value, sizeOf(run));
+                if (size) {
+                    run.styles['font-size'] = size;
+                }
             });
             return;
         }
@@ -1904,7 +1976,7 @@
             });
             return;
         }
-        const box = shownFormats(element);
+        const box = shownLook(element);
         if (BOX_FORMATS[format] && box && box[format]) {
             // The box is bold: the bold moves onto its text, so part of it can lose it.
             element.style.setProperty(BOX_FORMATS[format][0], 'normal');
@@ -1933,9 +2005,22 @@
             return null;
         }
         const lines = textLines(element);
-        const hasText = segments.some((segment) => sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end)
-            .selected.length > 0);
-        if (!hasText) {
+        const selectedText = [];
+        segments.forEach((segment) => {
+            selectedText.push(...sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end).selected);
+        });
+        const sizes = SIZE_STYLES.indexOf(style) !== -1;
+        // Empty lines in the selection take a size too (they have no text to carry it).
+        const emptyLines = sizes ? segments.map((segment) => lines[segment.index]).filter(isEmptyLine) : [];
+        if (sizes && style !== 'font-size') {
+            // Increase / Decrease at the end of the list change nothing: no undo step either.
+            const changes = (size) => size !== null && parseFloat(newSize(style, value, size)) !== size;
+            const lineSize = (line) => (shownLook(line) ? shownLook(line).size : null);
+            if (!selectedText.some((run) => changes(sizeOf(run))) && !emptyLines.some((line) => changes(lineSize(line)))) {
+                return null;
+            }
+        }
+        if (selectedText.length === 0 && emptyLines.length === 0) {
             return null;
         }
         return {
@@ -1943,6 +2028,7 @@
             run: () => {
                 // Read everything before changing anything: the box's look decides what the text shows.
                 const perLine = lines.map((line) => readRuns(line));
+                const emptySizes = emptyLines.map((line) => newSize(style, value, shownLook(line) ? shownLook(line).size : null));
                 const selected = [];
                 segments.forEach((segment) => {
                     const sliced = sliceRuns(perLine[segment.index], segment.start, segment.end);
@@ -1951,8 +2037,13 @@
                 });
                 const allRuns = [].concat(...perLine);
                 changeRuns(element, style, value, selected, allRuns);
-                liftToBox(element, allRuns);
+                liftToBox(element, allRuns, lines);
                 lines.forEach((line, index) => writeRuns(line, perLine[index]));
+                emptyLines.forEach((line, index) => {
+                    if (emptySizes[index]) {
+                        line.style.setProperty('font-size', emptySizes[index]);
+                    }
+                });
                 return caret;
             },
         };
@@ -1986,11 +2077,22 @@
             state[style] = runs.length > 0 && runs.every((run) => hasFormat(run, TOGGLES[style]));
         });
         if (runs.length === 0) {
-            // An empty line: the box's own bold / italic.
-            const box = shownFormats(element);
+            // An empty line: the box's own bold / italic, the line's size.
+            const box = shownLook(element);
             state.bold = !!(box && box.b);
             state.italic = !!(box && box.i);
+            const line = caret ? lines[Math.min(caret.focus.p, lines.length - 1)] : null;
+            const look = line ? shownLook(line) : null;
+            state.fontSize = look ? look.size : null;
+        } else {
+            const sizes = runs.map(sizeOf);
+            state.fontSize = sizes.every((size) => size === sizes[0]) ? sizes[0] : null;
         }
+        // The font as written (a theme font stays "var(--font-body)"), else as the browser has it.
+        const boxFont = element.style.getPropertyValue('font-family') ||
+            (element.ownerDocument.defaultView ? element.ownerDocument.defaultView.getComputedStyle(element).fontFamily : null);
+        const fonts = (runs.length > 0 ? runs : [{ styles: {} }]).map((run) => run.styles['font-family'] || boxFont);
+        state.fontFamily = fonts.every((font) => font === fonts[0]) ? fonts[0] : null;
         return state;
     };
 
@@ -2235,7 +2337,7 @@
         }
         const model = before || after;
         const run = model ? copyRun(model, text) : { text: text, formats: new Set(), styles: spanStyles(lines[at.p]),
-            href: null, shown: shownFormats(lines[at.p]) };
+            href: null, shown: shownLook(lines[at.p]) };
         const split = sliceRuns(runs, at.o, at.o);
         let index = 0;
         let position = 0;
@@ -2247,7 +2349,7 @@
         perLine[at.p] = split.runs;
         const allRuns = [].concat(...perLine);
         styles.forEach(([style, value]) => changeRuns(element, style, value, [run], allRuns));
-        liftToBox(element, allRuns);
+        liftToBox(element, allRuns, lines);
         lines.forEach((line, i) => writeRuns(line, perLine[i]));
         App.text.normalize(element);
         App.text.setCaret(element, caretAt({ p: at.p, o: at.o + text.length }));
@@ -2434,6 +2536,18 @@
         App.selection.refresh();
     }
 
+    /* Put the focus back into the text being edited (after the size box had it), keeping the selection. */
+    App.text.refocus = function refocus() {
+        if (!editing) {
+            return;
+        }
+        const caret = App.text.getCaret(editing.element);
+        editing.element.focus({ preventScroll: true });
+        if (caret) {
+            App.text.setCaret(editing.element, caret);
+        }
+    };
+
     /* Whether a formatting command can act now: a text box is being edited or is selected. */
     App.text.canStyle = function canStyle() {
         return listTarget() !== null;
@@ -2447,12 +2561,18 @@
         }
         const state = App.text.styleState(target.element, target.caret);
         if (pending && editing && target.caret && comparePositions(pending.caret.focus, target.caret.focus) === 0) {
-            pending.styles.forEach(([style]) => {
+            pending.styles.forEach(([style, value]) => {
                 if (style === 'clear') {
-                    const box = shownFormats(target.element);
+                    const box = shownLook(target.element);
                     Object.keys(TOGGLES).forEach((name) => { state[name] = false; });
                     state.bold = !!(box && box.b);
                     state.italic = !!(box && box.i);
+                } else if (style === 'font-size') {
+                    state.fontSize = parseFloat(toPoints(value));
+                } else if (style === 'grow' || style === 'shrink') {
+                    state.fontSize = state.fontSize ? stepSize(state.fontSize, style === 'grow' ? 1 : -1) : state.fontSize;
+                } else if (style === 'font-family') {
+                    state.fontFamily = value;
                 } else if (TOGGLES[style]) {
                     state[style] = !state[style];
                     if (state[style] && (style === 'superscript' || style === 'subscript')) {

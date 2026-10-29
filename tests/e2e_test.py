@@ -609,6 +609,74 @@ def test_character_formatting(browser):
     editor.close()
 
 
+def test_font_and_size(browser):
+    """Home > Font: the font list, the size box (list and typed), Increase / Decrease and their keys."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    box_style = lambda: page.evaluate(  # noqa: E731
+        "() => App.deck.getDocument().querySelector('[data-id=\"e7\"]').getAttribute('style')")
+    last_line = lambda: page.evaluate(  # noqa: E731
+        "() => App.deck.getDocument().querySelector('[data-id=\"e7\"]').lastElementChild.innerHTML")
+    size_box = page.locator("#ribbon-panel .font-size-input")
+    font_box = page.locator("#ribbon-panel .font-family-button")
+    shows = lambda locator, text: wait_until(  # noqa: E731
+        page, "([s, t]) => { const n = document.querySelector(s); return n && (n.value ?? n.textContent) === t; }",
+        [locator, text], timeout=3000)
+    start = last_line()
+    shows("#ribbon-panel .font-size-input", "16.5")
+    shows("#ribbon-panel .font-family-button .font-name", "Calibri (Body)")
+    page.keyboard.press("Control+[")   # the box is selected: all its text, one size, so the box's own size
+    check("font-size: 16pt" in box_style() and "<span" not in last_line(), f"Ctrl+[ on the box: {box_style()}")
+    shows("#ribbon-panel .font-size-input", "16")
+    page.keyboard.press("Control+z")
+    check("font-size: 16.5pt" in box_style(), "Ctrl+Z")
+
+    page.keyboard.press("Enter")   # edit, cursor at the end
+    page.keyboard.press("Control+Shift+ArrowLeft")   # the last word
+    page.keyboard.press("Control+]")
+    check(last_line().endswith('<span style="font-size: 18pt;">compras</span>'), f"Ctrl+] grows to 18: {last_line()}")
+    shows("#ribbon-panel .font-size-input", "18")
+    page.keyboard.press("Control+Shift+Period")   # Ctrl+Shift+> on a US keyboard
+    check('font-size: 20pt' in last_line(), f"Ctrl+Shift+> grows to 20: {last_line()}")
+
+    size_box.click()
+    size_box.fill("30")
+    size_box.press("Enter")
+    check('font-size: 30pt' in last_line(), f"a typed size: {last_line()}")
+    check(page.evaluate("App.text.isEditing() && document.activeElement.id === 'deck-frame'"),
+          "still editing, the focus is back in the text")
+    check(page.evaluate("JSON.stringify(App.text.getCaret(App.text.editingElement()))") ==
+          '{"anchor":{"p":3,"o":70},"focus":{"p":3,"o":63}}', "the word is still selected")
+
+    page.locator("#ribbon-panel .font-size-menu-button").click()
+    page.locator(".font-size-menu .menu-item", has_text="40").first.click()
+    check('font-size: 40pt' in last_line(), f"a size from the list: {last_line()}")
+
+    font_box.click()
+    page.locator(".font-family-menu .menu-item", has_text="Georgia").click()
+    check('font-family: Georgia, serif' in last_line(), f"Georgia from the font list: {last_line()}")
+    shows("#ribbon-panel .font-family-button .font-name", "Georgia")
+    font_box.click()
+    page.locator(".font-family-menu .menu-item", has_text="(Headings)").click()
+    check('font-family: var(--font-heading)' in last_line(), f"the theme heading font is a variable: {last_line()}")
+
+    page.keyboard.press("Home")
+    page.keyboard.press("Shift+End")
+    shows("#ribbon-panel .font-size-input", "")   # mixed sizes: blank, as in PowerPoint
+
+    page.keyboard.press("Escape")
+    for _ in range(10):
+        if last_line() == start:
+            break
+        page.keyboard.press("Control+z")
+    check(last_line() == start and "font-size: 16.5pt" in box_style(), f"every step undoes: {last_line()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1556,6 +1624,7 @@ TESTS = [
     test_bullet_keys,
     test_list_buttons,
     test_character_formatting,
+    test_font_and_size,
 ]
 
 

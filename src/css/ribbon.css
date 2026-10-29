@@ -66,6 +66,23 @@
 .ribbon-row { display: flex; gap: 2px; align-items: center; }
 .ribbon-button.small { min-width: 0; padding: 3px; }
 .ribbon-button.small .icon { width: 20px; height: 20px; }
+
+/* Home > Font: the font list and the size box (fontcontrols.js). */
+.font-family-button, .font-size-box {
+    display: flex; align-items: center; height: 28px;
+    border: 1px solid var(--border); border-radius: 3px; background: var(--surface);
+}
+.font-family-button { width: 168px; gap: 4px; padding: 0 4px 0 6px; cursor: pointer; text-align: left; }
+.font-name { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.font-arrow, .font-size-menu-button { color: var(--text-muted); font-size: 11px; }
+.font-size-box { width: 64px; margin-right: 4px; }
+.font-size-input { width: 40px; height: 100%; padding: 0 4px; border: 0; background: transparent; font: inherit; }
+.font-size-menu-button { flex: 1; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--border); background: transparent; cursor: pointer; }
+.font-family-button:disabled, .font-size-box:has(:disabled) { opacity: 0.4; cursor: default; }
+.font-family-menu, .font-size-menu { min-width: 0; max-height: 360px; overflow-y: auto; }
+.font-family-menu { width: 220px; }
+.font-size-menu { width: 64px; }
+.font-family-menu .menu-item, .font-size-menu .menu-item { padding: 5px 10px; }
 .ribbon-note {
     align-self: center; max-width: 560px; padding: 0 14px;
     color: var(--text-muted); font-size: 12px; line-height: 1.4;

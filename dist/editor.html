@@ -203,6 +203,23 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .ribbon-row { display: flex; gap: 2px; align-items: center; }
 .ribbon-button.small { min-width: 0; padding: 3px; }
 .ribbon-button.small .icon { width: 20px; height: 20px; }
+
+/* Home > Font: the font list and the size box (fontcontrols.js). */
+.font-family-button, .font-size-box {
+    display: flex; align-items: center; height: 28px;
+    border: 1px solid var(--border); border-radius: 3px; background: var(--surface);
+}
+.font-family-button { width: 168px; gap: 4px; padding: 0 4px 0 6px; cursor: pointer; text-align: left; }
+.font-name { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.font-arrow, .font-size-menu-button { color: var(--text-muted); font-size: 11px; }
+.font-size-box { width: 64px; margin-right: 4px; }
+.font-size-input { width: 40px; height: 100%; padding: 0 4px; border: 0; background: transparent; font: inherit; }
+.font-size-menu-button { flex: 1; height: 100%; padding: 0; border: 0; border-left: 1px solid var(--border); background: transparent; cursor: pointer; }
+.font-family-button:disabled, .font-size-box:has(:disabled) { opacity: 0.4; cursor: default; }
+.font-family-menu, .font-size-menu { min-width: 0; max-height: 360px; overflow-y: auto; }
+.font-family-menu { width: 220px; }
+.font-size-menu { width: 64px; }
+.font-family-menu .menu-item, .font-size-menu .menu-item { padding: 5px 10px; }
 .ribbon-note {
     align-self: center; max-width: 560px; padding: 0 14px;
     color: var(--text-muted); font-size: 12px; line-height: 1.4;
@@ -1174,6 +1191,11 @@ App.createEventBus = function createEventBus() {
         ['Ctrl+I', 'italic', { whileTyping: true }],
         // Ctrl+U would otherwise show the page source.
         ['Ctrl+U', 'underline', { whileTyping: true, blockBrowserDefault: true }],
+        // Font size: Ctrl+] / Ctrl+[ and, as in PowerPoint, Ctrl+Shift+> / Ctrl+Shift+<.
+        ['Ctrl+]', 'growFont', { whileTyping: true }],
+        ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
+        ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],
+        ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
         ['Shift+F10', 'contextMenu'],
         ['ContextMenu', 'contextMenu'],
     ];
@@ -3309,19 +3331,59 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     const TOGGLES = { bold: 'b', italic: 'i', underline: 'u', strikethrough: 's', superscript: 'sup', subscript: 'sub' };
     const STYLE_LABELS = { bold: 'Bold', italic: 'Italic', underline: 'Underline', strikethrough: 'Strikethrough',
-        superscript: 'Superscript', subscript: 'Subscript', clear: 'Clear formatting' };
+        superscript: 'Superscript', subscript: 'Subscript', clear: 'Clear formatting', 'font-family': 'Font',
+        'font-size': 'Font size', grow: 'Increase font size', shrink: 'Decrease font size' };
+    // Commands that set a size: an empty line takes it too (its height, and what is typed there later).
+    const SIZE_STYLES = ['font-size', 'grow', 'shrink'];
+    // The font size list (SPEC Phase 3, "Font sizes"); Increase / Decrease step through it.
+    App.text.FONT_SIZES = [8, 9, 10, 10.5, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40, 44, 48, 54, 60, 66, 72, 80, 88, 96];
     // Bold and italic can also come from the box itself (.el font-weight / font-style).
     const BOX_FORMATS = { b: ['font-weight', 'bold'], i: ['font-style', 'italic'] };
     const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
 
-    /* Bold / italic as the browser shows them (null in a document that is not displayed). */
-    function shownFormats(element) {
+    /*
+     * Bold, italic and size (pt) as the browser shows them, or null in a document
+     * that is not displayed. The size is that of the text around a superscript
+     * (which the browser draws smaller), as PowerPoint shows it.
+     */
+    function shownLook(element) {
         const view = element.ownerDocument.defaultView;
         if (!view) {
             return null;
         }
         const computed = view.getComputedStyle(element);
-        return { b: parseInt(computed.fontWeight, 10) >= 600, i: /italic|oblique/.test(computed.fontStyle) };
+        let sized = element;
+        while ((tagOf(sized) === 'sup' || tagOf(sized) === 'sub') && sized.parentElement) {
+            sized = sized.parentElement;
+        }
+        const points = parseFloat(view.getComputedStyle(sized).fontSize) * 0.75;
+        return { b: parseInt(computed.fontWeight, 10) >= 600, i: /italic|oblique/.test(computed.fontStyle),
+            size: Math.round(points * 2) / 2 };
+    }
+
+    /* The next size in the list above (direction 1) or below (-1) `size`; the same size at the ends. */
+    function stepSize(size, direction) {
+        const sizes = App.text.FONT_SIZES;
+        if (direction > 0) {
+            const next = sizes.find((candidate) => candidate > size);
+            return next !== undefined ? next : size;
+        }
+        const smaller = sizes.filter((candidate) => candidate < size);
+        return smaller.length > 0 ? smaller[smaller.length - 1] : size;
+    }
+
+    /* A run's size in pt: its own, else what the browser shows. */
+    function sizeOf(run) {
+        const own = run.styles['font-size'] ? parseFloat(toPoints(run.styles['font-size'])) : NaN;
+        return !isNaN(own) ? own : run.shown ? run.shown.size : null;
+    }
+
+    /* The size a command gives text (or an empty line) whose size is now `size`. */
+    function newSize(style, value, size) {
+        if (style === 'font-size') {
+            return toPoints(value);
+        }
+        return size === null ? null : stepSize(size, style === 'grow' ? 1 : -1) + 'pt';
     }
 
     /* The runs of a line. Text without its own size or colour takes the line's (see derivedLook). */
@@ -3337,7 +3399,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (item.nodeType !== Node.TEXT_NODE) {
                 return { br: true };
             }
-            const run = { text: item.data, formats: new Set(), styles: {}, href: null, shown: shownFormats(item.parentElement) };
+            const run = { text: item.data, formats: new Set(), styles: {}, href: null, shown: shownLook(item.parentElement) };
             for (let node = item.parentElement; node && node !== line; node = node.parentElement) {
                 const tag = tagOf(node);
                 if (TAG_FORMATS[tag]) {
@@ -3472,6 +3534,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         const ordered = [caret.anchor, caret.focus].sort(comparePositions);
         const [from, to] = ordered;
         if (comparePositions(from, to) === 0) {
+            if (lines[from.p] && isEmptyLine(lines[from.p])) {
+                return [{ index: from.p, start: 0, end: Infinity }];   // an empty line: the line itself
+            }
             const word = lines[from.p] ? wordAround(lines[from.p], from.o) : null;
             return word ? [{ index: from.p, start: word.start, end: word.end }] : null;
         }
@@ -3491,7 +3556,7 @@ App.template.newDeckHtml = function newDeckHtml() {
      * written on the box itself (the box's look, as after an import) instead
      * of on each piece.
      */
-    function liftToBox(element, allRuns) {
+    function liftToBox(element, allRuns, lines) {
         const texts = allRuns.filter((run) => !run.br && run.text !== '');
         if (texts.length === 0) {
             return;
@@ -3502,6 +3567,22 @@ App.template.newDeckHtml = function newDeckHtml() {
                 texts.forEach((run) => run.formats.delete(format));
             }
         });
+        ['font-family', 'font-size'].forEach((property) => {
+            const value = texts[0].styles[property];
+            if (value && texts.every((run) => run.styles[property] === value)) {
+                if (property === 'font-size') {
+                    // Empty lines that follow the box's size keep the one they have now.
+                    lines.filter((line) => isEmptyLine(line) && !line.style.getPropertyValue('font-size')).forEach((line) => {
+                        const look = shownLook(line);
+                        if (look) {
+                            line.style.setProperty('font-size', look.size + 'pt');
+                        }
+                    });
+                }
+                element.style.setProperty(property, value);
+                texts.forEach((run) => { delete run.styles[property]; });
+            }
+        });
     }
 
     /* Changes the selected runs for one command; allRuns = every run of the box (bold can move off the box). */
@@ -3510,6 +3591,19 @@ App.template.newDeckHtml = function newDeckHtml() {
             selected.forEach((run) => {
                 run.formats.clear();
                 run.styles = {};
+            });
+            return;
+        }
+        if (style === 'font-family') {
+            selected.forEach((run) => { run.styles['font-family'] = value; });
+            return;
+        }
+        if (SIZE_STYLES.indexOf(style) !== -1) {
+            selected.forEach((run) => {
+                const size = newSize(style, value, sizeOf(run));
+                if (size) {
+                    run.styles['font-size'] = size;
+                }
             });
             return;
         }
@@ -3524,7 +3618,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             });
             return;
         }
-        const box = shownFormats(element);
+        const box = shownLook(element);
         if (BOX_FORMATS[format] && box && box[format]) {
             // The box is bold: the bold moves onto its text, so part of it can lose it.
             element.style.setProperty(BOX_FORMATS[format][0], 'normal');
@@ -3553,9 +3647,22 @@ App.template.newDeckHtml = function newDeckHtml() {
             return null;
         }
         const lines = textLines(element);
-        const hasText = segments.some((segment) => sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end)
-            .selected.length > 0);
-        if (!hasText) {
+        const selectedText = [];
+        segments.forEach((segment) => {
+            selectedText.push(...sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end).selected);
+        });
+        const sizes = SIZE_STYLES.indexOf(style) !== -1;
+        // Empty lines in the selection take a size too (they have no text to carry it).
+        const emptyLines = sizes ? segments.map((segment) => lines[segment.index]).filter(isEmptyLine) : [];
+        if (sizes && style !== 'font-size') {
+            // Increase / Decrease at the end of the list change nothing: no undo step either.
+            const changes = (size) => size !== null && parseFloat(newSize(style, value, size)) !== size;
+            const lineSize = (line) => (shownLook(line) ? shownLook(line).size : null);
+            if (!selectedText.some((run) => changes(sizeOf(run))) && !emptyLines.some((line) => changes(lineSize(line)))) {
+                return null;
+            }
+        }
+        if (selectedText.length === 0 && emptyLines.length === 0) {
             return null;
         }
         return {
@@ -3563,6 +3670,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             run: () => {
                 // Read everything before changing anything: the box's look decides what the text shows.
                 const perLine = lines.map((line) => readRuns(line));
+                const emptySizes = emptyLines.map((line) => newSize(style, value, shownLook(line) ? shownLook(line).size : null));
                 const selected = [];
                 segments.forEach((segment) => {
                     const sliced = sliceRuns(perLine[segment.index], segment.start, segment.end);
@@ -3571,8 +3679,13 @@ App.template.newDeckHtml = function newDeckHtml() {
                 });
                 const allRuns = [].concat(...perLine);
                 changeRuns(element, style, value, selected, allRuns);
-                liftToBox(element, allRuns);
+                liftToBox(element, allRuns, lines);
                 lines.forEach((line, index) => writeRuns(line, perLine[index]));
+                emptyLines.forEach((line, index) => {
+                    if (emptySizes[index]) {
+                        line.style.setProperty('font-size', emptySizes[index]);
+                    }
+                });
                 return caret;
             },
         };
@@ -3606,11 +3719,22 @@ App.template.newDeckHtml = function newDeckHtml() {
             state[style] = runs.length > 0 && runs.every((run) => hasFormat(run, TOGGLES[style]));
         });
         if (runs.length === 0) {
-            // An empty line: the box's own bold / italic.
-            const box = shownFormats(element);
+            // An empty line: the box's own bold / italic, the line's size.
+            const box = shownLook(element);
             state.bold = !!(box && box.b);
             state.italic = !!(box && box.i);
+            const line = caret ? lines[Math.min(caret.focus.p, lines.length - 1)] : null;
+            const look = line ? shownLook(line) : null;
+            state.fontSize = look ? look.size : null;
+        } else {
+            const sizes = runs.map(sizeOf);
+            state.fontSize = sizes.every((size) => size === sizes[0]) ? sizes[0] : null;
         }
+        // The font as written (a theme font stays "var(--font-body)"), else as the browser has it.
+        const boxFont = element.style.getPropertyValue('font-family') ||
+            (element.ownerDocument.defaultView ? element.ownerDocument.defaultView.getComputedStyle(element).fontFamily : null);
+        const fonts = (runs.length > 0 ? runs : [{ styles: {} }]).map((run) => run.styles['font-family'] || boxFont);
+        state.fontFamily = fonts.every((font) => font === fonts[0]) ? fonts[0] : null;
         return state;
     };
 
@@ -3855,7 +3979,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const model = before || after;
         const run = model ? copyRun(model, text) : { text: text, formats: new Set(), styles: spanStyles(lines[at.p]),
-            href: null, shown: shownFormats(lines[at.p]) };
+            href: null, shown: shownLook(lines[at.p]) };
         const split = sliceRuns(runs, at.o, at.o);
         let index = 0;
         let position = 0;
@@ -3867,7 +3991,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         perLine[at.p] = split.runs;
         const allRuns = [].concat(...perLine);
         styles.forEach(([style, value]) => changeRuns(element, style, value, [run], allRuns));
-        liftToBox(element, allRuns);
+        liftToBox(element, allRuns, lines);
         lines.forEach((line, i) => writeRuns(line, perLine[i]));
         App.text.normalize(element);
         App.text.setCaret(element, caretAt({ p: at.p, o: at.o + text.length }));
@@ -4054,6 +4178,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.selection.refresh();
     }
 
+    /* Put the focus back into the text being edited (after the size box had it), keeping the selection. */
+    App.text.refocus = function refocus() {
+        if (!editing) {
+            return;
+        }
+        const caret = App.text.getCaret(editing.element);
+        editing.element.focus({ preventScroll: true });
+        if (caret) {
+            App.text.setCaret(editing.element, caret);
+        }
+    };
+
     /* Whether a formatting command can act now: a text box is being edited or is selected. */
     App.text.canStyle = function canStyle() {
         return listTarget() !== null;
@@ -4067,12 +4203,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const state = App.text.styleState(target.element, target.caret);
         if (pending && editing && target.caret && comparePositions(pending.caret.focus, target.caret.focus) === 0) {
-            pending.styles.forEach(([style]) => {
+            pending.styles.forEach(([style, value]) => {
                 if (style === 'clear') {
-                    const box = shownFormats(target.element);
+                    const box = shownLook(target.element);
                     Object.keys(TOGGLES).forEach((name) => { state[name] = false; });
                     state.bold = !!(box && box.b);
                     state.italic = !!(box && box.i);
+                } else if (style === 'font-size') {
+                    state.fontSize = parseFloat(toPoints(value));
+                } else if (style === 'grow' || style === 'shrink') {
+                    state.fontSize = state.fontSize ? stepSize(state.fontSize, style === 'grow' ? 1 : -1) : state.fontSize;
+                } else if (style === 'font-family') {
+                    state.fontFamily = value;
                 } else if (TOGGLES[style]) {
                     state[style] = !state[style];
                     if (state[style] && (style === 'superscript' || style === 'subscript')) {
@@ -5885,6 +6027,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             '<path d="M6 14.5c.8 1.3 2.3 2 4 2 2.2 0 4-1.2 4-3 0-.8-.3-1.4-.8-2"/><path d="M3 10h14"/>',
         superscript: '<path d="M3 7l7 9M10 7l-7 9"/><path d="M13 4.5a1.5 1.5 0 1 1 2.5 1.1L13 8h3.5"/>',
         subscript: '<path d="M3 4l7 9M10 4l-7 9"/><path d="M13 13.5a1.5 1.5 0 1 1 2.5 1.1L13 17h3.5"/>',
+        growFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 7l2-2.5L18 7"/>',
+        shrinkFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 4.5l2 2.5 2-2.5"/>',
         clearFormatting: '<path d="M5 4.5h10M10 4.5l-3 11"/><path d="M12 12l5 5M17 12l-5 5"/>',
         bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
             '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
@@ -9634,7 +9778,7 @@ App.template.newDeckHtml = function newDeckHtml() {
      * Run a command by name. Commands may be async (open, save); any error
      * ends up in one dialog instead of failing silently.
      */
-    App.commands.run = function run(name) {
+    App.commands.run = function run(name, value) {
         const command = registry.get(name);
         if (!command) {
             throw new Error('Unknown command: ' + name);
@@ -9643,7 +9787,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             return Promise.resolve();
         }
         return Promise.resolve()
-            .then(() => command.run())
+            .then(() => command.run(value))
             .catch((error) => {
                 App.ui.setBusy(null);
                 console.error(error);
@@ -9737,6 +9881,23 @@ App.template.newDeckHtml = function newDeckHtml() {
                 isChecked: () => !!App.text.currentStyleState()[name],
             });
         });
+        // The font list and size box pass the chosen value (fontcontrols.js).
+        App.commands.define('setFontFamily', {
+            label: 'Font', keepsEdit: true, run: (value) => App.text.applyStyle('font-family', value),
+            isEnabled: () => App.text.canStyle(),
+        });
+        App.commands.define('setFontSize', {
+            label: 'Font size', keepsEdit: true, run: (value) => App.text.applyStyle('font-size', value),
+            isEnabled: () => App.text.canStyle(),
+        });
+        App.commands.define('growFont', {
+            label: 'Increase font size', keepsEdit: true, run: () => App.text.applyStyle('grow'),
+            isEnabled: () => App.text.canStyle(),
+        });
+        App.commands.define('shrinkFont', {
+            label: 'Decrease font size', keepsEdit: true, run: () => App.text.applyStyle('shrink'),
+            isEnabled: () => App.text.canStyle(),
+        });
         App.commands.define('clearFormatting', {
             label: 'Clear formatting', keepsEdit: true, run: () => App.text.applyStyle('clear'),
             isEnabled: () => App.text.canStyle(),
@@ -9802,6 +9963,216 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/fontcontrols.js ----
+/*
+ * fontcontrols.js - the font list and the font size box of Home > Font (SPEC Phase 3).
+ *
+ * Unlike the other ribbon buttons, these show a value: the font and size of
+ * the selected text (blank when the selection mixes them, as in PowerPoint).
+ * Choosing a font or a size runs a command; the text keeps its selection.
+ *
+ * - The font list starts with the deck's theme fonts, shown with their real
+ *   names ("Calibri (Headings)") and stored as var(--font-heading) /
+ *   var(--font-body), so changing the theme restyles the text; then the
+ *   Windows fonts of SPEC 2.1, each with a generic fallback.
+ * - The size box takes a typed size (Enter applies it, Esc goes back to the
+ *   text) or one from its list (App.text.FONT_SIZES).
+ *
+ * Talks to: commands.js (setFontFamily, setFontSize), text.js (what the
+ * selection has), deck.js (the theme fonts), ribbon.js (places the controls).
+ */
+
+(function () {
+    'use strict';
+
+    App.fontControls = {};
+
+    const el = (...args) => App.util.el(...args);
+
+    const THEME_FONTS = [['--font-heading', 'Headings'], ['--font-body', 'Body']];
+    const FONTS = [
+        ['Arial', 'Arial, sans-serif'],
+        ['Calibri', 'Calibri, sans-serif'],
+        ['Cambria', 'Cambria, serif'],
+        ['Consolas', 'Consolas, monospace'],
+        ['Georgia', 'Georgia, serif'],
+        ['Segoe UI', '"Segoe UI", sans-serif'],
+        ['Times New Roman', '"Times New Roman", serif'],
+        ['Verdana', 'Verdana, sans-serif'],
+    ];
+
+    let fontButton = null;
+    let sizeInput = null;
+    let menu = null;   // the one open list (fonts or sizes), or null
+
+    /* "Calibri" from '"Calibri", Arial, sans-serif'. */
+    function firstFamily(value) {
+        return value.split(',')[0].trim().replace(/^["']|["']$/g, '');
+    }
+
+    /* The fonts a theme variable stands for in the open deck ("Calibri, Arial, sans-serif"), or ''. */
+    function themeFontValue(variable) {
+        const doc = App.deck.getDocument();
+        return doc ? getComputedStyle(doc.documentElement).getPropertyValue(variable).trim() : '';
+    }
+
+    /* Its first font ("Calibri"), or null. */
+    function themeFontName(variable) {
+        const value = themeFontValue(variable);
+        return value ? firstFamily(value) : null;
+    }
+
+    /* What the font box shows for a font-family value. */
+    function fontLabel(value) {
+        if (!value) {
+            return '';
+        }
+        const theme = THEME_FONTS.find(([variable]) => value === 'var(' + variable + ')');
+        if (theme) {
+            return (themeFontName(theme[0]) || 'Theme font') + ' (' + theme[1] + ')';
+        }
+        return firstFamily(value);
+    }
+
+    /* Controls that work on the text being edited: a press on them keeps text editing. */
+    function keepEdit(node) {
+        node.setAttribute('data-keep-edit', '');
+        return node;
+    }
+
+    function closeMenu() {
+        if (menu) {
+            menu.remove();
+            menu = null;
+            window.removeEventListener('pointerdown', onOutsidePointerDown, true);
+            window.removeEventListener('keydown', onMenuKey, true);
+        }
+    }
+
+    function onOutsidePointerDown(event) {
+        if (menu && !menu.contains(event.target)) {
+            closeMenu();
+        }
+    }
+
+    function onMenuKey(event) {
+        if (event.key === 'Escape') {
+            event.stopPropagation();
+            closeMenu();
+        }
+    }
+
+    /*
+     * Open a list under `anchor`. items: [{ label, value, style }]; choosing one
+     * calls onChoose(value). Its items never take the focus, so the text keeps
+     * its cursor and selection.
+     */
+    function openMenu(anchor, className, items, onChoose) {
+        closeMenu();
+        menu = keepEdit(el('div', { class: 'menu ' + className, role: 'menu' }));
+        items.forEach((item) => {
+            if (item.separator) {
+                menu.appendChild(el('div', { class: 'menu-separator', role: 'separator' }));
+                return;
+            }
+            const button = el('button', {
+                type: 'button', class: 'menu-item', role: 'menuitem',
+                onmousedown: (event) => event.preventDefault(),
+                onclick: () => {
+                    closeMenu();
+                    onChoose(item.value);
+                },
+            }, [el('span', { class: 'menu-label', style: item.style || null }, [item.label])]);
+            menu.appendChild(button);
+        });
+        const rect = anchor.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = rect.bottom + 'px';
+        document.body.appendChild(menu);
+        window.addEventListener('pointerdown', onOutsidePointerDown, true);
+        window.addEventListener('keydown', onMenuKey, true);
+    }
+
+    function openFontMenu() {
+        const themeItems = THEME_FONTS.map(([variable]) => ({
+            label: fontLabel('var(' + variable + ')'), value: 'var(' + variable + ')',
+            style: 'font-family: ' + (themeFontValue(variable) || 'inherit'),
+        }));
+        const fontItems = FONTS.map(([name, value]) => ({ label: name, value: value, style: 'font-family: ' + value }));
+        openMenu(fontButton, 'font-family-menu', themeItems.concat([{ separator: true }], fontItems), (value) => {
+            App.commands.run('setFontFamily', value);
+        });
+    }
+
+    function openSizeMenu(anchor) {
+        const items = App.text.FONT_SIZES.map((size) => ({ label: String(size), value: size + 'pt' }));
+        openMenu(anchor, 'font-size-menu', items, (value) => App.commands.run('setFontSize', value));
+    }
+
+    /* A typed size: Enter applies it (1 to 999 pt), Esc goes back to the text unchanged. */
+    function onSizeKey(event) {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            const size = parseFloat(sizeInput.value.replace(',', '.'));
+            if (size >= 1 && size <= 999) {
+                App.commands.run('setFontSize', size + 'pt').then(() => App.text.refocus());
+            } else {
+                App.ui.setStatus('Type a font size between 1 and 999');
+            }
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            App.text.refocus();
+            App.fontControls.refresh();
+        }
+    }
+
+    function createFontFamily() {
+        fontButton = keepEdit(el('button', {
+            type: 'button', class: 'font-family-button', title: 'Font', 'aria-haspopup': 'menu',
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => (menu && menu.classList.contains('font-family-menu') ? closeMenu() : openFontMenu()),
+        }, [el('span', { class: 'font-name' }), el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾'])]));
+        return fontButton;
+    }
+
+    function createFontSize() {
+        sizeInput = keepEdit(el('input', {
+            type: 'text', class: 'font-size-input', title: 'Font size', 'aria-label': 'Font size', inputmode: 'decimal',
+            onkeydown: onSizeKey,
+            onblur: () => App.fontControls.refresh(),
+        }));
+        const arrow = keepEdit(el('button', {
+            type: 'button', class: 'font-size-menu-button', title: 'Font sizes', 'aria-haspopup': 'menu',
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => (menu && menu.classList.contains('font-size-menu') ? closeMenu() : openSizeMenu(sizeInput)),
+        }, ['▾']));
+        return el('div', { class: 'font-size-box' }, [sizeInput, arrow]);
+    }
+
+    /* The control named in the ribbon's layout ('fontFamily' or 'fontSize'). */
+    App.fontControls.create = function create(name) {
+        return name === 'fontFamily' ? createFontFamily() : createFontSize();
+    };
+
+    /* Show the selection's font and size; grey out when there is no text to format. */
+    App.fontControls.refresh = function refresh() {
+        if (!fontButton || !fontButton.isConnected) {
+            return;
+        }
+        const enabled = App.commands.isEnabled('setFontFamily');
+        const state = enabled ? App.text.currentStyleState() : {};
+        fontButton.disabled = !enabled;
+        fontButton.querySelector('.font-name').textContent = fontLabel(state.fontFamily);
+        sizeInput.disabled = !enabled;
+        sizeInput.nextSibling.disabled = !enabled;
+        if (document.activeElement !== sizeInput) {
+            sizeInput.value = state.fontSize ? String(state.fontSize) : '';
+        }
+    };
+})();
+
+</script>
+<script>
 // ---- js/ribbon.js ----
 /*
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
@@ -9829,7 +10200,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 // Text groups: rows of small buttons (the name shows on hover), as in PowerPoint.
                 {
                     label: 'Font',
-                    rows: [[['clearFormatting', 'clearFormatting']],
+                    rows: [[{ control: 'fontFamily' }, { control: 'fontSize' }, ['growFont', 'growFont'],
+                        ['shrinkFont', 'shrinkFont'], ['clearFormatting', 'clearFormatting']],
                         [['bold', 'bold'], ['italic', 'italic'], ['underline', 'underline'],
                             ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript']]],
                 },
@@ -9918,7 +10290,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             let buttonsNode;
             if (group.rows) {
                 buttonsNode = el('div', { class: 'ribbon-rows' }, group.rows.map((row) =>
-                    el('div', { class: 'ribbon-row' }, row.map(([command, icon]) => commandButton(command, icon, true)))));
+                    el('div', { class: 'ribbon-row' }, row.map((item) => (item.control
+                        ? App.fontControls.create(item.control) : commandButton(item[0], item[1], true))))));
             } else {
                 buttonsNode = el('div', { class: 'ribbon-group-buttons' });
                 group.commands.forEach(([command, icon]) => buttonsNode.appendChild(commandButton(command, icon)));
@@ -10028,6 +10401,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 button.setAttribute('aria-pressed', checked ? 'true' : 'false');
             }
         });
+        App.fontControls.refresh();
     };
 })();
 

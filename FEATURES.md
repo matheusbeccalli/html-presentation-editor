@@ -47,7 +47,7 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [x] Ribbon shell (Home, Insert, Arrange, Slide Show, Export tabs), Format pane and notes area placeholders laid out like PowerPoint
 - [x] Chromium only (SPEC 2.4): browsers without the File System Access API (Firefox) show a banner saying Save downloads a copy and to use Edge or Chrome
 - [x] **Done when:** a Copilot deck opens, shows all slides, saves back unchanged (except normalization), and the saved file presents on its own. *(Automated with the sample decks in `tests/e2e_test.py`; the manual checks below are for you.)*
-  - [ ] In Edge: File > Open a **real** Copilot deck (keep it in `private/`), check every slide is there and looks like the original
+  - [x] In Edge: File > Open a **real** Copilot deck (keep it in `private/`), check every slide is there and looks like the original
   - [x] Ctrl+S on a deck opened with File > Open: the first save asks you to confirm the file once (Save As opens on the same file; Edge refuses write permission to pages opened from disk), then the file on disk is overwritten and later saves need no confirmation (open it in Notepad to confirm)
   - [x] Drop a deck onto the window, then Ctrl+S: it saves to the same file
   - [x] Double-click the saved file: arrows, Space, Home/End and F (full screen) work; hidden slides are skipped
@@ -78,15 +78,15 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [x] Privacy settings (6.3): "Keep recovery drafts in this browser" on/off, retention days, "Remember recent files" on/off, "Delete all drafts now" (empties the whole IndexedDB), note that other HTML files opened from disk can read drafts
 - [x] IndexedDB unavailable → "Recovery unavailable" in the status bar, editor keeps working (every storage call in try/catch)
 - [x] Status indicator (6.4): Saved · Saving… · Unsaved changes · AutoSave off · Draft saved 14:32 · Recovery unavailable *(e.g. "Unsaved changes · Draft saved 14:32"; a new deck shows "Not saved yet")*
-- [ ] **Done when:** any element can be moved and resized precisely, every action undoes, and killing the browser mid-edit loses at most 30 seconds of work. Autosave (section 6): (1) with AutoSave on, closing the tab after an edit and reopening the file shows the edit; (2) with AutoSave off, killing the browser mid-edit and reopening offers to recover changes no older than 30 seconds; (3) "Delete all drafts now" leaves nothing in IndexedDB (DevTools > Application).
-  - [ ] In Edge: open a deck with File > Open, press Ctrl+S once (confirm the file as in Phase 1): the AutoSave switch at the top left turns On
-  - [ ] With AutoSave On: move an element, wait 5 seconds, close the tab, open the file again: the element is in its new place
-  - [ ] With AutoSave On: open the same file in Notepad, add a space and save it there; then move an element in the editor: the editor asks Reload / Save as copy / Overwrite; try Save as copy (a new file is written and AutoSave continues on it)
-  - [ ] File > Revert to version opened brings back the deck as opened, and Ctrl+Z undoes the revert
-  - [ ] With AutoSave Off: move an element, wait 30 seconds (status "Draft saved hh:mm"), end Edge in Task Manager, start Edge and open editor.html: "Recover unsaved changes?" appears with slide 1; choose Decide later, open the deck: the question comes back; Compare shows the moved slide; Recover brings the move back, Ctrl+Z undoes it
-  - [ ] Save the recovered deck, then in Edge DevTools (F12) > Application > IndexedDB > deck-editor > drafts: empty
-  - [ ] File > Settings: turn on "Remember recent files", OK; open a deck with File > Open; reload editor.html: the deck is under Recent on the welcome screen; clicking it shows the Open window already in the deck's folder
-  - [ ] Edit a deck, wait 30 s, then File > Settings > "Delete all drafts now": in DevTools > Application > IndexedDB > deck-editor, the stores drafts, draftHtml and recent are all empty (right-click > Refresh)
+- [x] **Done when:** any element can be moved and resized precisely, every action undoes, and killing the browser mid-edit loses at most 30 seconds of work. Autosave (section 6): (1) with AutoSave on, closing the tab after an edit and reopening the file shows the edit; (2) with AutoSave off, killing the browser mid-edit and reopening offers to recover changes no older than 30 seconds; (3) "Delete all drafts now" leaves nothing in IndexedDB (DevTools > Application).
+  - [x] In Edge: open a deck with File > Open, press Ctrl+S once (confirm the file as in Phase 1): the AutoSave switch at the top left turns On
+  - [x] With AutoSave On: move an element, wait 5 seconds, close the tab, open the file again: the element is in its new place
+  - [x] With AutoSave On: open the same file in Notepad, add a space and save it there; then move an element in the editor: the editor asks Reload / Save as copy / Overwrite; try Save as copy (a new file is written and AutoSave continues on it)
+  - [x] File > Revert to version opened brings back the deck as opened, and Ctrl+Z undoes the revert
+  - [x] With AutoSave Off: move an element, wait 30 seconds (status "Draft saved hh:mm"), end Edge in Task Manager, start Edge and open editor.html: "Recover unsaved changes?" appears with slide 1; choose Decide later, open the deck: the question comes back; Compare shows the moved slide; Recover brings the move back, Ctrl+Z undoes it
+  - [x] Save the recovered deck, then in Edge DevTools (F12) > Application > IndexedDB > deck-editor > drafts: empty
+  - [x] File > Settings: turn on "Remember recent files", OK; open a deck with File > Open; reload editor.html: the deck is under Recent on the welcome screen; clicking it shows the Open window already in the deck's folder
+  - [x] Edit a deck, wait 30 s, then File > Settings > "Delete all drafts now": in DevTools > Application > IndexedDB > deck-editor, the stores drafts, draftHtml and recent are all empty (right-click > Refresh)
 
 ## Phase 3: Text
 

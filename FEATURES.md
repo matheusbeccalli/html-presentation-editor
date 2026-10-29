@@ -99,21 +99,21 @@ Nested bullets are the top priority of this phase.
 - [ ] Text model: one `<p data-list="bullet|number|none" data-level="1..5">` per line, optional `data-start`; no `<ul>/<ol>/<li>` or headings inside text elements
 - [ ] Bullets and numbers drawn with CSS (`::before` + counters) from `<style data-deck-text>`, with a hanging indent; numbering per level, reset by a higher level (1, 2, a, b, 3)
 - [ ] Per-level list theme variables `--list-N-bullet / -number / -bullet-color / -bullet-size / -indent / -space-before` (defaults • – ▪ · ·, 1. a. i.)
-- [ ] `data-start` mirrored to an inline `counter-set` by the normalizer
+- [ ] `data-start` mirrored to an inline `counter-set` by the normalizer; each `<p>` gets the derived `font-size` and `color` of its first character (bullets follow the text)
 - [ ] `deck-format` bumped to 2; format-1 decks migrated on open (lists and headings converted, list variables and stylesheet added), noted in the import report
-- [ ] Import: nested `<ul>/<ol>/<li>` → flat paragraphs with levels; headings → `<p>` with their computed look kept as inline formatting
-- [ ] Import/paste: Word/Outlook `mso-list` levelN paragraphs → flat paragraphs (glyph spans removed)
+- [ ] Import: nested `<ul>/<ol>/<li>` → flat paragraphs with levels; headings → `<p>`, their look kept (box-wide look on the `.el`, differences as inline formatting); boxes with flex/grid/column layout flattened and listed in the import report
+- [ ] Import/paste: Word/Outlook `mso-list` levelN paragraphs → flat paragraphs (glyph spans removed); PowerPoint text keeps bullets and levels
 - [ ] Copy out of a text element also puts nested `<ul>/<ol>` HTML on the clipboard (bullets survive in Outlook/Word)
 
 *Editing*
 - [ ] Double-click a text element to edit (`contenteditable`)
-- [ ] Insert text box
+- [ ] Insert text box, PowerPoint style: click the button, then click on the slide (grows as you type) or drag to set the width
 - [ ] Toolbar: bold, italic, underline, strikethrough, superscript, subscript
-- [ ] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting
+- [ ] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting; theme fonts and theme colors stored as `var(--…)`
 - [ ] Toolbar: align left / center / right / justify
 - [ ] Line spacing and paragraph spacing
 - [ ] Format painter (copy the style of one text, apply to another)
-- [ ] Autofit: shrink text to fit its box, with an option to resize the box instead
+- [ ] Autofit (`data-autofit="shrink|resize|off"`): shrink text to fit, or grow the box; new boxes `resize`, imported boxes `off`
 - [ ] Spell check in Portuguese (`spellcheck="true"`, `lang="pt-BR"`)
 - [ ] Find & replace across all slides
 
@@ -138,9 +138,9 @@ Nested bullets are the top priority of this phase.
 - [ ] Idempotent (normalize twice == once), tested
 
 *Paste*
-- [ ] Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets/levels, links), drops fonts, sizes and colors ("Use Destination Theme")
+- [ ] Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets/levels, links), drops fonts, sizes and colors ("Use Destination Theme"); text copied inside the editor keeps all its formatting
 - [ ] Ctrl+Shift+V pastes plain text; paste-options button after a paste switches between the two
-- [ ] Works for paste from Word, Outlook, Copilot's chat window and web pages
+- [ ] Works for paste from Word, Outlook, PowerPoint, Copilot's chat window and web pages (fixtures captured with `tests/clipboard-capture.html`)
 
 *Undo*
 - [ ] Browser text undo intercepted (`beforeinput` historyUndo / historyRedo) and routed to `history.js`: one undo stack

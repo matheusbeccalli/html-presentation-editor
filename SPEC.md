@@ -151,7 +151,7 @@ Element types: `text`, `image`, `table`, `shape`, `chart`, `group`. Every elemen
 - Remove the deck's own `<script>` tags (Copilot decks often include navigation code). Warn the user and list what was removed.
 - "Normalize" converts flow-layout content to absolute positioning: measure each visible block with `getBoundingClientRect()` and write its position in px.
 - Decks at another size (e.g. 1920×1080) are scaled proportionally to 1280×720.
-- Text is converted to the flat-paragraph text model (Phase 3): nested `<ul>/<ol>/<li>` become `<p data-list data-level>`, headings become `<p>`, and the look is kept by turning the computed style into allowed inline formatting before tags and classes are removed.
+- Text is converted to the flat-paragraph text model (Phase 3): nested `<ul>/<ol>/<li>` become `<p data-list data-level>`, headings become `<p>`, and the look is kept before tags and classes are removed: what is the same for the whole text box (font, size, weight, color, alignment, letter spacing, upper case) goes on the text element's own style (`.el`), and only what differs inside it becomes allowed inline formatting. Text boxes whose layout the flat model cannot express (side-by-side flex/grid content, columns) are flattened anyway and listed in the import report as boxes to check.
 - Show a short import report: slides found, elements converted, items removed or blocked. Charts that carry JSON data but no SVG (as Copilot produces them, Appendix A) are rendered during import.
 
 **3.5 Editor and deck isolation**
@@ -202,11 +202,11 @@ The interface follows PowerPoint: a ribbon with tabs (Home, Insert, Arrange, Sli
 
 Nested bullets are on almost every slide the user makes, so they are the top priority of this phase.
 
-- Double-click a text element to edit (`contenteditable`). Insert text box.
-- Toolbar: bold, italic, underline, strikethrough, superscript, subscript, font family (Windows fonts from 2.1), font size (see "Font sizes"), color, highlight, clear formatting, align left/center/right/justify.
+- Double-click a text element to edit (`contenteditable`). Insert text box, PowerPoint style: click the button, then click on the slide (the box grows as you type) or drag to set its width.
+- Toolbar: bold, italic, underline, strikethrough, superscript, subscript, font family (Windows fonts from 2.1), font size (see "Font sizes"), color, highlight, clear formatting, align left/center/right/justify. The font list starts with "Heading font (theme)" and "Body font (theme)", and the color pickers start with a row of theme colors; these are stored as `var(--font-heading)`, `var(--color-primary)` …, so changing the theme (Phase 7) restyles the text.
 - Bullets and numbering with five indent levels (see "Text model" and "Bullet behavior"), line spacing and paragraph spacing.
 - Format painter (copy the style of one text, apply to another).
-- Autofit: shrink text to fit its box, with an option to resize the box instead.
+- Autofit, stored as `data-autofit="shrink|resize|off"` on the text element: shrink scales the text down with CSS to fit the box; resize grows the box's height to fit the text. New text boxes start with `resize`; imported boxes with `off`, so they keep their look.
 - Spell check in Portuguese (`spellcheck="true"`, `lang="pt-BR"`).
 - Find & replace across all slides.
 - All of it behind the `text.js` interface (3.7).
@@ -218,7 +218,7 @@ Nested bullets are on almost every slide the user makes, so they are the top pri
 - Bullets and numbers are drawn with CSS (`::before` and CSS counters) from the `<style data-deck-text>` stylesheet that the editor writes into the deck (it is part of the deck and is saved with it). The paragraph gets a left padding and the bullet hangs in it, so wrapped lines align with the text, not with the bullet.
 - Per-level list style is part of the deck theme (3.3), so a corporate template can define it: CSS variables `--list-N-bullet`, `--list-N-number`, `--list-N-bullet-color`, `--list-N-bullet-size` (relative to the text), `--list-N-indent` and `--list-N-space-before` for N = 1..5. Defaults: bullets level 1 "•", level 2 "–", level 3 "▪", levels 4–5 "·"; numbering 1. / a. / i. by level (then 1. / a. again at levels 4–5); bullet color and size follow the text.
 - Numbering: a numbered paragraph at level N counts on counter `list-N` and resets the deeper counters, so numbers count per level and reset when a higher level appears (1, 2, a, b, 3 …). A bulleted or plain paragraph at the same or a higher level ends the numbered run; the next numbered paragraph starts again at 1 unless "Continue numbering" (which writes `data-start`) is used. `data-start` is mirrored by the normalizer into an inline `counter-set` on the paragraph, because CSS cannot read a number from an attribute in every browser and saved decks must render anywhere (2.5).
-- Import (3.4) and paste: nested `<ul>/<ol>/<li>` (Copilot decks, web pages) and Word/Outlook list paragraphs (`mso-list: … levelN`, with their bullet glyph spans removed) become flat paragraphs with the right list type and level. Headings become `<p>`; before tags and classes are removed, the computed style (size, weight, italic, color, font, alignment, spacing) is turned into allowed inline formatting, so titles keep their look.
+- Import (3.4) and paste: nested `<ul>/<ol>/<li>` (Copilot decks, web pages), Word/Outlook list paragraphs (`mso-list: … levelN`, with their bullet glyph spans removed) and PowerPoint text become flat paragraphs with the right list type and level. Headings become `<p>`; before tags and classes are removed, the computed style (size, weight, italic, color, font, alignment, spacing) is kept: what is the same for the whole box goes on the text element's own style (`.el`), the rest becomes allowed inline formatting, so titles keep their look.
 - Copying text out of the editor (Ctrl+C inside a text element) also puts nested `<ul>/<ol>` HTML on the clipboard, so bullets survive a paste into Outlook or Word, which do not understand `data-list`.
 - Deck format: this model is `deck-format` 2 (8.2). Opening a format-1 deck migrates its text with the import conversion, adds the list variables and `<style data-deck-text>`, and says so in the import report.
 
@@ -252,9 +252,9 @@ Nested bullets are on almost every slide the user makes, so they are the top pri
 *Normalizer: the defense against messy browser HTML.*
 
 - One function, `App.text.normalize(element)`, rewrites the HTML inside a text element into an allowed set:
-  - `<p>` with `data-list`, `data-level`, `data-start`, and a style limited to `text-align`, `line-height`, `margin-top`, `margin-bottom` (plus the `counter-set` it derives from `data-start`);
+  - `<p>` with `data-list`, `data-level`, `data-start`, and a style limited to `text-align`, `line-height`, `margin-top`, `margin-bottom`, plus values the normalizer derives itself: the `counter-set` from `data-start`, and `font-size` and `color` copied from the paragraph's first character, so bullets and numbers follow the text (as in PowerPoint) and an empty line keeps its size;
   - `<b>`, `<i>`, `<u>`, `<s>`, `<sup>`, `<sub>`, `<br>`, `<a href>`;
-  - `<span>` with a style limited to `font-family`, `font-size`, `color`, `background-color`.
+  - `<span>` with a style limited to `font-family`, `font-size`, `color`, `background-color`; a value may be a theme variable (`var(--font-heading)`, `var(--font-body)`, `var(--color-…)`).
 - Conversions: `<strong>`→`<b>`, `<em>`→`<i>`, `<font>`→`<span>`, `<div>`→`<p>`, nested lists→flat paragraphs, text directly inside the element→wrapped in `<p>`. Unknown tags are unwrapped (their text is kept). `class`, `id` and every other attribute or style property are removed. Empty spans are removed and adjacent spans with identical styles are merged. `<a href>` keeps only `http:`, `https:` and `mailto:` links (no `javascript:`).
 - The text element's own style (`.el`: default font, size, color, padding) is not touched; the normalizer only rewrites what is inside it.
 - When it runs: on leaving text-edit mode, after every toolbar command, after paste, after import, and before save. Not on every keystroke, so the cursor never jumps while typing. When it runs during editing, it preserves the user's selection.
@@ -262,9 +262,9 @@ Nested bullets are on almost every slide the user makes, so they are the top pri
 
 *Paste into text.*
 
-- Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets and levels, links) through the normalizer, but drops fonts, sizes and colors so the pasted text matches the deck's theme (PowerPoint's "Use Destination Theme").
+- Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets and levels, links) through the normalizer, but drops fonts, sizes and colors so the pasted text matches the deck's theme (PowerPoint's "Use Destination Theme"). Text copied inside the editor (marked in the copied HTML) keeps all its formatting.
 - Ctrl+Shift+V pastes plain text only. A small paste-options button appears after a paste and switches between the two, like PowerPoint.
-- Must handle paste from Word, Outlook, Copilot's chat window and web pages.
+- Must handle paste from Word, Outlook, PowerPoint, Copilot's chat window and web pages. Test fixtures are real clipboard captures (fake text) made with `tests/clipboard-capture.html`.
 
 *Undo for text.*
 

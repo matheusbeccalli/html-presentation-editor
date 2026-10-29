@@ -551,6 +551,64 @@ def test_list_buttons(browser):
     editor.close()
 
 
+def test_character_formatting(browser):
+    """Home > Font toggles and Clear formatting, from the ribbon and the keyboard."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    last_line = lambda: page.evaluate(  # noqa: E731
+        "() => App.deck.getDocument().querySelector('[data-id=\"e7\"]').lastElementChild.innerHTML")
+    button = lambda command: page.locator(f'#ribbon-panel [data-command="{command}"]')  # noqa: E731
+    pressed = lambda command: button(command).get_attribute("aria-pressed") == "true"  # noqa: E731
+    start = last_line()
+
+    page.keyboard.press("Enter")   # edit, cursor at the end
+    page.keyboard.press("Control+Shift+ArrowLeft")   # select the last word
+    page.keyboard.press("Control+b")
+    check(last_line().endswith("<b>compras</b>"), f"Ctrl+B bolds the selected word: {last_line()}")
+    wait_until(page, "() => document.querySelector('#ribbon-panel [data-command=\"bold\"]').ariaPressed === 'true'",
+               timeout=3000)
+    button("italic").click()
+    check(last_line().endswith("<b><i>compras</i></b>"), f"the Italic button adds italic: {last_line()}")
+    check(page.evaluate("App.text.isEditing()") and pressed("italic"), "still editing; Italic shows on")
+    page.keyboard.press("Control+z")
+    check(last_line().endswith("<b>compras</b>"), "Ctrl+Z undoes only the italic")
+    page.keyboard.press("Control+u")
+    check(last_line().endswith("<b><u>compras</u></b>"), f"Ctrl+U underlines: {last_line()}")
+    page.keyboard.press("Control+z")
+
+    # With just a cursor, the formatting is for what is typed next (as in PowerPoint).
+    page.keyboard.press("End")
+    page.keyboard.press("Control+b")
+    check(pressed("bold") is False, "the cursor after a bold word: Ctrl+B turns bold off for what comes next")
+    page.keyboard.type(" e mais")
+    check(last_line().endswith("<b>compras</b> e mais"), f"text typed after Ctrl+B is not bold: {last_line()}")
+    page.keyboard.press("Control+b")
+    page.keyboard.type(" novo")
+    check(last_line().endswith(" e mais<b> novo</b>"), f"text typed after Ctrl+B again is bold: {last_line()}")
+
+    # Clear formatting on the whole line.
+    page.keyboard.press("Home")
+    page.keyboard.press("Shift+End")
+    button("clearFormatting").click()
+    check("<b>" not in last_line(), f"Clear formatting removed the bold: {last_line()}")
+
+    page.keyboard.press("Escape")
+    page.keyboard.press("Control+b")   # the box is selected: all its text
+    weight = page.evaluate("() => App.deck.getDocument().querySelector('[data-id=\"e7\"]').style.fontWeight")
+    check(weight == "bold", f"Ctrl+B on a selected box makes the box bold: {weight}")
+    check(pressed("bold"), "Bold shows on")
+    for _ in range(8):   # box bold, clear, the typing, bold
+        if last_line() == start:
+            break
+        page.keyboard.press("Control+z")
+    check(last_line() == start, f"every step undoes: {last_line()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1497,6 +1555,7 @@ TESTS = [
     test_text_editing,
     test_bullet_keys,
     test_list_buttons,
+    test_character_formatting,
 ]
 
 

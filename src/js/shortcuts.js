@@ -207,6 +207,11 @@
         ['Ctrl+V', 'paste'],
         // Ctrl+D is the browser's "bookmark this page"; never let it open with nothing selected.
         ['Ctrl+D', 'duplicate', { blockBrowserDefault: true }],
+        // Formatting keys also work while typing (that is where they are used).
+        ['Ctrl+B', 'bold', { whileTyping: true }],
+        ['Ctrl+I', 'italic', { whileTyping: true }],
+        // Ctrl+U would otherwise show the page source.
+        ['Ctrl+U', 'underline', { whileTyping: true, blockBrowserDefault: true }],
         ['Shift+F10', 'contextMenu'],
         ['ContextMenu', 'contextMenu'],
     ];

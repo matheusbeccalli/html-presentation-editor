@@ -108,7 +108,7 @@ Nested bullets are the top priority of this phase.
 *Editing*
 - [x] Double-click a text element to edit (`contenteditable`) *(also Enter / F2 on a selected text box; Esc or a click outside stops)*
 - [x] Insert text box, PowerPoint style: click the button, then click on the slide (grows as you type) or drag to set the width *(click = 360 px wide, grows in height; an empty new box is removed)*
-- [ ] Toolbar: bold, italic, underline, strikethrough, superscript, subscript
+- [x] Toolbar: bold, italic, underline, strikethrough, superscript, subscript *(Home > Font; Ctrl+B / Ctrl+I / Ctrl+U; a cursor inside a word formats the word, elsewhere the text typed next; with the box selected: all its text)*
 - [ ] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting; theme fonts and theme colors stored as `var(--…)`
 - [ ] Toolbar: align left / center / right / justify
 - [ ] Line spacing and paragraph spacing
@@ -160,6 +160,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Type a misspelled Portuguese word (e.g. "recieta"): it gets a red underline (Edge needs Portuguese under Settings > Languages > Spell check)
   - [ ] In a bulleted box: End, Enter, Tab, type, Enter, Enter, Enter (level 2 → level 1 → plain text); type "- " (bullet) then Ctrl+Z ("- " stays as text); Backspace at the start of a bullet removes it; select three lines and Shift+Tab
   - [ ] Home > Paragraph: select two bullets, click Numbering (1., 2.; the button lights up), Increase indent (a., b.), type: the cursor is still in the text; put the cursor on b. and click Restart numbering (a.); in a later numbered line after a bullet, Continue numbering goes on from the run above; Esc, then Bullets acts on the whole box; Ctrl+Z undoes each click
+  - [ ] Home > Font: select a word, Ctrl+B, then the Italic button (both light up); click inside another word and Ctrl+U underlines the word; at the end of a line Ctrl+B then type: only the new text is bold; select a box (not typing) and Ctrl+B: all its text; Clear formatting removes it; Ctrl+Z undoes each step
 
 ## Phase 4: Tables
 

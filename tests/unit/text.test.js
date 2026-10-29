@@ -850,3 +850,148 @@ test('bullet keys: nothing happens while an IME is composing a character', async
     assertEqual(App.text.keyAction(el, { key: 'Enter', isComposing: true }), null);
     frame.remove();
 });
+
+// ---------------------------------------------------------------
+// Character formatting (SPEC Phase 3, Toolbar): styleAction / styleState
+// ---------------------------------------------------------------
+//
+// Lines are written as HTML with the selection marked in the text: "[" and "]"
+// for anchor and focus, "|" for a cursor. Each line becomes a plain <p>.
+
+function placeMarkers(el) {
+    const doc = el.ownerDocument;
+    const found = {};
+    const walker = doc.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        nodes.push(node);
+    }
+    nodes.forEach((node) => {
+        let index = node.data.search(/[[\]|]/);
+        while (index !== -1) {
+            found[node.data[index]] = { node: node, offset: index };
+            node.data = node.data.slice(0, index) + node.data.slice(index + 1);
+            index = node.data.search(/[[\]|]/);
+        }
+    });
+    const anchor = found['['] || found['|'];
+    const focus = found[']'] || found['|'];
+    doc.getSelection().setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
+    return App.text.getCaret(el);
+}
+
+async function formatBox(lines, elStyle) {
+    const frame = await renderedBox('', lines.map((line) => '<p data-list="none" data-level="1">' + line + '</p>').join(''),
+        elStyle);
+    const el = frame.contentDocument.querySelector('.el');
+    return { frame: frame, el: el, caret: placeMarkers(el) };
+}
+
+// Runs one formatting action; returns each line's HTML and the box's own style.
+async function styled(lines, style, value, elStyle) {
+    const box = await formatBox(lines, elStyle);
+    const action = App.text.styleAction(box.el, style, value, box.caret);
+    if (action) {
+        App.text.runAction(box.el, action);
+    }
+    const result = {
+        lines: Array.from(box.el.children).map((p) => p.innerHTML),
+        weight: box.el.style.fontWeight, italic: box.el.style.fontStyle,
+        caret: App.text.getCaret(box.el), action: action ? action.label : null,
+    };
+    box.frame.remove();
+    return result;
+}
+
+test('formatting: Bold on a selection wraps it in <b>', async () => {
+    const result = await styled(['Alfa [Beta]'], 'bold');
+    assertEqual(result.lines, ['Alfa <b>Beta</b>']);
+    assertEqual(result.action, 'Bold');
+    assertEqual(result.caret, { anchor: { p: 0, o: 5 }, focus: { p: 0, o: 9 } }, 'the selection stays');
+});
+
+test('formatting: Bold on text that is all bold removes it', async () => {
+    assertEqual((await styled(['<b>Alfa [Beta]</b>'], 'bold')).lines, ['<b>Alfa </b>Beta']);
+});
+
+test('formatting: Bold on a partly bold selection makes all of it bold', async () => {
+    assertEqual((await styled(['A[lfa <b>Be]ta</b>'], 'bold')).lines, ['A<b>lfa Beta</b>']);
+});
+
+test('formatting: a selection over two lines formats both parts', async () => {
+    assertEqual((await styled(['Al[fa', 'Be]ta'], 'italic')).lines, ['Al<i>fa</i>', '<i>Be</i>ta']);
+});
+
+test('formatting: a cursor inside a word formats the whole word', async () => {
+    const result = await styled(['Alfa Be|ta Gama'], 'underline');
+    assertEqual(result.lines, ['Alfa <u>Beta</u> Gama']);
+    assertEqual(result.caret, { anchor: { p: 0, o: 7 }, focus: { p: 0, o: 7 } }, 'the cursor stays');
+});
+
+test('formatting: a cursor outside a word has no action here (it applies to what is typed next)', async () => {
+    assertEqual((await styled(['Alfa |Beta'], 'bold')).action, null);
+    assertEqual((await styled(['Alfa|'], 'bold')).action, null);
+});
+
+test('formatting: un-bolding part of a bold box moves the bold onto the rest of its text', async () => {
+    const result = await styled(['Alfa [Beta]', 'Gama'], 'bold', null, 'font-weight: bold;');
+    assertEqual(result.lines, ['<b>Alfa </b>Beta', '<b>Gama</b>']);
+    assertEqual(result.weight, 'normal');
+});
+
+test('formatting: un-italicizing part of an italic box works the same way', async () => {
+    const result = await styled(['[Alfa] Beta'], 'italic', null, 'font-style: italic;');
+    assertEqual(result.lines, ['Alfa<i> Beta</i>']);
+    assertEqual(result.italic, 'normal');
+});
+
+test('formatting: strikethrough, superscript and subscript', async () => {
+    assertEqual((await styled(['Alfa [Beta]'], 'strikethrough')).lines, ['Alfa <s>Beta</s>']);
+    assertEqual((await styled(['x[2]'], 'superscript')).lines, ['x<sup>2</sup>']);
+    assertEqual((await styled(['x<sup>[2]</sup>'], 'subscript')).lines, ['x<sub>2</sub>'], 'subscript replaces superscript');
+    assertEqual((await styled(['x<sub>[2]</sub>'], 'subscript')).lines, ['x2'], 'subscript again removes it');
+});
+
+test('formatting: other formatting, colours and links are kept', async () => {
+    const result = await styled(['<a href="https://example.com"><span style="color: red">A[lf]a</span></a>'], 'underline');
+    assertEqual(result.lines, ['<a href="https://example.com"><span style="color: red;">A<u>lf</u>a</span></a>']);
+});
+
+test('formatting: Clear formatting removes formatting, sizes and colours from the selection (links stay)', async () => {
+    const result = await styled(['<b>Al[fa</b> <span style="font-size: 24pt; color: red">Beta</span> ' +
+        '<a href="https://example.com"><i>Ga]ma</i></a>'], 'clear');
+    assertEqual(result.lines, ['<b>Al</b>fa Beta <a href="https://example.com">Ga<i>ma</i></a>']);
+    assertEqual(result.action, 'Clear formatting');
+});
+
+test('formatting: when all the text of the box gets the same bold, it goes on the box itself', async () => {
+    const result = await styled(['[Alfa', 'Beta]'], 'bold');
+    assertEqual(result.lines, ['Alfa', 'Beta']);
+    assertEqual(result.weight, 'bold');
+});
+
+test('formatting: with the box selected (no cursor) Bold acts on all of its text', async () => {
+    const box = await formatBox(['Al|fa', '<b>Beta</b>']);
+    App.text.runAction(box.el, App.text.styleAction(box.el, 'bold', null, null));
+    assertEqual(Array.from(box.el.children).map((p) => p.innerHTML), ['Alfa', 'Beta']);
+    assertEqual(box.el.style.fontWeight, 'bold');
+    App.text.runAction(box.el, App.text.styleAction(box.el, 'bold', null, null));
+    assertEqual(Array.from(box.el.children).map((p) => p.innerHTML), ['Alfa', 'Beta']);
+    assertEqual(box.el.style.fontWeight, 'normal', 'and again takes it off');
+    box.frame.remove();
+});
+
+test('formatting: styleState says which formatting every selected character has', async () => {
+    let box = await formatBox(['<b>[Alfa <i>Be]ta</i></b>']);
+    let state = App.text.styleState(box.el, box.caret);
+    assertEqual([state.bold, state.italic, state.underline], [true, false, false]);
+    box.frame.remove();
+    box = await formatBox(['Alfa B|eta'], 'font-weight: bold;');
+    state = App.text.styleState(box.el, box.caret);
+    assertEqual(state.bold, true, 'a bold box counts');
+    box.frame.remove();
+    box = await formatBox(['x<sup>[2]</sup>']);
+    state = App.text.styleState(box.el, box.caret);
+    assertEqual([state.superscript, state.subscript], [true, false]);
+    box.frame.remove();
+});

@@ -21,11 +21,18 @@
             groups: [
                 { label: 'Clipboard', commands: [['paste', 'paste'], ['cut', 'cut'], ['copy', 'copy'], ['duplicate', 'duplicate']] },
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
+                // Text groups: rows of small buttons (the name shows on hover), as in PowerPoint.
+                {
+                    label: 'Font',
+                    rows: [[['clearFormatting', 'clearFormatting']],
+                        [['bold', 'bold'], ['italic', 'italic'], ['underline', 'underline'],
+                            ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript']]],
+                },
                 {
                     label: 'Paragraph',
-                    commands: [['bullets', 'bullets'], ['numbering', 'numbering'], ['decreaseIndent', 'outdent'],
-                        ['increaseIndent', 'indent'], ['restartNumbering', 'restartNumbering'],
-                        ['continueNumbering', 'continueNumbering']],
+                    rows: [[['bullets', 'bullets'], ['numbering', 'numbering'], ['decreaseIndent', 'outdent'],
+                        ['increaseIndent', 'indent']],
+                    [['restartNumbering', 'restartNumbering'], ['continueNumbering', 'continueNumbering']]],
                 },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
@@ -69,10 +76,12 @@
     let fileMenu = null;
     const buttons = [];   // [{ button, command }] so enabled states can be refreshed
 
-    function commandButton(command, iconName, extraClass) {
+    /* A ribbon button; small ones show only the icon (the name is in the tooltip). */
+    function commandButton(command, iconName, small) {
         const keys = App.shortcuts.keysFor(command);
         const button = el('button', {
-            type: 'button', class: 'ribbon-button ' + (extraClass || ''),
+            type: 'button', class: 'ribbon-button' + (small ? ' small' : ''),
+            'aria-label': App.commands.label(command),
             title: App.commands.label(command) + (keys ? ' (' + keys + ')' : ''),
             'data-command': command,
             onclick: () => App.commands.run(command),
@@ -84,7 +93,9 @@
             button.addEventListener('mousedown', (event) => event.preventDefault());
         }
         button.innerHTML = App.icons.get(iconName);
-        button.appendChild(el('span', { class: 'ribbon-button-label' }, [App.commands.label(command)]));
+        if (!small) {
+            button.appendChild(el('span', { class: 'ribbon-button-label' }, [App.commands.label(command)]));
+        }
         buttons.push({ button: button, command: command });
         return button;
     }
@@ -99,9 +110,15 @@
         }
         (tab.groups || []).forEach((group) => {
             const groupNode = el('div', { class: 'ribbon-group' });
-            const row = el('div', { class: 'ribbon-group-buttons' });
-            group.commands.forEach(([command, icon]) => row.appendChild(commandButton(command, icon)));
-            groupNode.append(row, el('div', { class: 'ribbon-group-label' }, [group.label]));
+            let buttonsNode;
+            if (group.rows) {
+                buttonsNode = el('div', { class: 'ribbon-rows' }, group.rows.map((row) =>
+                    el('div', { class: 'ribbon-row' }, row.map(([command, icon]) => commandButton(command, icon, true)))));
+            } else {
+                buttonsNode = el('div', { class: 'ribbon-group-buttons' });
+                group.commands.forEach(([command, icon]) => buttonsNode.appendChild(commandButton(command, icon)));
+            }
+            groupNode.append(buttonsNode, el('div', { class: 'ribbon-group-label' }, [group.label]));
             panel.appendChild(groupNode);
         });
         if (tab.note) {

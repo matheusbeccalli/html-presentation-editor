@@ -29,6 +29,14 @@
         check: '<path d="M4 10.5l4 4 8-9"/>',
         textBox: '<rect x="2.5" y="4" width="15" height="12" stroke-dasharray="2 1.5"/><path d="M6.5 7.5h7M10 7.5v6"/>',
         close: '<path d="M5 5l10 10M15 5L5 15"/>',
+        bold: '<path stroke-width="2" d="M6 3.5h4.8a3 3 0 0 1 0 6H6zM6 9.5h5.5a3.5 3.5 0 0 1 0 7H6z"/>',
+        italic: '<path d="M8.5 3.5h6M5.5 16.5h6M12 3.5l-4 13"/>',
+        underline: '<path d="M6 3v6.5a4 4 0 0 0 8 0V3"/><path d="M4.5 17.5h11"/>',
+        strikethrough: '<path d="M14 5.5c-.8-1.3-2.3-2-4-2-2.2 0-4 1.2-4 3 0 1.4 1 2.3 2.6 2.9"/>' +
+            '<path d="M6 14.5c.8 1.3 2.3 2 4 2 2.2 0 4-1.2 4-3 0-.8-.3-1.4-.8-2"/><path d="M3 10h14"/>',
+        superscript: '<path d="M3 7l7 9M10 7l-7 9"/><path d="M13 4.5a1.5 1.5 0 1 1 2.5 1.1L13 8h3.5"/>',
+        subscript: '<path d="M3 4l7 9M10 4l-7 9"/><path d="M13 13.5a1.5 1.5 0 1 1 2.5 1.1L13 17h3.5"/>',
+        clearFormatting: '<path d="M5 4.5h10M10 4.5l-3 11"/><path d="M12 12l5 5M17 12l-5 5"/>',
         bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
             '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
         numbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M2.8 12.2a1.6 1.6 0 1 1 2.6 1.2l-2.6 2.6h3.4"/>' +

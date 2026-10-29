@@ -152,6 +152,19 @@
             label: 'Edit text', isEnabled: () => !!selectedText() && !App.text.isEditing(),
             run: () => App.text.enterEdit(selectedText(), { caret: 'end' }),
         });
+        // Character formatting (Home > Font): the selected text, or all the text of a selected box.
+        [['bold', 'Bold'], ['italic', 'Italic'], ['underline', 'Underline'], ['strikethrough', 'Strikethrough'],
+         ['superscript', 'Superscript'], ['subscript', 'Subscript']].forEach(([name, label]) => {
+            App.commands.define(name, {
+                label: label, keepsEdit: true, run: () => App.text.applyStyle(name),
+                isEnabled: () => App.text.canStyle(),
+                isChecked: () => !!App.text.currentStyleState()[name],
+            });
+        });
+        App.commands.define('clearFormatting', {
+            label: 'Clear formatting', keepsEdit: true, run: () => App.text.applyStyle('clear'),
+            isEnabled: () => App.text.canStyle(),
+        });
         // The list buttons (Home > Paragraph): the selected lines, or every line of a selected box.
         [['bullets', 'Bullets', 'bullet', () => App.text.toggleList('bullet')],
          ['numbering', 'Numbering', 'number', () => App.text.toggleList('number')],

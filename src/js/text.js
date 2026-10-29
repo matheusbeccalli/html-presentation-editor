@@ -1676,6 +1676,324 @@
         return { bullet: all('bullet'), number: all('number') };
     };
 
+    // ---------------------------------------------------------------
+    // Character formatting
+    // ---------------------------------------------------------------
+    //
+    // Bold, italic … clear formatting (SPEC Phase 3, Toolbar), written without
+    // document.execCommand, whose HTML differs between browsers. A line is read
+    // as runs: pieces of text with one look { text, formats, styles, href }
+    // (or { br }). The selected runs are changed and the line is written back;
+    // normalize() then merges what can be merged. Like the list buttons, each
+    // command is an action { label, run }.
+
+    const TOGGLES = { bold: 'b', italic: 'i', underline: 'u', strikethrough: 's', superscript: 'sup', subscript: 'sub' };
+    const STYLE_LABELS = { bold: 'Bold', italic: 'Italic', underline: 'Underline', strikethrough: 'Strikethrough',
+        superscript: 'Superscript', subscript: 'Subscript', clear: 'Clear formatting' };
+    // Bold and italic can also come from the box itself (.el font-weight / font-style).
+    const BOX_FORMATS = { b: ['font-weight', 'bold'], i: ['font-style', 'italic'] };
+    const WORD_CHAR_RE = /[\p{L}\p{N}_]/u;
+
+    /* Bold / italic as the browser shows them (null in a document that is not displayed). */
+    function shownFormats(element) {
+        const view = element.ownerDocument.defaultView;
+        if (!view) {
+            return null;
+        }
+        const computed = view.getComputedStyle(element);
+        return { b: parseInt(computed.fontWeight, 10) >= 600, i: /italic|oblique/.test(computed.fontStyle) };
+    }
+
+    /* The runs of a line. Text without its own size or colour takes the line's (see derivedLook). */
+    function readRuns(line) {
+        const lineLook = spanStyles(line);
+        const base = {};
+        ['font-size', 'color'].forEach((property) => {
+            if (lineLook[property]) {
+                base[property] = lineLook[property];
+            }
+        });
+        return inlineItems(line).map((item) => {
+            if (item.nodeType !== Node.TEXT_NODE) {
+                return { br: true };
+            }
+            const run = { text: item.data, formats: new Set(), styles: {}, href: null, shown: shownFormats(item.parentElement) };
+            for (let node = item.parentElement; node && node !== line; node = node.parentElement) {
+                const tag = tagOf(node);
+                if (TAG_FORMATS[tag]) {
+                    run.formats.add(TAG_FORMATS[tag]);
+                }
+                styleFormats(node).forEach((format) => run.formats.add(format));
+                if (tag === 'a' && run.href === null) {
+                    run.href = node.getAttribute('href');
+                }
+                const own = spanStyles(node);
+                Object.keys(own).forEach((property) => {
+                    if (!(property in run.styles)) {
+                        run.styles[property] = own[property];   // the innermost span wins
+                    }
+                });
+            }
+            Object.keys(base).forEach((property) => {
+                if (!(property in run.styles)) {
+                    run.styles[property] = base[property];
+                }
+            });
+            return run;
+        });
+    }
+
+    /* Write runs back as HTML (link > span > b > i > u > s > sup/sub, as normalize writes them). */
+    function writeRuns(line, runs) {
+        const doc = line.ownerDocument;
+        const nodes = [];
+        runs.forEach((run) => {
+            if (run.br) {
+                nodes.push(doc.createElement('br'));
+                return;
+            }
+            if (run.text === '') {
+                return;
+            }
+            let node = doc.createTextNode(run.text);
+            FORMAT_TAGS.slice().reverse().forEach((format) => {
+                if (run.formats.has(format)) {
+                    node = wrap(doc.createElement(format), [node]);
+                }
+            });
+            const style = styleText(run.styles, SPAN_ORDER);
+            if (style) {
+                const span = doc.createElement('span');
+                span.setAttribute('style', style);
+                node = wrap(span, [node]);
+            }
+            if (run.href) {
+                const link = doc.createElement('a');
+                link.setAttribute('href', run.href);
+                node = wrap(link, [node]);
+            }
+            nodes.push(node);
+        });
+        line.replaceChildren(...nodes);
+        if (runs.some((run) => !run.br && run.text !== '')) {
+            // The runs carry the look now; normalize derives the line's own values again.
+            line.style.removeProperty('font-size');
+            line.style.removeProperty('color');
+        }
+    }
+
+    function copyRun(run, text) {
+        return { text: text, formats: new Set(run.formats), styles: Object.assign({}, run.styles), href: run.href, shown: run.shown };
+    }
+
+    /*
+     * Split the runs of a line at start and end (character positions, a <br>
+     * counting as one) and return { runs, selected }: the new list and the text
+     * runs between start and end.
+     */
+    function sliceRuns(runs, start, end) {
+        const out = [];
+        const selected = [];
+        let position = 0;
+        runs.forEach((run) => {
+            if (run.br) {
+                out.push(run);
+                position += 1;
+                return;
+            }
+            const from = position;
+            const to = position + run.text.length;
+            position = to;
+            const cuts = [from, Math.min(Math.max(start, from), to), Math.min(Math.max(end, from), to), to];
+            for (let i = 0; i < 3; i++) {
+                if (cuts[i + 1] > cuts[i]) {
+                    const piece = copyRun(run, run.text.slice(cuts[i] - from, cuts[i + 1] - from));
+                    out.push(piece);
+                    if (i === 1) {
+                        selected.push(piece);
+                    }
+                }
+            }
+        });
+        return { runs: out, selected: selected };
+    }
+
+    function comparePositions(a, b) {
+        return a.p !== b.p ? a.p - b.p : a.o - b.o;
+    }
+
+    /* The word around a cursor strictly inside it, as { start, end } in the line, else null. */
+    function wordAround(line, o) {
+        const text = readRuns(line).map((run) => run.br ? '\n' : run.text).join('');
+        if (o <= 0 || o >= text.length || !WORD_CHAR_RE.test(text[o - 1]) || !WORD_CHAR_RE.test(text[o])) {
+            return null;
+        }
+        let start = o;
+        let end = o;
+        while (start > 0 && WORD_CHAR_RE.test(text[start - 1])) {
+            start--;
+        }
+        while (end < text.length && WORD_CHAR_RE.test(text[end])) {
+            end++;
+        }
+        return { start: start, end: end };
+    }
+
+    /*
+     * The parts of lines a formatting command works on: [{ index, start, end }].
+     * No cursor: every line, whole. A cursor inside a word: that word. A cursor
+     * anywhere else: null (the formatting is for what is typed next).
+     */
+    function formatSegments(element, caret) {
+        const lines = textLines(element);
+        if (!caret) {
+            return lines.map((line, index) => ({ index: index, start: 0, end: Infinity }));
+        }
+        const ordered = [caret.anchor, caret.focus].sort(comparePositions);
+        const [from, to] = ordered;
+        if (comparePositions(from, to) === 0) {
+            const word = lines[from.p] ? wordAround(lines[from.p], from.o) : null;
+            return word ? [{ index: from.p, start: word.start, end: word.end }] : null;
+        }
+        const segments = [];
+        for (let p = from.p; p <= Math.min(to.p, lines.length - 1); p++) {
+            segments.push({ index: p, start: p === from.p ? from.o : 0, end: p === to.p ? to.o : Infinity });
+        }
+        return segments;
+    }
+
+    function hasFormat(run, format) {
+        return run.formats.has(format) || (BOX_FORMATS[format] && run.shown ? run.shown[format] : false);
+    }
+
+    /*
+     * When every piece of text in the box has the same bold or italic, it is
+     * written on the box itself (the box's look, as after an import) instead
+     * of on each piece.
+     */
+    function liftToBox(element, allRuns) {
+        const texts = allRuns.filter((run) => !run.br && run.text !== '');
+        if (texts.length === 0) {
+            return;
+        }
+        Object.keys(BOX_FORMATS).forEach((format) => {
+            if (texts.every((run) => run.formats.has(format))) {
+                element.style.setProperty(BOX_FORMATS[format][0], BOX_FORMATS[format][1]);
+                texts.forEach((run) => run.formats.delete(format));
+            }
+        });
+    }
+
+    /* Changes the selected runs for one command; allRuns = every run of the box (bold can move off the box). */
+    function changeRuns(element, style, value, selected, allRuns) {
+        if (style === 'clear') {
+            selected.forEach((run) => {
+                run.formats.clear();
+                run.styles = {};
+            });
+            return;
+        }
+        const format = TOGGLES[style];
+        const turnOn = !selected.every((run) => hasFormat(run, format));
+        if (turnOn) {
+            selected.forEach((run) => {
+                run.formats.add(format);
+                if (format === 'sup' || format === 'sub') {
+                    run.formats.delete(format === 'sup' ? 'sub' : 'sup');
+                }
+            });
+            return;
+        }
+        const box = shownFormats(element);
+        if (BOX_FORMATS[format] && box && box[format]) {
+            // The box is bold: the bold moves onto its text, so part of it can lose it.
+            element.style.setProperty(BOX_FORMATS[format][0], 'normal');
+            allRuns.forEach((run) => {
+                if (!run.br && run.shown && run.shown[format]) {
+                    run.formats.add(format);
+                }
+            });
+        }
+        selected.forEach((run) => run.formats.delete(format));
+    }
+
+    /*
+     * The action for a formatting command on the selection (caret), or on all
+     * the text of the box (caret null); null when there is no text to change
+     * there (a cursor outside a word: the editor keeps the formatting for what
+     * is typed next). style: bold | italic | underline | strikethrough |
+     * superscript | subscript | clear.
+     */
+    App.text.styleAction = function styleAction(element, style, value, caret) {
+        if (!STYLE_LABELS[style]) {
+            return null;
+        }
+        const segments = formatSegments(element, caret);
+        if (!segments) {
+            return null;
+        }
+        const lines = textLines(element);
+        const hasText = segments.some((segment) => sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end)
+            .selected.length > 0);
+        if (!hasText) {
+            return null;
+        }
+        return {
+            label: STYLE_LABELS[style],
+            run: () => {
+                // Read everything before changing anything: the box's look decides what the text shows.
+                const perLine = lines.map((line) => readRuns(line));
+                const selected = [];
+                segments.forEach((segment) => {
+                    const sliced = sliceRuns(perLine[segment.index], segment.start, segment.end);
+                    perLine[segment.index] = sliced.runs;
+                    selected.push(...sliced.selected);
+                });
+                const allRuns = [].concat(...perLine);
+                changeRuns(element, style, value, selected, allRuns);
+                liftToBox(element, allRuns);
+                lines.forEach((line, index) => writeRuns(line, perLine[index]));
+                return caret;
+            },
+        };
+    };
+
+    /*
+     * What the selected text has, for the ribbon: { bold, italic, underline,
+     * strikethrough, superscript, subscript } (true when every selected
+     * character has it). A cursor shows the character before it.
+     */
+    App.text.styleState = function styleState(element, caret) {
+        const lines = textLines(element);
+        let runs = [];
+        if (!caret) {
+            runs = [].concat(...lines.map(readRuns));
+        } else {
+            const [from, to] = [caret.anchor, caret.focus].sort(comparePositions);
+            for (let p = from.p; p <= Math.min(to.p, lines.length - 1); p++) {
+                const start = p === from.p ? from.o : 0;
+                const end = p === to.p ? to.o : Infinity;
+                runs.push(...sliceRuns(readRuns(lines[p]), start, end).selected);
+            }
+            if (runs.length === 0 && lines[from.p]) {
+                const lineRuns = readRuns(lines[from.p]);
+                const at = from.o > 0 ? sliceRuns(lineRuns, from.o - 1, from.o) : sliceRuns(lineRuns, 0, 1);
+                runs = at.selected;
+            }
+        }
+        const state = {};
+        Object.keys(TOGGLES).forEach((style) => {
+            state[style] = runs.length > 0 && runs.every((run) => hasFormat(run, TOGGLES[style]));
+        });
+        if (runs.length === 0) {
+            // An empty line: the box's own bold / italic.
+            const box = shownFormats(element);
+            state.bold = !!(box && box.b);
+            state.italic = !!(box && box.i);
+        }
+        return state;
+    };
+
     /* Run an action (a key, AutoFormat, a list button): change the lines, tidy them, put the cursor back
        (an action on a selected box, not being edited, has no cursor). */
     App.text.runAction = function runAction(element, action) {
@@ -1701,6 +2019,8 @@
     let editing = null;   // { element, id, slideId, isNew, doc }
     let typing = null;    // { meta, timer } while a typing step is open
     let applying = false; // a key action is changing the text: its own input events are not typing
+    let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
+    let looseSpace = null; // { node, index }: a non-breaking space insertStyled typed at the end of a line
 
     App.text.isEditing = function isEditing() {
         return editing !== null;
@@ -1797,6 +2117,7 @@
         App.text.commitTyping();
         const state = editing;
         editing = null;
+        pending = null;
         state.doc.removeEventListener('keydown', onKeyDown, true);
         state.doc.removeEventListener('pointerdown', onDeckPointerDown, true);
         state.doc.removeEventListener('selectionchange', onSelectionChange);
@@ -1822,6 +2143,12 @@
     /* The cursor moved: the ribbon shows what the lines under it have (once per frame at most). */
     let selectionFrame = 0;
     function onSelectionChange() {
+        if (pending && editing) {
+            const caret = App.text.getCaret(editing.element);
+            if (!caret || !sameCaret(caret) || comparePositions(caret.focus, pending.caret.focus) !== 0) {
+                pending = null;
+            }
+        }
         if (!selectionFrame) {
             selectionFrame = requestAnimationFrame(() => {
                 selectionFrame = 0;
@@ -1876,12 +2203,71 @@
         }
         clearTimeout(typing.timer);
         typing.timer = setTimeout(App.text.commitTyping, TYPING_PAUSE_MS);
+        if (pending && event.inputType === 'insertText' && event.data && !event.isComposing) {
+            const caret = App.text.getCaret(editing.element);
+            if (caret && sameCaret(caret) && comparePositions(caret.focus, pending.caret.focus) === 0) {
+                event.preventDefault();   // typed here by insertStyled instead, with the chosen formatting
+                insertStyled(editing.element, caret.focus, event.data, pending.styles);
+                pending = null;
+                if (App.text.fitHeight(editing.element)) {
+                    App.selection.refresh();
+                }
+            }
+        }
+    }
+
+    /*
+     * Type `text` at position `at` with the look of the character before it,
+     * changed by `styles` (the formatting chosen at the cursor), and put the
+     * cursor after it: the browser then types on inside the same formatting.
+     */
+    function insertStyled(element, at, typed, styles) {
+        let text = typed;
+        const lines = textLines(element);
+        const perLine = lines.map((line) => readRuns(line));
+        const runs = perLine[at.p];
+        const before = at.o > 0 ? sliceRuns(runs, at.o - 1, at.o).selected[0] : null;
+        const after = sliceRuns(runs, at.o, at.o + 1).selected[0];
+        // Like the browser: a space at the end of a line, or next to another space, is a
+        // non-breaking one, else it would be dropped as layout whitespace.
+        if ((!after || / $/.test(before ? before.text : '') || /^ /.test(after.text) || at.o === 0) && / /.test(text)) {
+            text = text.replace(/ /g, '\u00a0');
+        }
+        const model = before || after;
+        const run = model ? copyRun(model, text) : { text: text, formats: new Set(), styles: spanStyles(lines[at.p]),
+            href: null, shown: shownFormats(lines[at.p]) };
+        const split = sliceRuns(runs, at.o, at.o);
+        let index = 0;
+        let position = 0;
+        while (index < split.runs.length && position < at.o) {
+            position += split.runs[index].br ? 1 : split.runs[index].text.length;
+            index++;
+        }
+        split.runs.splice(index, 0, run);
+        perLine[at.p] = split.runs;
+        const allRuns = [].concat(...perLine);
+        styles.forEach(([style, value]) => changeRuns(element, style, value, [run], allRuns));
+        liftToBox(element, allRuns);
+        lines.forEach((line, i) => writeRuns(line, perLine[i]));
+        App.text.normalize(element);
+        App.text.setCaret(element, caretAt({ p: at.p, o: at.o + text.length }));
+        const end = pointOf(element, { p: at.p, o: at.o + text.length });
+        looseSpace = end.node.nodeType === Node.TEXT_NODE && end.node.data[end.offset - 1] === '\u00a0' && / $/.test(typed)
+            ? { node: end.node, index: end.offset - 1 } : null;
     }
 
     function onInput(event) {
         const element = editing && editing.element;
         if (!element || applying) {
             return;
+        }
+        if (looseSpace) {
+            // Text came after that space: it becomes a normal one again (as the browser does with its own).
+            const { node, index } = looseSpace;
+            looseSpace = null;
+            if (node.isConnected && node.data[index] === '\u00a0' && /\S/.test(node.data[index + 1] || '')) {
+                node.replaceData(index, 1, ' ');
+            }
         }
         ensureLines(element);
         if (event.inputType === 'insertText' && /[ \u00a0]$/.test(event.data || '')) {
@@ -1992,12 +2378,7 @@
             runInEditor(action);
             return;
         }
-        const element = target.element;
-        App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, () => {
-            App.text.runAction(element, action);
-            App.text.fitHeight(element);
-        });
-        App.selection.refresh();
+        runOnBox(target.element, action);
     }
 
     /* Bullets ('bullet') or Numbering ('number') on or off (SPEC 3.7 toggleList). */
@@ -2013,6 +2394,74 @@
     /* Restart ('restart') or continue ('continue') the numbering at the first selected numbered line. */
     App.text.setNumbering = function setNumbering(mode) {
         runList(mode);
+    };
+
+    /*
+     * Character formatting (SPEC 3.7 applyStyle) on the selected text, the word
+     * around the cursor, or all the text of a selected box. With the cursor
+     * anywhere else, it is kept for the text typed next at that spot.
+     */
+    App.text.applyStyle = function applyStyle(style, value) {
+        const target = listTarget();
+        if (!target) {
+            return;
+        }
+        const action = App.text.styleAction(target.element, style, value, target.caret);
+        if (action) {
+            pending = null;
+            if (editing) {
+                runInEditor(action);
+            } else {
+                runOnBox(target.element, action);
+            }
+            return;
+        }
+        if (editing && target.caret && sameCaret(target.caret)) {
+            if (!pending || comparePositions(pending.caret.focus, target.caret.focus) !== 0) {
+                pending = { caret: target.caret, styles: [] };
+            }
+            pending.styles.push([style, value]);
+            App.events.emit('text-selection-changed');
+        }
+    };
+
+    /* A text action on a selected box (not being edited), as one undo step. */
+    function runOnBox(element, action) {
+        App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, () => {
+            App.text.runAction(element, action);
+            App.text.fitHeight(element);
+        });
+        App.selection.refresh();
+    }
+
+    /* Whether a formatting command can act now: a text box is being edited or is selected. */
+    App.text.canStyle = function canStyle() {
+        return listTarget() !== null;
+    };
+
+    /* What the ribbon shows as on: the selection's formatting, with what was chosen for the text typed next. */
+    App.text.currentStyleState = function currentStyleState() {
+        const target = listTarget();
+        if (!target) {
+            return {};
+        }
+        const state = App.text.styleState(target.element, target.caret);
+        if (pending && editing && target.caret && comparePositions(pending.caret.focus, target.caret.focus) === 0) {
+            pending.styles.forEach(([style]) => {
+                if (style === 'clear') {
+                    const box = shownFormats(target.element);
+                    Object.keys(TOGGLES).forEach((name) => { state[name] = false; });
+                    state.bold = !!(box && box.b);
+                    state.italic = !!(box && box.i);
+                } else if (TOGGLES[style]) {
+                    state[style] = !state[style];
+                    if (state[style] && (style === 'superscript' || style === 'subscript')) {
+                        state[style === 'superscript' ? 'subscript' : 'superscript'] = false;
+                    }
+                }
+            });
+        }
+        return state;
     };
 
     /* Whether a list button can act now (greys out the ribbon button otherwise). */

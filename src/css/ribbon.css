@@ -62,6 +62,10 @@
 .ribbon-button:disabled { opacity: 0.4; cursor: default; }
 .ribbon-button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
 .ribbon-button-label { font-size: 12px; white-space: nowrap; }
+.ribbon-rows { display: flex; flex-direction: column; gap: 2px; }
+.ribbon-row { display: flex; gap: 2px; align-items: center; }
+.ribbon-button.small { min-width: 0; padding: 3px; }
+.ribbon-button.small .icon { width: 20px; height: 20px; }
 .ribbon-note {
     align-self: center; max-width: 560px; padding: 0 14px;
     color: var(--text-muted); font-size: 12px; line-height: 1.4;

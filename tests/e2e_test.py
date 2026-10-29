@@ -132,7 +132,10 @@ class Editor:
 
 def _is_expected_console_error(text):
     # The deck's own blocked requests are reported by Chromium as CSP console errors.
-    return "Content Security Policy" in text or "Blocked script execution" in text
+    # "Blocked script execution" is NOT expected: the editor never puts a script or an
+    # inline handler into a sandboxed frame, so that message would be a real bug
+    # (in Edge it can come from a browser extension, which tests do not have).
+    return "Content Security Policy" in text
 
 
 def check(condition, message):
@@ -204,6 +207,9 @@ def test_browser_banner_only_outside_chromium(browser):
         editor = Editor(firefox)
         check(editor.page.is_visible("#browser-banner"), "Firefox shows the banner")
         check("Edge" in editor.page.inner_text("#browser-banner"), "banner names Edge")
+        editor.page.click("#welcome-new")
+        wait_until(editor.page, "App.state.hasDeck")
+        check(editor.page.is_hidden("#save-banner"), "no save-first banner where AutoSave cannot exist")
         editor.page.screenshot(path=str(OUTPUT / "01b-firefox-banner.png"))
         editor.page.click("#browser-banner-close")
         check(editor.page.is_hidden("#browser-banner"), "the banner can be closed")
@@ -219,7 +225,14 @@ def test_new_blank_deck(browser):
     check(editor.slide_count() == 2, "template has 2 slides")
     check(editor.title() == "Untitled deck.html — Deck Editor", "title, got " + editor.title())
     wait_until(editor.page, "document.querySelectorAll('.thumb[data-drawn]').length === 2")
+    check(editor.page.is_visible("#save-banner"), "a new deck shows the save-first banner")
+    check("not saved yet" in editor.page.inner_text("#save-banner"), "new-deck wording")
     editor.page.screenshot(path=str(OUTPUT / "02-new-deck.png"))
+    editor.page.click("#save-banner-close")
+    check(editor.page.is_hidden("#save-banner"), "the banner can be closed")
+    editor.page.click(".ribbon-file-button")
+    editor.page.click(".file-menu button[data-command='newDeck']")
+    wait_until(editor.page, "!document.getElementById('save-banner').hidden")
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
 
@@ -752,6 +765,8 @@ def test_autosave_to_file(browser):
 
     # Off until the first manual save; the first save switches it on.
     check(page.is_visible(switch) and page.get_attribute(switch, "aria-checked") == "false", "AutoSave Off at first")
+    check(page.is_visible("#save-banner"), "the banner asks for a first save")
+    check("Save As" in page.inner_text("#save-banner"), "the banner offers Save As for an opened file")
     page.mouse.click(*slide_to_screen(page, 300, 290))
     page.keyboard.press("ArrowRight")
     page.wait_for_timeout(800)
@@ -759,6 +774,7 @@ def test_autosave_to_file(browser):
     page.keyboard.press("Control+s")
     wait_until(page, "__disk.writes === 1")
     check(page.get_attribute(switch, "aria-checked") == "true", "AutoSave On after the first save")
+    check(page.is_hidden("#save-banner"), "the banner goes away once AutoSave is on")
     page.screenshot(path=str(OUTPUT / "16-autosave-on.png"), clip={"x": 0, "y": 0, "width": 1440, "height": 40})
 
     # A change is written shortly after, and the unsaved dot goes away.

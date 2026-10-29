@@ -59,8 +59,8 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .btn-primary:hover { background: var(--accent-dark); }
 .btn-danger.btn-primary { background: var(--danger); border-color: var(--danger); }
 
-/* Warning for browsers that cannot save in place (Firefox). */
-#browser-banner {
+/* Yellow message bars under the ribbon: the Firefox warning and the save-first reminder. */
+.banner {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -68,8 +68,9 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     border-bottom: 1px solid #e0c36c;
     background: #fff4ce;
 }
-#browser-banner span { flex: 1; }
-#browser-banner button {
+.banner[hidden] { display: none; }
+.banner span { flex: 1; }
+.banner-close {
     border: none;
     background: none;
     font-size: 18px;

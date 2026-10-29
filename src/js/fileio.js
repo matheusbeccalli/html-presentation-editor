@@ -293,8 +293,7 @@
         App.ui.setBusy('Recovering unsaved changes…');
         try {
             const result = await App.importer.importDeck(html);
-            await showDeck(result.html, fileName || NEW_DECK_NAME, null);
-            App.state.isNew = true;   // not in any file yet
+            await showDeck(result.html, fileName || NEW_DECK_NAME, null, true);   // not in any file yet
             App.history.markDirty();
         } finally {
             App.ui.setBusy(null);
@@ -302,13 +301,15 @@
         App.ui.setStatus('Recovered unsaved changes');
     };
 
-    async function showDeck(html, fileName, handle) {
+    // isNew: the deck is in no file yet (File > New, recovered drafts). Set before
+    // history.reset(), whose 'history-changed' event makes the UI read this state.
+    async function showDeck(html, fileName, handle, isNew) {
         await App.deck.load(html);
         App.state.fileName = fileName;
         App.state.fileHandle = handle || null;
         App.state.openedHtml = html;          // for "Revert to version opened" (SPEC 6.1)
         App.state.diskLastModified = null;
-        App.state.isNew = false;
+        App.state.isNew = !!isNew;
         App.history.reset();
         App.ui.showDeck();
     }
@@ -319,8 +320,7 @@
         }
         // Through the importer like any deck, so there is only one way in.
         const result = await App.importer.importDeck(App.template.newDeckHtml());
-        await showDeck(result.html, NEW_DECK_NAME, null);
-        App.state.isNew = true;
+        await showDeck(result.html, NEW_DECK_NAME, null, true);
         App.ui.setStatus('New deck');
     };
 

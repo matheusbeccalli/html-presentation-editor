@@ -131,3 +131,26 @@ test('autosave: flush saves now (closing the tab); cancel forgets the pending sa
     await scheduler.flush();
     assertEqual(saves, [1000], 'flush with nothing pending does nothing');
 });
+
+// The "save once to turn AutoSave on" reminder banner: when it shows and which text.
+function reminderState(extra) {
+    return Object.assign({
+        hasDeck: true, canSaveInPlace: true, enabled: false, switchedOff: false, dismissed: false, isNew: false,
+    }, extra || {});
+}
+
+test('save reminder: an opened file that AutoSave does not write yet', () => {
+    assertEqual(App.autosave.saveReminder(reminderState()), 'file');
+});
+
+test('save reminder: a new deck that is in no file yet', () => {
+    assertEqual(App.autosave.saveReminder(reminderState({ isNew: true })), 'new');
+});
+
+test('save reminder: hidden without a deck, in Firefox, once AutoSave is on, after it was switched off, or closed', () => {
+    assertEqual(App.autosave.saveReminder(reminderState({ hasDeck: false })), null);
+    assertEqual(App.autosave.saveReminder(reminderState({ canSaveInPlace: false })), null);
+    assertEqual(App.autosave.saveReminder(reminderState({ enabled: true })), null);
+    assertEqual(App.autosave.saveReminder(reminderState({ switchedOff: true })), null);
+    assertEqual(App.autosave.saveReminder(reminderState({ dismissed: true })), null);
+});

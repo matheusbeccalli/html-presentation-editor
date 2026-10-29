@@ -33,10 +33,18 @@
 </nav>
 
 <!-- Shown only in browsers without the File System Access API, e.g. Firefox (ui.js). -->
-<div id="browser-banner" role="status" hidden>
+<div id="browser-banner" class="banner" role="status" hidden>
     <span>This browser cannot save back into the opened file: Save and Save As download a copy to your
     Downloads folder, and AutoSave is not available. For the full editor, open this file in Microsoft Edge or Google Chrome.</span>
-    <button type="button" id="browser-banner-close" title="Hide this message">×</button>
+    <button type="button" class="banner-close" id="browser-banner-close" title="Hide this message">×</button>
+</div>
+
+<!-- "Save once and AutoSave keeps it saved": shown until the deck is in a file (autosave.js). -->
+<div id="save-banner" class="banner" role="status" hidden>
+    <span id="save-banner-text"></span>
+    <button type="button" class="btn btn-primary" id="save-banner-save">Save</button>
+    <button type="button" class="btn" id="save-banner-save-as">Save As…</button>
+    <button type="button" class="banner-close" id="save-banner-close" title="Hide this message until another deck is opened">×</button>
 </div>
 
 <main id="workspace">

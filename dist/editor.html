@@ -74,8 +74,8 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .btn-primary:hover { background: var(--accent-dark); }
 .btn-danger.btn-primary { background: var(--danger); border-color: var(--danger); }
 
-/* Warning for browsers that cannot save in place (Firefox). */
-#browser-banner {
+/* Yellow message bars under the ribbon: the Firefox warning and the save-first reminder. */
+.banner {
     display: flex;
     align-items: center;
     gap: 12px;
@@ -83,8 +83,9 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     border-bottom: 1px solid #e0c36c;
     background: #fff4ce;
 }
-#browser-banner span { flex: 1; }
-#browser-banner button {
+.banner[hidden] { display: none; }
+.banner span { flex: 1; }
+.banner-close {
     border: none;
     background: none;
     font-size: 18px;
@@ -500,10 +501,18 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 </nav>
 
 <!-- Shown only in browsers without the File System Access API, e.g. Firefox (ui.js). -->
-<div id="browser-banner" role="status" hidden>
+<div id="browser-banner" class="banner" role="status" hidden>
     <span>This browser cannot save back into the opened file: Save and Save As download a copy to your
     Downloads folder, and AutoSave is not available. For the full editor, open this file in Microsoft Edge or Google Chrome.</span>
-    <button type="button" id="browser-banner-close" title="Hide this message">×</button>
+    <button type="button" class="banner-close" id="browser-banner-close" title="Hide this message">×</button>
+</div>
+
+<!-- "Save once and AutoSave keeps it saved": shown until the deck is in a file (autosave.js). -->
+<div id="save-banner" class="banner" role="status" hidden>
+    <span id="save-banner-text"></span>
+    <button type="button" class="btn btn-primary" id="save-banner-save">Save</button>
+    <button type="button" class="btn" id="save-banner-save-as">Save As…</button>
+    <button type="button" class="banner-close" id="save-banner-close" title="Hide this message until another deck is opened">×</button>
 </div>
 
 <main id="workspace">
@@ -5057,8 +5066,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.ui.setBusy('Recovering unsaved changes…');
         try {
             const result = await App.importer.importDeck(html);
-            await showDeck(result.html, fileName || NEW_DECK_NAME, null);
-            App.state.isNew = true;   // not in any file yet
+            await showDeck(result.html, fileName || NEW_DECK_NAME, null, true);   // not in any file yet
             App.history.markDirty();
         } finally {
             App.ui.setBusy(null);
@@ -5066,13 +5074,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.ui.setStatus('Recovered unsaved changes');
     };
 
-    async function showDeck(html, fileName, handle) {
+    // isNew: the deck is in no file yet (File > New, recovered drafts). Set before
+    // history.reset(), whose 'history-changed' event makes the UI read this state.
+    async function showDeck(html, fileName, handle, isNew) {
         await App.deck.load(html);
         App.state.fileName = fileName;
         App.state.fileHandle = handle || null;
         App.state.openedHtml = html;          // for "Revert to version opened" (SPEC 6.1)
         App.state.diskLastModified = null;
-        App.state.isNew = false;
+        App.state.isNew = !!isNew;
         App.history.reset();
         App.ui.showDeck();
     }
@@ -5083,8 +5093,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         // Through the importer like any deck, so there is only one way in.
         const result = await App.importer.importDeck(App.template.newDeckHtml());
-        await showDeck(result.html, NEW_DECK_NAME, null);
-        App.state.isNew = true;
+        await showDeck(result.html, NEW_DECK_NAME, null, true);
         App.ui.setStatus('New deck');
     };
 
@@ -5305,8 +5314,12 @@ App.template.newDeckHtml = function newDeckHtml() {
  * Before each write fileio.autoSave() checks that the file did not change on
  * disk. If it did, AutoSave pauses and asks: Reload / Save as copy / Overwrite.
  *
+ * Until that first save, a yellow banner under the ribbon says so and offers
+ * Save / Save As (saveReminder decides when it shows).
+ *
  * Talks to: fileio.js (writes), history.js (dirty state, drags in progress),
- *           dialogs.js, ui.js (status), events (history-changed, saved, deck-loaded).
+ *           commands.js (Save / Save As from the banner), dialogs.js,
+ *           ui.js (status), events (history-changed, saved, deck-loaded).
  */
 
 (function () {
@@ -5410,6 +5423,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     let askingUser = false;        // the "changed on disk" question is open
     let composing = false;         // IME composition in progress
     let switchedOff = false;       // was on, then switched off or paused this session (status bar)
+    let reminderClosed = false;    // the save-first banner was closed (until another deck opens)
     let toggle = null;
 
     App.autosave.init = function init() {
@@ -5418,6 +5432,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
         App.events.on('deck-loaded', () => {
             switchedOff = false;
+            reminderClosed = false;
             setEnabled(false);
             userTurnedOff = false;
             savedToFile = false;
@@ -5439,6 +5454,11 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
             refreshToggle();
         });
+
+        App.events.on('autosave-changed', refreshReminder);
+        App.events.on('saved', refreshReminder);
+        App.events.on('history-changed', refreshReminder);   // file name and 'new deck' are known by then
+        wireReminder();
 
         listenForComposition(window);
         // Closing the tab: start writing straight away. The browser still asks
@@ -5547,6 +5567,55 @@ App.template.newDeckHtml = function newDeckHtml() {
     // ---------------------------------------------------------------
     // The switch in the title bar
     // ---------------------------------------------------------------
+
+    // ---------------------------------------------------------------
+    // The save-first reminder banner
+    // ---------------------------------------------------------------
+
+    /*
+     * Which reminder to show: 'new' (the deck is in no file yet), 'file' (an
+     * opened file AutoSave does not write yet) or null (no banner). Pure, so it
+     * is unit-tested. No banner where AutoSave cannot exist (Firefox has its own
+     * banner), once AutoSave is on, after it was on and got switched off (the
+     * user chose that, or a dialog already explained why), or when closed.
+     */
+    App.autosave.saveReminder = function saveReminder(state) {
+        if (!state.hasDeck || !state.canSaveInPlace || state.enabled || state.switchedOff || state.dismissed) {
+            return null;
+        }
+        return state.isNew ? 'new' : 'file';
+    };
+
+    function wireReminder() {
+        document.getElementById('save-banner-save').addEventListener('click', () => App.commands.run('save'));
+        document.getElementById('save-banner-save-as').addEventListener('click', () => App.commands.run('saveAs'));
+        document.getElementById('save-banner-close').addEventListener('click', () => {
+            reminderClosed = true;
+            refreshReminder();
+        });
+    }
+
+    function refreshReminder() {
+        const kind = App.autosave.saveReminder({
+            hasDeck: App.state.hasDeck,
+            canSaveInPlace: App.fileio.canSaveInPlace(window),
+            enabled: enabled,
+            switchedOff: switchedOff,
+            dismissed: reminderClosed,
+            isNew: !!App.state.isNew,
+        });
+        const banner = document.getElementById('save-banner');
+        banner.hidden = kind === null;
+        if (kind === null) {
+            return;
+        }
+        document.getElementById('save-banner-text').textContent = kind === 'new'
+            ? 'This deck is not saved yet. Save it once and AutoSave keeps it saved from then on.'
+            : 'AutoSave is off until you save once. Save writes your changes into "' + App.state.fileName +
+              '"; Save As… leaves that file unchanged and saves a copy.';
+        // For a new deck Save already asks where to save, so Save As would do the same.
+        document.getElementById('save-banner-save-as').hidden = kind === 'new';
+    }
 
     function buildToggle() {
         toggle = App.util.el('button', {

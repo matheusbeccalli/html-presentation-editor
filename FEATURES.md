@@ -66,6 +66,7 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 - [x] Right-click context menu with the common actions (also Shift+F10 / Menu key)
 - [x] Canvas zoom: Ctrl+mouse wheel and zoom slider, 50–400% (plus −/+ and Fit; the wheel zooms around the mouse; fit mode follows the window)
 - [x] AutoSave layer 1 (6.1): on/off toggle in the title bar, turns on after the first manual save in the session (into a file, not a download; hidden in Firefox)
+- [x] Save-first banner: until AutoSave is on, a yellow bar under the ribbon says so ("not saved yet" for a new deck; "AutoSave is off until you save once" for an opened file) with Save and Save As buttons; × hides it until another deck opens; never in Firefox or after AutoSave was on and got switched off
 - [x] AutoSave timing: 5 s after the last change, at most every 30 s while editing; never during drag, resize or IME composition; closing the tab starts the write at once
 - [x] AutoSave writes through `createWritable()` (atomic replace on close); one write at a time
 - [x] AutoSave conflict check: compare `lastModified`; if changed on disk, pause and ask overwrite / save as copy / reload *(Save as copy uses the real Save As window, so it is checked by hand below)*
@@ -87,6 +88,7 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
   - [x] Save the recovered deck, then in Edge DevTools (F12) > Application > IndexedDB > deck-editor > drafts: empty
   - [x] File > Settings: turn on "Remember recent files", OK; open a deck with File > Open; reload editor.html: the deck is under Recent on the welcome screen; clicking it shows the Open window already in the deck's folder
   - [x] Edit a deck, wait 30 s, then File > Settings > "Delete all drafts now": in DevTools > Application > IndexedDB > deck-editor, the stores drafts, draftHtml and recent are all empty (right-click > Refresh)
+  - [ ] In Edge: open a deck with File > Open: a yellow bar says AutoSave is off until you save once; click its Save button (confirm the file): the bar disappears and AutoSave turns On. File > New: the bar says the deck is not saved yet; × hides it
 
 ## Phase 3: Text
 

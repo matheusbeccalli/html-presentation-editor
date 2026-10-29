@@ -42,7 +42,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `elements.js` | Actions on the selected element: nudge (merged undo), delete, cut/copy/paste/duplicate (own clipboard, fresh ids), stacking order | selection, transform, history, deck |
 | `thumbnails.js` | Slide rail; one small sandboxed iframe per slide, drawn lazily, refreshed debounced | deck, history events |
 | `fileio.js` | Open (picker / input / drag-drop), Save, Save As, download fallback, close warning | importer, deck, serialize, history |
-| `autosave.js` | AutoSave to the file (SPEC 6.1): the title-bar switch, a scheduler (5 s after the last change, max 30 s, never during a drag/IME, never two writes), the changed-on-disk question | fileio, history, dialogs |
+| `autosave.js` | AutoSave to the file (SPEC 6.1): the title-bar switch, the save-first banner until it is on, a scheduler (5 s after the last change, max 30 s, never during a drag/IME, never two writes), the changed-on-disk question | fileio, history, dialogs |
 | `storage.js` | The editor's IndexedDB (drafts, draft HTML, recent files); never throws: blocked storage gives false/null/[] | — |
 | `settings.js` | Privacy settings (keep drafts, retention 1–30 days, recent files) in localStorage, and the File > Settings dialog | storage, drafts, dialogs |
 | `drafts.js` | Crash-recovery drafts (SPEC 6.2): a draft 30 s after unsaved changes (last 5 per deck), deleted on save/clean state/discard/after 1 day; Recover / Compare / Discard dialogs | storage, autosave (scheduler), fileio, importer, deck, thumbnails |

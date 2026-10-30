@@ -148,13 +148,22 @@
         return hit === null ? null : elements[hit];
     };
 
-    /* Double-click on a text box: edit its text, with the cursor where the click was. */
+    /*
+     * Double-click on a text box: edit its text, with the cursor where the click
+     * was. On empty slide space: a new text box there, ready to type (left
+     * empty, it goes once deselected, see text.js).
+     */
     function onDoubleClick(event) {
         const point = toSlidePoint(event);
         const element = App.selection.elementAt(point.x, point.y);
         if (element && element.getAttribute('data-type') === 'text') {
             App.selection.select(element);
             App.text.enterEdit(element, { point: point });
+            return;
+        }
+        const slide = App.deck.getCurrentSlide();
+        if (!element && slide && point.x >= 0 && point.y >= 0 && point.x < slide.offsetWidth && point.y < slide.offsetHeight) {
+            App.elements.insertTextBox({ left: Math.round(point.x), top: Math.round(point.y), width: null });
         }
     }
 

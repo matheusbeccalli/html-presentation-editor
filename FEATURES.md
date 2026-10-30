@@ -107,7 +107,7 @@ Nested bullets are the top priority of this phase.
 
 *Editing*
 - [x] Double-click a text element to edit (`contenteditable`) *(also Enter / F2 on a selected text box; Esc or a click outside stops)*
-- [x] Insert text box, PowerPoint style: click the button, then click on the slide (grows as you type) or drag to set the width *(click = 360 px wide, grows in height; an empty new box is removed once it is deselected, as in PowerPoint; ribbon tabs keep typing going)*
+- [x] Insert text box, PowerPoint style: click the button, then click on the slide (grows as you type) or drag to set the width *(click = 360 px wide, grows in height; an empty new box is removed once it is deselected, as in PowerPoint; ribbon tabs keep typing going; a double-click on empty slide space also adds a text box there)*
 - [x] Toolbar: bold, italic, underline, strikethrough, superscript, subscript *(Home > Font; Ctrl+B / Ctrl+I / Ctrl+U; a cursor inside a word formats the word, elsewhere the text typed next; with the box selected: all its text)*
 - [x] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting; theme fonts and theme colors stored as `var(--…)` *(Font color / Highlight are split buttons that remember the last colour; More colors… opens the browser's colour window)*
 - [x] Toolbar: align left / center / right / justify *(Ctrl+L / E / R / J while a text box is selected or edited)*
@@ -157,6 +157,7 @@ Nested bullets are the top priority of this phase.
   - [x] Double-click a bullet, type, press Esc: the text is there and the box stays selected; Ctrl+Z removes the typing in one step, Ctrl+Y brings it back
   - [x] While typing: arrow keys move the cursor (not the box); type, wait 2 s, type again, Ctrl+Z: only the second part goes and the cursor goes back to where it was
   - [ ] Insert > Text box, click on the slide, type two lines (Shift+Enter): the box grows; Insert > Text box, drag, Esc without typing: the empty box stays selected, a second Esc (or a click elsewhere) removes it; Insert > Text box, click, then Home > Bullets before typing: the box stays, with a bullet *(changed after your hand test: the empty box used to vanish on Esc)*
+  - [ ] Double-click an empty spot of a slide: a text box appears there with the cursor in it; type, Esc: it stays. Double-click again and click elsewhere without typing: no box is left. Double-click a text box: you type in that box (no new one)
   - [ ] Type a misspelled Portuguese word (e.g. "recieta"): it gets a red underline (Edge needs Portuguese under Settings > Languages > Spell check)
   - [x] In a bulleted box: End, Enter, Tab, type, Enter, Enter, Enter (level 2 → level 1 → plain text); type "- " (bullet) then Ctrl+Z ("- " stays as text); Backspace at the start of a bullet removes it; select three lines and Shift+Tab
   - [ ] Home > Paragraph: select two bullets, click Numbering (1., 2.; the button lights up), Increase indent (a., b.), type: the cursor is still in the text; put the cursor on b. and click Restart numbering (a.); in a later numbered line after a bullet, Continue numbering goes on from the run above; Esc, then Bullets acts on the whole box; Ctrl+Z undoes each click

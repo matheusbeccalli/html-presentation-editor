@@ -963,6 +963,43 @@ def test_paste_options_button(browser):
     editor.close()
 
 
+def test_double_click_empty_slide_adds_text_box(browser):
+    """Double-click on empty slide space: a new text box there, ready to type; left empty, it goes when deselected."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    count = lambda: page.evaluate("App.deck.getCurrentSlide().querySelectorAll('.el').length")  # noqa: E731
+    before = count()
+    check(page.evaluate("App.selection.elementAt(900, 670)") is None, "the spot is empty slide space")
+    page.mouse.dblclick(*slide_to_screen(page, 900, 670))
+    new_id = editing_id(page)
+    check(new_id is not None and count() == before + 1, "a new text box, in edit mode")
+    rect = element_rect(page, new_id)
+    # The mouse lands on whole screen pixels: at this zoom, one is about 1.4 slide pixels.
+    check(abs(rect["left"] - 900) <= 1 and abs(rect["top"] - 670) <= 1, f"placed where the double-click was: {rect}")
+    page.keyboard.type("Nota")
+    check(page.evaluate(TEXT_OF, new_id) == ["Nota"], "typing goes into it")
+    page.keyboard.press("Escape")
+    page.keyboard.press("Control+z")   # the typing
+    page.keyboard.press("Control+z")   # the box
+    check(count() == before, "two undo steps: the typing, then the box")
+
+    page.mouse.dblclick(*slide_to_screen(page, 900, 670))
+    check(editing_id(page) is not None, "again")
+    page.mouse.click(*slide_to_screen(page, 640, 700))   # elsewhere, without typing
+    check(count() == before, "left empty and deselected: removed")
+
+    page.mouse.dblclick(*slide_to_screen(page, 300, 300))   # on the bullets
+    check(editing_id(page) == "e7" and count() == before, "on a text box, double-click still edits that box")
+    page.keyboard.press("Escape")
+    overlay = page.evaluate("(() => { const r = document.getElementById('overlay').getBoundingClientRect(); return [r.left, r.bottom]; })()")
+    page.mouse.dblclick(overlay[0] - 20, overlay[1] + 20)   # the grey area outside the slide
+    check(count() == before and editing_id(page) is None, "outside the slide: nothing")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1918,6 +1955,7 @@ TESTS = [
     test_paste_into_text,
     test_copy_and_cut_text,
     test_paste_options_button,
+    test_double_click_empty_slide_adds_text_box,
 ]
 
 

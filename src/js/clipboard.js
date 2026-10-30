@@ -13,6 +13,11 @@
  *     and colours come back as var(--…) (see App.text.copyHtml).
  * Nothing here touches the deck: text.js inserts the result (pasteAction).
  *
+ * Out: fromLines(lines, doc) writes copied lines as nested <ul>/<ol>/<li>, so
+ * bullets survive a paste into Outlook or Word (which do not know data-list),
+ * and marks them data-deck-editor="text" with each line's data-list /
+ * data-level, so the editor reads its own copies back exactly.
+ *
  * Talks to: text.js (normalize builds the paragraphs; pasteAction uses them).
  */
 
@@ -146,6 +151,56 @@
                 });
             });
     }
+
+    /*
+     * Copied lines -> marked HTML. lines: [{ list, level, start, number, style, html }]
+     * (number: what a numbered line shows, so a list copied from its middle
+     * keeps its numbers in Word: <ol start>). A list of another type at the
+     * same level starts a new list; a deeper line nests in the item above it.
+     */
+    App.clipboard.fromLines = function fromLines(lines, doc) {
+        const root = doc.createElement('div');
+        root.setAttribute('data-deck-editor', 'text');
+        let stack = [];   // the open lists: { level, tag, list, item }
+        lines.forEach((line) => {
+            const node = doc.createElement(line.list === 'none' ? 'p' : 'li');
+            node.setAttribute('data-list', line.list);
+            node.setAttribute('data-level', String(line.level));
+            if (line.start) {
+                node.setAttribute('data-start', String(line.start));
+            }
+            if (line.style) {
+                node.setAttribute('style', line.style);
+            }
+            node.innerHTML = line.html;
+            if (line.list === 'none') {
+                stack = [];
+                root.appendChild(node);
+                return;
+            }
+            const tag = line.list === 'number' ? 'ol' : 'ul';
+            while (stack.length > 0 && stack[stack.length - 1].level > line.level) {
+                stack.pop();
+            }
+            let top = stack[stack.length - 1];
+            if (top && top.level === line.level && top.tag !== tag) {
+                stack.pop();
+                top = stack[stack.length - 1];
+            }
+            if (!top || top.level < line.level) {
+                const list = doc.createElement(tag);
+                if (tag === 'ol' && line.number && line.number !== 1) {
+                    list.setAttribute('start', String(line.number));
+                }
+                (top ? top.item : root).appendChild(list);
+                top = { level: line.level, tag: tag, list: list, item: null };
+                stack.push(top);
+            }
+            top.list.appendChild(node);
+            top.item = node;
+        });
+        return root.outerHTML;
+    };
 
     /*
      * Clipboard HTML -> { fromEditor, holder }: holder is an element (in its

@@ -1257,3 +1257,72 @@ test('paste: text copied in the editor keeps all its formatting (theme values as
 test('paste: an empty clipboard does nothing', async () => {
     assertEqual((await pasted(['p1:Al|fa'], { html: '', text: '' })).label, null);
 });
+
+// ---------------------------------------------------------------
+// Copy out of a text (SPEC Phase 3: nested <ul>/<ol> on the clipboard)
+// ---------------------------------------------------------------
+
+const THEME_CSS = ':root { --font-body: Calibri, Arial, sans-serif; --color-primary: #cc092f; }';
+
+async function copied(lines, elStyle) {
+    const frame = await renderedBox(THEME_CSS, lines.map(lineHtml).join(''), elStyle);
+    const el = frame.contentDocument.querySelector('.el');
+    const anchor = markerPosition(lines, '[');
+    const caret = anchor ? { anchor: anchor, focus: markerPosition(lines, ']') }
+        : { anchor: markerPosition(lines, '|'), focus: markerPosition(lines, '|') };
+    App.text.setCaret(el, caret);
+    const content = App.text.copyContent(el, caret);
+    return { frame: frame, el: el, caret: caret, content: content,
+        dom: content ? new DOMParser().parseFromString(content.html, 'text/html') : null };
+}
+
+test('copy: the selection as nested lists for Word / Outlook, and as plain lines', async () => {
+    const box = await copied(['b1:Al[fa', 'b2:Beta', 'b2:Gama', 'n1:Del]ta', 'p1:Fim']);
+    const dom = box.dom;
+    assert(dom.querySelector('[data-deck-editor="text"]'), 'marked as the editor’s');
+    // Each item: its list, its level, its own text (without the lists nested in it).
+    const ownText = (li) => Array.from(li.childNodes).filter((node) => !/^(UL|OL)$/.test(node.nodeName))
+        .map((node) => node.textContent).join('');
+    assertEqual(Array.from(dom.querySelectorAll('li')).map((li) => [li.parentElement.tagName, li.getAttribute('data-level'), ownText(li)]),
+        [['UL', '1', 'fa'], ['UL', '2', 'Beta'], ['UL', '2', 'Gama'], ['OL', '1', 'Del']]);
+    assertEqual(dom.querySelector('li ul').parentElement.getAttribute('data-level'), '1', 'level 2 nested inside level 1');
+    assertEqual(box.content.text, 'fa\nBeta\nGama\nDel');
+    box.frame.remove();
+});
+
+test('copy: a cursor alone copies nothing (the browser does nothing either)', async () => {
+    const box = await copied(['b1:Al|fa']);
+    assertEqual(box.content, null);
+    box.frame.remove();
+});
+
+test('copy: the text carries its full look, theme values written out with their names', async () => {
+    const box = await copied(['p1:[Alfa]'], 'font-family: var(--font-body); font-size: 20pt; color: var(--color-primary); font-weight: bold;');
+    const span = box.dom.querySelector('span');
+    assertEqual([span.style.fontFamily, span.style.fontSize, span.style.color],
+        ['Calibri, Arial, sans-serif', '20pt', 'rgb(204, 9, 47)'], 'real values for Word / Outlook');
+    assertEqual([span.getAttribute('data-theme-font'), span.getAttribute('data-theme-color')], ['--font-body', '--color-primary']);
+    assert(box.dom.querySelector('b'), 'the box’s bold is on the text');
+    box.frame.remove();
+});
+
+test('copy then paste in another box: the text keeps its look, theme links included', async () => {
+    const source = await copied(['b2:[Alfa ', 'n1:Be]ta'], 'font-family: var(--font-body); font-size: 20pt; color: var(--color-primary);');
+    const result = await pasted(['p1:|'], source.content);
+    assertEqual(result.lines, ['b2:Alfa', 'n1:Be|']);
+    assertEqual(result.html[0], '<span style="font-family: var(--font-body); font-size: 20pt; color: var(--color-primary);">Alfa</span>');
+    source.frame.remove();
+});
+
+test('copy: a numbered list copied from its middle keeps its numbers outside (ol start)', async () => {
+    const box = await copied(['n1:Um', 'n1:Dois', 'n1:[Três', 'n1:Qua]tro']);
+    assertEqual(box.dom.querySelector('ol').getAttribute('start'), '3');
+    box.frame.remove();
+});
+
+test('cut: removes the selection as one action', async () => {
+    const box = await copied(['b1:Al[fa', 'b1:Be]ta']);
+    App.text.runAction(box.el, App.text.cutAction(box.el, box.caret));
+    assertEqual(describeLines(box.el), ['b1:Al|ta']);
+    box.frame.remove();
+});

@@ -852,6 +852,48 @@ def test_paste_into_text(browser):
     editor.close()
 
 
+def test_copy_and_cut_text(browser):
+    """Ctrl+C in a text: nested lists on the clipboard for Outlook/Word; pasted back it looks the same. Ctrl+X: one step."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    lines = lambda: page.evaluate(LINES_OF, "e7")  # noqa: E731
+    start = lines()
+
+    page.keyboard.press("Enter")   # edit, cursor at the end of the last line
+    page.keyboard.press("Home")
+    page.keyboard.press("ArrowUp")   # the start of line 3
+    page.keyboard.press("Shift+ArrowDown")
+    page.keyboard.press("Shift+End")   # lines 3 and 4, whole
+    page.keyboard.press("Control+c")
+    clipboard = page.evaluate("""async () => {
+        const [item] = await navigator.clipboard.read();
+        return { html: await (await item.getType('text/html')).text(), text: await (await item.getType('text/plain')).text() };
+    }""")
+    check('data-deck-editor="text"' in clipboard["html"] and "<ul>" in clipboard["html"], f"nested lists: {clipboard['html'][:200]}")
+    check(clipboard["text"].replace("\r", "") == "\n".join(line[3:] for line in start[2:4]), f"plain lines: {clipboard['text']!r}")
+
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.press("Control+v")
+    check(lines() == start + start[2:4], f"pasted back: two more bullets with the same text: {lines()}")
+    for _ in range(2):   # the paste, the new line
+        page.keyboard.press("Control+z")
+    check(lines() == start, f"undone: {lines()}")
+
+    page.keyboard.press("Shift+ArrowUp")
+    page.keyboard.press("Control+x")
+    check(len(lines()) == len(start) - 1, f"Ctrl+X removed the selection: {lines()}")
+    page.keyboard.press("Control+z")
+    check(lines() == start, "Ctrl+Z brings it back")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1805,6 +1847,7 @@ TESTS = [
     test_paragraph_formatting,
     test_clipboard_capture_page,
     test_paste_into_text,
+    test_copy_and_cut_text,
 ]
 
 

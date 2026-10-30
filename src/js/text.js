@@ -1789,7 +1789,7 @@
         }
         const points = parseFloat(view.getComputedStyle(sized).fontSize) * 0.75;
         return { b: parseInt(computed.fontWeight, 10) >= 600, i: /italic|oblique/.test(computed.fontStyle),
-            size: Math.round(points * 2) / 2 };
+            size: Math.round(points * 2) / 2, family: computed.fontFamily, color: computed.color };
     }
 
     /* The next size in the list above (direction 1) or below (-1) `size`; the same size at the ends. */
@@ -2340,6 +2340,89 @@
         };
     };
 
+    // ---------------------------------------------------------------
+    // Copy and cut
+    // ---------------------------------------------------------------
+    //
+    // Ctrl+C / Ctrl+X while typing put the selection on the clipboard as
+    // nested lists (clipboard.fromLines) with each piece's full look, so it
+    // looks the same in Outlook, Word or another text box, plus plain lines.
+
+    const THEME_ATTRIBUTES = { 'font-family': 'data-theme-font', color: 'data-theme-color', 'background-color': 'data-theme-highlight' };
+
+    /* A run with its whole look written on it: its own, else the box's declared one (theme variables kept), else as shown. */
+    function fullLook(element, run) {
+        const look = copyRun(run, run.text);
+        if (run.shown) {
+            ['b', 'i'].forEach((format) => {
+                if (run.shown[format]) {
+                    look.formats.add(format);
+                }
+            });
+        }
+        [['font-family', 'family'], ['font-size', 'size'], ['color', 'color']].forEach(([property, shown]) => {
+            if (!look.styles[property]) {
+                const declared = element.style.getPropertyValue(property);
+                const value = declared && property !== 'font-size' ? declared
+                    : run.shown ? (property === 'font-size' ? run.shown.size + 'pt' : run.shown[shown]) : null;
+                if (value) {
+                    look.styles[property] = value;
+                }
+            }
+        });
+        return look;
+    }
+
+    /* For programs that do not know the theme: var(--x) written out, its name kept in a data-theme-… attribute. */
+    function resolveThemeValues(line) {
+        const root = line.ownerDocument.documentElement;
+        const view = line.ownerDocument.defaultView;
+        line.querySelectorAll('span').forEach((span) => {
+            Object.keys(THEME_ATTRIBUTES).forEach((property) => {
+                const match = /^var\((--[a-z0-9-]+)\)$/.exec(span.style.getPropertyValue(property));
+                const value = match && view ? view.getComputedStyle(root).getPropertyValue(match[1]).trim() : '';
+                if (value) {
+                    span.style.setProperty(property, value);
+                    span.setAttribute(THEME_ATTRIBUTES[property], match[1]);
+                }
+            });
+        });
+    }
+
+    /* The selection as { html, text } for the clipboard, or null when nothing is selected. */
+    App.text.copyContent = function copyContent(element, caret) {
+        if (!caret || sameCaret(caret)) {
+            return null;
+        }
+        const [from, to] = [caret.anchor, caret.focus].sort(comparePositions);
+        const lines = textLines(element);
+        const numbers = shownNumbers(lines);
+        const copiedLines = [];
+        const texts = [];
+        for (let p = from.p; p <= Math.min(to.p, lines.length - 1); p++) {
+            const line = lines[p];
+            const runs = contentRuns(line);
+            const [, rest] = splitRunsAt(runs, p === from.p ? from.o : 0);
+            const [part] = p === to.p ? splitRunsAt(rest, to.o - (p === from.p ? from.o : 0)) : [rest];
+            const holder = line.cloneNode(false);
+            writeRuns(holder, part.map((run) => (run.br ? run : fullLook(element, run))));
+            resolveThemeValues(holder);
+            const style = styleText(paragraphStyles(line), PARAGRAPH_ORDER);
+            copiedLines.push({ list: listOf(line), level: levelOf(line), number: numbers[p], style: style, html: holder.innerHTML,
+                start: listOf(line) === 'number' ? positiveInt(line.getAttribute('data-start')) : null });
+            texts.push(part.map((run) => (run.br ? '\n' : run.text)).join(''));
+        }
+        return { html: App.clipboard.fromLines(copiedLines, element.ownerDocument), text: texts.join('\n') };
+    };
+
+    /* Ctrl+X: the selection is removed (copyContent has put it on the clipboard). */
+    App.text.cutAction = function cutAction(element, caret) {
+        if (!caret || sameCaret(caret)) {
+            return null;
+        }
+        return { label: 'Cut', run: () => caretAt(deleteSelection(element, caret)) };
+    };
+
     /* Run an action (a key, AutoFormat, a list button): change the lines, tidy them, put the cursor back
        (an action on a selected box, not being edited, has no cursor). */
     App.text.runAction = function runAction(element, action) {
@@ -2432,12 +2515,16 @@
         element.addEventListener('beforeinput', onBeforeInput);
         element.addEventListener('input', onInput);
         element.addEventListener('paste', onPaste);
+        element.addEventListener('copy', onCopy);
+        element.addEventListener('cut', onCopy);
     }
 
     function detachFromElement(element) {
         element.removeEventListener('beforeinput', onBeforeInput);
         element.removeEventListener('input', onInput);
         element.removeEventListener('paste', onPaste);
+        element.removeEventListener('copy', onCopy);
+        element.removeEventListener('cut', onCopy);
         unmarkEditable(element);
     }
 
@@ -2636,6 +2723,21 @@
         const action = caret && App.text.pasteAction(editing.element, caret, clipboard, mode);
         if (action) {
             runInEditor(action);
+        }
+    }
+
+    /* Ctrl+C / Ctrl+X while typing: the editor's own clipboard content (copyContent); a cut is one undo step. */
+    function onCopy(event) {
+        const caret = editing && App.text.getCaret(editing.element);
+        const content = caret && App.text.copyContent(editing.element, caret);
+        if (!content) {
+            return;
+        }
+        event.preventDefault();
+        event.clipboardData.setData('text/html', content.html);
+        event.clipboardData.setData('text/plain', content.text);
+        if (event.type === 'cut') {
+            runInEditor(App.text.cutAction(editing.element, caret));
         }
     }
 

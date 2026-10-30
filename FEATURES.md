@@ -167,7 +167,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Home > Paragraph, alignment and spacing: in a text, Ctrl+E centres the line (the Center button lights up); select two lines, Align right; Line spacing list: 1.5 spreads them out and shows as ticked when reopened; type 12 in Space before + Enter: space above both lines, and the cursor is back in the text; Esc, then Ctrl+L aligns the whole box left; Ctrl+Z undoes each step. With nothing selected, Ctrl+R still reloads the page (it asks first if there are unsaved changes)
   - [ ] Paste: copy a 3-level bulleted list in Word (or Outlook), type into a text box, Ctrl+V: three levels of bullets, bold kept, Word's font/size/colour gone; Ctrl+Z undoes the whole paste; Ctrl+Shift+V pastes the same as plain lines. Also try a list from Copilot's chat and from a web page; after a paste, the small button under it switches to "Keep text only" and back
   - [ ] Copy: select two bullets of a deck (one with bold), Ctrl+C, paste into a new Outlook e-mail: two bullets, bold kept, same font and colour; paste into another text box of the deck: same look; Ctrl+X removes them, Ctrl+Z brings them back
-  - [ ] Capture real clipboard fixtures: open `tests/clipboard-capture.html` in Edge, copy a list from Word, Outlook, PowerPoint and Copilot (keep "fake letters" on), save each into `tests/fixtures/clipboard/` and list it in `tests/run-tests.html`
+  - [x] Capture real clipboard fixtures: open `tests/clipboard-capture.html` in Edge, copy a list from Word, Outlook, PowerPoint and Copilot (keep "fake letters" on), save each into `tests/fixtures/clipboard/` and list it in `tests/run-tests.html`
 
 ## Phase 4: Tables
 

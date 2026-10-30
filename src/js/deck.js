@@ -42,6 +42,9 @@
         '  opacity: 1 !important; visibility: visible !important; }',
         'aside.notes, .master { display: none !important; }',
         '*, *::before, *::after { animation: none !important; transition: none !important; }',
+        // Find & replace paints its matches with the CSS Highlight API (findreplace.js), as the browser's own find does.
+        '::highlight(editor-find) { background-color: #ffe14d; }',
+        '::highlight(editor-find-current) { background-color: #ff9632; }',
     ].join('\n');
 
     App.deck.init = function init() {
@@ -169,6 +172,29 @@
         slides.forEach((slide, i) => slide.toggleAttribute('data-editor-current', i === currentIndex));
         if (!(options && options.silent)) {
             App.events.emit('slide-changed', { index: currentIndex });
+        }
+    };
+
+    /*
+     * Run fn with `slide` shown instead of the current one, e.g. to measure a
+     * text box on another slide (autofit after Replace All); then show the current one again.
+     */
+    App.deck.withSlideShown = function withSlideShown(slide, fn) {
+        const current = App.deck.getCurrentSlide();
+        if (slide === current) {
+            return fn();
+        }
+        if (current) {
+            current.removeAttribute('data-editor-current');
+        }
+        slide.setAttribute('data-editor-current', '');
+        try {
+            return fn();
+        } finally {
+            slide.removeAttribute('data-editor-current');
+            if (current) {
+                current.setAttribute('data-editor-current', '');
+            }
         }
     };
 

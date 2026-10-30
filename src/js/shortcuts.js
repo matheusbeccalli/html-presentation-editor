@@ -219,6 +219,9 @@
         ['Ctrl+R', 'alignRight', { whileTyping: true }],
         ['Ctrl+J', 'alignJustify', { whileTyping: true }],
         // Font size: Ctrl+] / Ctrl+[ and, as in PowerPoint, Ctrl+Shift+> / Ctrl+Shift+<.
+        // Find / Replace; Ctrl+H would otherwise open the browser's history.
+        ['Ctrl+F', 'find', { whileTyping: true, blockBrowserDefault: true }],
+        ['Ctrl+H', 'replace', { whileTyping: true, blockBrowserDefault: true }],
         ['Ctrl+]', 'growFont', { whileTyping: true }],
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
         ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],

@@ -254,6 +254,11 @@
                 App.text.startPainter(true);
             },
         });
+        // Find & replace across all slides (findreplace.js); the panel keeps typing in the text going.
+        App.commands.define('find', { label: 'Find', keepsEdit: true, isEnabled: hasDeck, run: () => App.findReplace.open('find') });
+        App.commands.define('replace', {
+            label: 'Replace', keepsEdit: true, isEnabled: hasDeck, run: () => App.findReplace.open('replace'),
+        });
         App.commands.define('cut', { label: 'Cut', isEnabled: hasSelection, run: () => App.elements.cut() });
         App.commands.define('copy', { label: 'Copy', isEnabled: hasSelection, run: () => App.elements.copy() });
         App.commands.define('paste', { label: 'Paste', isEnabled: () => App.elements.canPaste(), run: () => App.elements.paste() });

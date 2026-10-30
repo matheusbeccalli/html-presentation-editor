@@ -89,6 +89,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     display: flex;
     flex-direction: column;
     min-width: 0;
+    position: relative;          /* the find panel floats over its top right */
 }
 
 /* Shown while a file is opened or converted. */

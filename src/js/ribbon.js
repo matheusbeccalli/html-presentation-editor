@@ -41,6 +41,8 @@
                         ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }]],
                 },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
+                // Small buttons with their names, stacked, as PowerPoint's Editing group.
+                { label: 'Editing', rows: [[{ command: 'find', icon: 'find' }], [{ command: 'replace', icon: 'replace' }]] },
             ],
             note: 'Double-click a text box (or press Enter) to type in it; Esc stops typing. ' +
                 'With a box selected, Font and Paragraph change all its text.',
@@ -83,10 +85,10 @@
     const buttons = [];   // [{ button, command }] so enabled states can be refreshed
 
     /* A ribbon button; small ones show only the icon (the name is in the tooltip). */
-    function commandButton(command, iconName, small, doubleClickCommand) {
+    function commandButton(command, iconName, small, doubleClickCommand, named) {
         const keys = App.shortcuts.keysFor(command);
         const button = el('button', {
-            type: 'button', class: 'ribbon-button' + (small ? ' small' : ''),
+            type: 'button', class: 'ribbon-button' + (small ? ' small' : '') + (named ? ' named' : ''),
             'aria-label': App.commands.label(command),
             title: App.commands.label(command) + (keys ? ' (' + keys + ')' : ''),
             'data-command': command,
@@ -102,7 +104,7 @@
             button.addEventListener('mousedown', (event) => event.preventDefault());
         }
         button.innerHTML = App.icons.get(iconName);
-        if (!small) {
+        if (!small || named) {
             button.appendChild(el('span', { class: 'ribbon-button-label' }, [App.commands.label(command)]));
         }
         buttons.push({ button: button, command: command });
@@ -122,8 +124,12 @@
             let buttonsNode;
             if (group.rows) {
                 buttonsNode = el('div', { class: 'ribbon-rows' }, group.rows.map((row) =>
-                    el('div', { class: 'ribbon-row' }, row.map((item) => (item.control
-                        ? App.textControls.create(item.control) : commandButton(item[0], item[1], true))))));
+                    el('div', { class: 'ribbon-row' }, row.map((item) => {
+                        if (item.control) {
+                            return App.textControls.create(item.control);
+                        }
+                        return item.command ? commandButton(item.command, item.icon, true, null, true) : commandButton(item[0], item[1], true);
+                    }))));
             } else {
                 buttonsNode = el('div', { class: 'ribbon-group-buttons' });
                 group.commands.forEach(([command, icon, onDouble]) =>

@@ -1139,6 +1139,107 @@ def test_autofit(browser):
     editor.close()
 
 
+FIND_STATE = """() => {
+    const doc = App.deck.getDocument();
+    const highlights = doc.defaultView.CSS.highlights;
+    const size = (name) => (highlights.get(name) ? highlights.get(name).size : 0);
+    const editing = App.text.editingElement();
+    return { open: !document.getElementById('find-panel').hidden, slide: App.deck.getCurrentIndex(),
+             editing: editing ? editing.getAttribute('data-id') : null, selected: doc.getSelection().toString(),
+             highlighted: size('editor-find') + size('editor-find-current'), current: size('editor-find-current'),
+             status: document.getElementById('find-status').textContent,
+             focus: document.activeElement ? document.activeElement.id : null };
+}"""
+
+COUNT_IN_DECK = """(word) => Array.from(App.deck.getDocument().querySelectorAll('.el[data-type="text"]'))
+    .reduce((sum, el) => sum + (el.textContent.match(new RegExp(word, 'gi')) || []).length, 0)"""
+
+
+def test_find_and_replace(browser):
+    """Home > Editing: Find (Ctrl+F) and Replace (Ctrl+H) across all slides, every match highlighted."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    state = lambda: page.evaluate(FIND_STATE)  # noqa: E731
+    check(page.locator('#ribbon-panel [data-command="find"]').is_visible() and
+          page.locator('#ribbon-panel [data-command="replace"]').is_visible(), "Home > Editing has Find and Replace")
+
+    page.keyboard.press("Control+f")
+    found = state()
+    check(found["open"] and found["focus"] == "find-text" and not page.locator("#find-replacement").is_visible(),
+          f"Ctrl+F opens Find with the cursor in it: {found}")
+    page.keyboard.type("margem")
+    total = page.evaluate(COUNT_IN_DECK, "margem")
+    check(total >= 3, f"the sample deck has 'margem' on several slides: {total}")
+    wait_until(page, f"() => ({FIND_STATE})().highlighted === {total}")
+    check(state()["status"] == f"{total} matches", f"the count: {state()}")
+
+    page.keyboard.press("Enter")
+    found = state()
+    check(found["slide"] == 1 and found["editing"] == "e7" and found["selected"] == "margem" and found["current"] == 1,
+          f"Enter goes to the first match (slide 2), selected in its box: {found}")
+    check(found["status"] == f"1 of {total}" and found["focus"] == "find-text", f"the panel keeps the keyboard: {found}")
+    page.keyboard.press("Enter")
+    check(state()["status"] == f"2 of {total}", f"Enter again: the next match: {state()}")
+    page.keyboard.press("Shift+Enter")
+    check(state()["status"] == f"1 of {total}" and state()["slide"] == 1, f"Shift+Enter goes back: {state()}")
+
+    page.check("#find-match-case")
+    wait_until(page, f"() => ({FIND_STATE})().highlighted === {page.evaluate(COUNT_IN_DECK.replace("'gi'", "'g'"), 'margem')}")
+    page.uncheck("#find-match-case")
+
+    page.fill("#find-text", "2024")   # at the end of a long line, under the panel where it opened
+    page.keyboard.press("Enter")
+    covered = page.evaluate("""() => {
+        const frame = document.getElementById('deck-frame').getBoundingClientRect();
+        const zoom = frame.width / 1280;
+        const r = App.deck.getDocument().getSelection().getRangeAt(0).getBoundingClientRect();
+        const p = document.getElementById('find-panel').getBoundingClientRect();
+        const m = { left: frame.left + r.left * zoom, right: frame.left + r.right * zoom,
+                    top: frame.top + r.top * zoom, bottom: frame.top + r.bottom * zoom };
+        return !(m.right < p.left || m.left > p.right || m.bottom < p.top || m.top > p.bottom);
+    }""")
+    check(state()["selected"] == "2024" and not covered, f"the panel moves off the match it selected: {state()}")
+
+    page.fill("#find-text", "oculto")
+    page.keyboard.press("Enter")
+    found = state()
+    check(found["slide"] == 4 and found["editing"] == "e15" and found["selected"] == "oculto",
+          f"hidden slides are searched too: {found}")
+
+    page.keyboard.press("Control+h")
+    check(page.locator("#find-replacement").is_visible() and state()["focus"] == "find-text",
+          f"Ctrl+H shows Replace: {state()}")
+    page.fill("#find-text", "Alfa")
+    page.fill("#find-replacement", "Beta")
+    page.click("#find-next")
+    found = state()
+    check(found["slide"] == 0 and found["editing"] == "e4" and found["selected"] == "Alfa" and "first slide" in found["status"],
+          f"past the last slide it goes on from the first: {found}")
+    alfas = page.evaluate(COUNT_IN_DECK, "alfa")
+    page.click("#find-replace")
+    box = lambda data_id: page.evaluate(f"App.deck.getDocument().querySelector('[data-id=\"{data_id}\"]').textContent")  # noqa: E731
+    found = state()
+    check("Beta Alimentos" in box("e4") and found["selected"] == "Alfa" and found["editing"] == "e7",
+          f"Replace changes this match and selects the next: {found}")
+    page.click('#ribbon-panel [data-command="undo"]')
+    check("Alfa Alimentos" in box("e4"), "one Ctrl+Z undoes that replace")
+
+    page.click("#find-replace-all")
+    found = state()
+    check(found["status"] == f"Replaced {alfas}" and page.evaluate(COUNT_IN_DECK, "alfa") == 0 and
+          "Beta Alimentos" in box("e4") and "Beta Alimentos" in box("e7"), f"Replace All, on every slide: {found}")
+    page.click('#ribbon-panel [data-command="undo"]')
+    check(page.evaluate(COUNT_IN_DECK, "alfa") == alfas, "one undo brings all of them back")
+
+    page.click("#find-text")
+    page.keyboard.press("Escape")
+    found = state()
+    check(not found["open"] and found["highlighted"] == 0, f"Esc closes the panel and its highlights: {found}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -2097,6 +2198,7 @@ TESTS = [
     test_double_click_empty_slide_adds_text_box,
     test_format_painter,
     test_autofit,
+    test_find_and_replace,
 ]
 
 

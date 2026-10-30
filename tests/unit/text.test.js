@@ -1477,3 +1477,87 @@ test('autofit: autofitAction switches the mode and fits at once; leaving shrink 
     assertEqual(App.text.autofitAction(box.el, 'off'), null, 'already off: nothing to do');
     box.frame.remove();
 });
+
+// ---------------------------------------------------------------
+// Find & replace (SPEC Phase 3): findMatches / matchRange / replaceAction
+// ---------------------------------------------------------------
+//
+// A match is { p, start, end }: the line and the characters [start, end) in it,
+// counted like the cursor (a <br> counts as one).
+
+function lines(htmlLines) {
+    const element = textElement(htmlLines.map((line) => '<p data-list="none" data-level="1">' + line + '</p>').join(''));
+    App.text.normalize(element);
+    return element;
+}
+
+test('find: matches on every line, ignoring case by default', () => {
+    assertEqual(App.text.findMatches(lines(['Alfa beta ALFA', 'alfabeto']), 'alfa'),
+        [{ p: 0, start: 0, end: 4 }, { p: 0, start: 10, end: 14 }, { p: 1, start: 0, end: 4 }]);
+});
+
+test('find: Match case keeps only the exact spelling', () => {
+    assertEqual(App.text.findMatches(lines(['Alfa beta ALFA']), 'ALFA', { matchCase: true }), [{ p: 0, start: 10, end: 14 }]);
+});
+
+test('find: whole words only skips the word inside a longer word (accented letters count as letters)', () => {
+    assertEqual(App.text.findMatches(lines(['alfabeto alfa, alfa_x xalfa']), 'alfa', { wholeWord: true }),
+        [{ p: 0, start: 9, end: 13 }]);
+    assertEqual(App.text.findMatches(lines(['ações ação']), 'ação', { wholeWord: true }), [{ p: 0, start: 6, end: 10 }]);
+});
+
+test('find: a match may cross formatting; accents count; a space finds a non-breaking space', () => {
+    assertEqual(App.text.findMatches(lines(['<b>Al</b>fa']), 'alfa'), [{ p: 0, start: 0, end: 4 }]);
+    assertEqual(App.text.findMatches(lines(['ação']), 'acao'), [], 'acao does not find ação');
+    assertEqual(App.text.findMatches(lines(['Alfa Beta']), 'alfa beta'), [{ p: 0, start: 0, end: 9 }]);
+});
+
+test('find: the text is searched literally (no patterns); an empty search finds nothing', () => {
+    assertEqual(App.text.findMatches(lines(['R$ 587 (mn) e R$5x87']), 'R$ 587 (mn)'), [{ p: 0, start: 0, end: 11 }]);
+    assertEqual(App.text.findMatches(lines(['abc']), 'a.c'), []);
+    assertEqual(App.text.findMatches(lines(['abc']), ''), []);
+});
+
+test('find: a match never runs across a line break', () => {
+    assertEqual(App.text.findMatches(lines(['Alfa<br>Beta']), 'alfa beta'), []);
+    assertEqual(App.text.findMatches(lines(['Alfa<br>Beta']), 'beta'), [{ p: 0, start: 5, end: 9 }], '<br> counts as one');
+});
+
+test('find: matchRange covers exactly the matched text, across formatting', async () => {
+    const box = await formatBox(['Receita <b>de R$</b> 587|']);
+    const [match] = App.text.findMatches(box.el, 'de r$ 5');
+    assertEqual(App.text.matchRange(box.el, match).toString(), 'de R$ 5');
+    box.frame.remove();
+});
+
+// Replaces `query` everywhere in the lines; returns each line's HTML and the caret run() gave back.
+async function replaced(htmlLines, query, replacement, options) {
+    const box = await formatBox(htmlLines.map((line, i) => (i === 0 ? '|' : '') + line));
+    const matches = App.text.findMatches(box.el, query, options);
+    const action = App.text.replaceAction(box.el, matches, replacement);
+    const caret = action ? action.run() : null;
+    if (action) {
+        App.text.normalize(box.el);
+    }
+    const result = { lines: Array.from(box.el.children).map((p) => p.innerHTML), caret: caret, label: action && action.label };
+    box.frame.remove();
+    return result;
+}
+
+test('replace: each match takes the formatting of its first character', async () => {
+    const result = await replaced(['Alfa e <b>alfa</b>', '<i>Al</i>fa'], 'alfa', 'Beta');
+    assertEqual(result.lines, ['Beta e <b>Beta</b>', '<i>Beta</i>']);
+    assertEqual(result.label, 'Replace');
+});
+
+test('replace: an empty replacement deletes; a replacement holding the search word does not loop', async () => {
+    assertEqual((await replaced(['um alfa dois'], 'alfa ', '')).lines, ['um dois']);
+    assertEqual((await replaced(['a b a'], 'a', 'aa', { wholeWord: true })).lines, ['aa b aa']);
+});
+
+test('replace: links and spans around the match stay; the caret ends after the first replacement', async () => {
+    const result = await replaced(['Ver <a href="https://example.com">Alfa</a> e alfa'], 'alfa', 'Gama');
+    assertEqual(result.lines, ['Ver <a href="https://example.com">Gama</a> e Gama']);
+    assertEqual(result.caret, { anchor: { p: 0, o: 8 }, focus: { p: 0, o: 8 } });
+    assertEqual(App.text.replaceAction(lines(['x']), [], 'y'), null, 'no matches: nothing to do');
+});

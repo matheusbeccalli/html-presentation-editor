@@ -2619,6 +2619,101 @@
     };
 
     // ---------------------------------------------------------------
+    // Find & replace (SPEC Phase 3; the panel is findreplace.js)
+    // ---------------------------------------------------------------
+    //
+    // A match is { p, start, end }: line p, characters [start, end), counted
+    // like the cursor (a <br> counts as one), so it can be selected with setCaret.
+
+    const WORD_EDGE = '[\\p{L}\\p{N}_]';
+
+    /* A line's text as the cursor counts it: a <br> is one "\n", which no search can cross. */
+    function lineText(line) {
+        return inlineItems(line).map((item) => (item.nodeType === Node.TEXT_NODE ? item.data : '\n')).join('');
+    }
+
+    /* The search as a regular expression: the text literally, a space also finding a non-breaking one. */
+    function searchPattern(query, options) {
+        const body = Array.from(query).map((ch) => (ch === ' ' || ch === ' ' ? '[  ]'
+            : ch.replace(/[\^$\\.*+?()[\]{}|/]/, '\\$&'))).join('');
+        const pattern = options.wholeWord ? '(?<!' + WORD_EDGE + ')' + body + '(?!' + WORD_EDGE + ')' : body;
+        return new RegExp(pattern, options.matchCase ? 'gu' : 'giu');
+    }
+
+    /*
+     * Every match of `query` in a text box, line by line. options: { matchCase,
+     * wholeWord } (both off by default). Accents count: "acao" does not find "ação".
+     */
+    App.text.findMatches = function findMatches(element, query, options) {
+        if (!query) {
+            return [];
+        }
+        const pattern = searchPattern(query, options || {});
+        const matches = [];
+        Array.from(element.children).forEach((line, p) => {
+            for (const found of lineText(line).matchAll(pattern)) {
+                matches.push({ p: p, start: found.index, end: found.index + found[0].length });
+            }
+        });
+        return matches;
+    };
+
+    /* A DOM Range over a match (the find panel paints these with the CSS Highlight API). */
+    App.text.matchRange = function matchRange(element, match) {
+        const start = pointOf(element, { p: match.p, o: match.start });
+        const end = pointOf(element, { p: match.p, o: match.end });
+        const range = element.ownerDocument.createRange();
+        range.setStart(start.node, start.offset);
+        range.setEnd(end.node, end.offset);
+        return range;
+    };
+
+    /*
+     * Replace matches of one box by `replacement`: each takes the formatting of
+     * its first character (as in PowerPoint). run() returns the cursor after the
+     * first replacement. null when there is nothing to replace.
+     */
+    App.text.replaceAction = function replaceAction(element, matches, replacement) {
+        if (matches.length === 0) {
+            return null;
+        }
+        return {
+            label: 'Replace',
+            run: () => {
+                const lines = Array.from(element.children);
+                const byLine = new Map();
+                matches.forEach((match) => byLine.set(match.p, (byLine.get(match.p) || []).concat([match])));
+                byLine.forEach((lineMatches, p) => {
+                    let runs = readRuns(lines[p]);
+                    // From the end of the line back, so the positions of the earlier matches stay right.
+                    lineMatches.slice().sort((a, b) => b.start - a.start).forEach((match) => {
+                        const sliced = sliceRuns(runs, match.start, match.end);
+                        if (sliced.selected.length > 0) {
+                            sliced.selected[0].text = replacement;
+                            sliced.selected.slice(1).forEach((run) => {
+                                run.text = '';
+                            });
+                        }
+                        runs = sliced.runs.filter((run) => run.br || run.text !== '');
+                    });
+                    writeRuns(lines[p], runs);
+                });
+                const first = matches.reduce((a, b) => (comparePositions({ p: b.p, o: b.start }, { p: a.p, o: a.start }) < 0 ? b : a));
+                return caretAt({ p: first.p, o: first.start + replacement.length });
+            },
+        };
+    };
+
+    /* Replace matches in a box with no undo step of its own and no cursor (Replace All makes one step of them all). */
+    App.text.replaceAll = function replaceAll(element, matches, replacement) {
+        const action = App.text.replaceAction(element, matches, replacement);
+        if (action) {
+            action.run();
+            App.text.normalize(element);
+        }
+    };
+
+    // ---------------------------------------------------------------
     // Edit mode
     // ---------------------------------------------------------------
     //
@@ -3149,6 +3244,28 @@
         });
         App.selection.refresh();
     }
+
+    /* Find: edit the match's box (it must be on the slide shown) and select the match in it. */
+    App.text.selectMatch = function selectMatch(element, match) {
+        if (!editing || editing.element !== element) {
+            App.selection.select(element);
+            App.text.enterEdit(element);
+        }
+        App.text.setCaret(element, { anchor: { p: match.p, o: match.start }, focus: { p: match.p, o: match.end } });
+    };
+
+    /* Replace: matches of one box as one undo step; in the box being edited the cursor ends after the replacement. */
+    App.text.replaceText = function replaceText(element, matches, replacement) {
+        const action = App.text.replaceAction(element, matches, replacement);
+        if (!action) {
+            return;
+        }
+        if (editing && editing.element === element) {
+            runInEditor(action);
+        } else {
+            runOnBox(element, { label: action.label, run: () => { action.run(); return null; } });
+        }
+    };
 
     /*
      * Alignment, line spacing or space before / after (paragraphAction) on the

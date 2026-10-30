@@ -66,6 +66,7 @@
 .ribbon-row { display: flex; gap: 2px; align-items: center; }
 .ribbon-button.small { min-width: 0; padding: 2px; }
 .ribbon-button.small .icon { width: 20px; height: 20px; }
+.ribbon-button.small.named { flex-direction: row; gap: 4px; padding: 2px 8px 2px 4px; }
 
 /* Home > Font: the font list and the size box (textcontrols.js). */
 .font-family-button, .font-size-box {

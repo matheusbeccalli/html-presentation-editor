@@ -88,7 +88,7 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
   - [x] Save the recovered deck, then in Edge DevTools (F12) > Application > IndexedDB > deck-editor > drafts: empty
   - [x] File > Settings: turn on "Remember recent files", OK; open a deck with File > Open; reload editor.html: the deck is under Recent on the welcome screen; clicking it shows the Open window already in the deck's folder
   - [x] Edit a deck, wait 30 s, then File > Settings > "Delete all drafts now": in DevTools > Application > IndexedDB > deck-editor, the stores drafts, draftHtml and recent are all empty (right-click > Refresh)
-  - [ ] In Edge: open a deck with File > Open: a yellow bar says AutoSave is off until you save once; click its Save button (confirm the file): the bar disappears and AutoSave turns On. File > New: the bar says the deck is not saved yet; × hides it
+  - [x] In Edge: open a deck with File > Open: a yellow bar says AutoSave is off until you save once; click its Save button (confirm the file): the bar disappears and AutoSave turns On. File > New: the bar says the deck is not saved yet; × hides it
 
 ## Phase 3: Text
 
@@ -152,13 +152,13 @@ Nested bullets are the top priority of this phase.
 - [x] Automated key-sequence table for the bullet behavior (start paragraphs + keys → expected paragraphs, types, levels)
 
 - [ ] **Done when:** a 3-level bulleted slide imported from a Copilot deck and a 3-level list pasted from Word both become editable flat paragraphs; every behavior in the bullet table works; a slide title and a bulleted paragraph can be fully reformatted without touching code; the saved deck prints to PDF (Ctrl+P on the saved file) with bullets, numbers and indents as on screen.
-  - [ ] In Edge: open a deck you saved with the Phase 1–2 editor (or `samples/contract-deck-format1.html`): the import report says its text was converted; slides look as before (only the bullet dots may look slightly different); Save, close, reopen: no report
+  - [x] In Edge: open a deck you saved with the Phase 1–2 editor (or `samples/contract-deck-format1.html`): the import report says its text was converted; slides look as before (only the bullet dots may look slightly different); Save, close, reopen: no report
   - [ ] Open a real Copilot deck from `private/`: titles and bullets look as before; any box listed under "Warnings" as side by side is worth a look
-  - [ ] Double-click a bullet, type, press Esc: the text is there and the box stays selected; Ctrl+Z removes the typing in one step, Ctrl+Y brings it back
-  - [ ] While typing: arrow keys move the cursor (not the box); type, wait 2 s, type again, Ctrl+Z: only the second part goes and the cursor goes back to where it was
-  - [ ] Insert > Text box, click on the slide, type two lines (Shift+Enter): the box grows; Insert > Text box, drag, Esc without typing: no box is left
+  - [x] Double-click a bullet, type, press Esc: the text is there and the box stays selected; Ctrl+Z removes the typing in one step, Ctrl+Y brings it back
+  - [x] While typing: arrow keys move the cursor (not the box); type, wait 2 s, type again, Ctrl+Z: only the second part goes and the cursor goes back to where it was
+  - [x] Insert > Text box, click on the slide, type two lines (Shift+Enter): the box grows; Insert > Text box, drag, Esc without typing: no box is left
   - [ ] Type a misspelled Portuguese word (e.g. "recieta"): it gets a red underline (Edge needs Portuguese under Settings > Languages > Spell check)
-  - [ ] In a bulleted box: End, Enter, Tab, type, Enter, Enter, Enter (level 2 → level 1 → plain text); type "- " (bullet) then Ctrl+Z ("- " stays as text); Backspace at the start of a bullet removes it; select three lines and Shift+Tab
+  - [x] In a bulleted box: End, Enter, Tab, type, Enter, Enter, Enter (level 2 → level 1 → plain text); type "- " (bullet) then Ctrl+Z ("- " stays as text); Backspace at the start of a bullet removes it; select three lines and Shift+Tab
   - [ ] Home > Paragraph: select two bullets, click Numbering (1., 2.; the button lights up), Increase indent (a., b.), type: the cursor is still in the text; put the cursor on b. and click Restart numbering (a.); in a later numbered line after a bullet, Continue numbering goes on from the run above; Esc, then Bullets acts on the whole box; Ctrl+Z undoes each click
   - [ ] Home > Font: select a word, Ctrl+B, then the Italic button (both light up); click inside another word and Ctrl+U underlines the word; at the end of a line Ctrl+B then type: only the new text is bold; select a box (not typing) and Ctrl+B: all its text; Clear formatting removes it; Ctrl+Z undoes each step
   - [ ] Home > Font, sizes and fonts: select a word, Ctrl+] twice (the size box counts up the list), type 30 in the size box + Enter (the word stays selected, typing goes on in the text), pick 40 from the size list, pick Georgia and then the "(Headings)" theme font from the font list; select a whole line with mixed sizes: the size box is blank; with the box selected (not typing) Ctrl+[ makes all its text one step smaller

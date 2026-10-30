@@ -43,6 +43,7 @@ App.start = function start() {
     App.commands.init();   // first: the ribbon and menus read command labels
     App.ui.init();
     App.ribbon.init();
+    App.textControls.init();
     App.canvas.init();
     App.selection.init();
     App.formatPane.init();

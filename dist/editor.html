@@ -242,6 +242,15 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .space-field { display: flex; align-items: center; gap: 6px; padding: 4px 10px; }
 .space-field span:first-child { flex: 1; }
 .space-field input { width: 48px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
+.paste-options-button {
+    position: fixed; z-index: 600; display: flex; align-items: center; gap: 1px; padding: 1px 3px;
+    border: 1px solid var(--border); border-radius: 3px; background: var(--surface); cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+.paste-options-button[hidden] { display: none; }
+.paste-options-button .icon { width: 16px; height: 16px; }
+.paste-options-menu { min-width: 0; width: 210px; }
+.paste-options-menu .menu-item[aria-checked="true"] { font-weight: 600; background: var(--accent-soft); }
 .color-picker-input { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; }
 .ribbon-note {
     /* At most four lines, so a narrow window never makes the ribbon taller (the tooltip has it all). */
@@ -805,6 +814,7 @@ App.start = function start() {
     App.commands.init();   // first: the ribbon and menus read command labels
     App.ui.init();
     App.ribbon.init();
+    App.textControls.init();
     App.canvas.init();
     App.selection.init();
     App.formatPane.init();
@@ -4123,6 +4133,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
     let looseSpace = null; // { node, index }: a non-breaking space insertStyled typed at the end of a line
     let plainPaste = false; // Ctrl+Shift+V was pressed: the paste that follows is plain text
+    let lastPaste = null;   // the last paste, for the paste options button: { id, clipboard, mode, caret, end, state }
 
     App.text.isEditing = function isEditing() {
         return editing !== null;
@@ -4395,8 +4406,50 @@ App.template.newDeckHtml = function newDeckHtml() {
         const action = caret && App.text.pasteAction(editing.element, caret, clipboard, mode);
         if (action) {
             runInEditor(action);
+            rememberPaste({ id: editing.id, clipboard: clipboard, mode: mode, caret: caret });
         }
     }
+
+    function rememberPaste(paste) {
+        lastPaste = Object.assign(paste, { state: App.history.stateId(), end: App.text.getCaret(editing.element) });
+        App.events.emit('text-pasted');
+    }
+
+    /*
+     * The paste options button's choices while the last paste can still be
+     * switched (it is the last step and the cursor is still at its end), else
+     * null. { current, options: [{ mode, label }] }.
+     */
+    App.text.pasteOptions = function pasteOptions() {
+        if (!editing || !lastPaste || lastPaste.id !== editing.id || App.history.isPending() ||
+            App.history.stateId() !== lastPaste.state || !lastPaste.clipboard.html || !lastPaste.clipboard.text) {
+            return null;
+        }
+        const caret = App.text.getCaret(editing.element);
+        if (!caret || JSON.stringify(caret) !== JSON.stringify(lastPaste.end)) {
+            return null;
+        }
+        const fromEditor = lastPaste.clipboard.html.indexOf('data-deck-editor="text"') !== -1;
+        return {
+            current: lastPaste.mode,
+            options: [{ mode: 'normal', label: fromEditor ? 'Keep source formatting' : 'Use destination theme' },
+                { mode: 'plain', label: 'Keep text only' }],
+        };
+    };
+
+    /* Paste the last paste again the other way ('normal' or 'plain'): its step is undone and replaced. */
+    App.text.repaste = function repaste(mode) {
+        if (!App.text.pasteOptions() || mode === lastPaste.mode) {
+            return;
+        }
+        const paste = lastPaste;
+        App.history.undo();   // afterHistoryChange finds the box again and puts the cursor back
+        const action = editing && App.text.pasteAction(editing.element, paste.caret, paste.clipboard, mode);
+        if (action) {
+            runInEditor(action);
+            rememberPaste(Object.assign({}, paste, { mode: mode }));
+        }
+    };
 
     /* Ctrl+C / Ctrl+X while typing: the editor's own clipboard content (copyContent); a cut is one undo step. */
     function onCopy(event) {
@@ -11033,6 +11086,57 @@ App.template.newDeckHtml = function newDeckHtml() {
         lineSpacingButton.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
         return lineSpacingButton;
     }
+
+    // ---- The paste options button (after a paste, at the end of the pasted text) ----
+
+    let pasteButton = null;
+
+    function openPasteMenu() {
+        const choices = App.text.pasteOptions();
+        if (!choices) {
+            return;
+        }
+        const items = choices.options.map((option) => ({ label: option.label, value: option.mode,
+            checked: option.mode === choices.current }));
+        openMenu(pasteButton, 'paste-options-menu', items, (mode) => App.text.repaste(mode));
+    }
+
+    /* Show the button where the pasted text ends while the paste can be switched; hide it otherwise. */
+    function refreshPasteButton() {
+        if (!pasteButton) {
+            pasteButton = keepEdit(el('button', {
+                id: 'paste-options', type: 'button', class: 'paste-options-button', hidden: true,
+                title: 'Paste options', 'aria-label': 'Paste options', 'aria-haspopup': 'menu',
+                onmousedown: (event) => event.preventDefault(),
+                onclick: () => (menu && menu.classList.contains('paste-options-menu') ? closeMenu() : openPasteMenu()),
+            }));
+            pasteButton.innerHTML = App.icons.get('paste');
+            pasteButton.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
+            document.body.appendChild(pasteButton);
+        }
+        const doc = App.deck.getDocument();
+        const selection = doc && doc.getSelection();
+        if (!App.text.pasteOptions() || !selection || selection.rangeCount === 0) {
+            pasteButton.hidden = true;
+            if (menu && menu.classList.contains('paste-options-menu')) {
+                closeMenu();
+            }
+            return;
+        }
+        // The deck iframe shows the slide at 1:1: the cursor's box is in slide pixels.
+        const range = selection.getRangeAt(0);
+        const box = range.getClientRects()[0] || range.startContainer.parentElement.getBoundingClientRect();
+        const overlay = document.getElementById('overlay').getBoundingClientRect();
+        const zoom = App.canvas.getZoom();
+        pasteButton.style.left = (overlay.left + box.right * zoom + 4) + 'px';
+        pasteButton.style.top = (overlay.top + box.bottom * zoom + 2) + 'px';
+        pasteButton.hidden = false;
+    }
+
+    App.textControls.init = function init() {
+        ['text-pasted', 'history-changed', 'text-selection-changed', 'text-edit-changed', 'zoom-changed', 'slide-changed']
+            .forEach((name) => App.events.on(name, refreshPasteButton));
+    };
 
     /* The control named in the ribbon's layout. */
     App.textControls.create = function create(name) {

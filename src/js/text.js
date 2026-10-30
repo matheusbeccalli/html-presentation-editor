@@ -2451,6 +2451,7 @@
     let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
     let looseSpace = null; // { node, index }: a non-breaking space insertStyled typed at the end of a line
     let plainPaste = false; // Ctrl+Shift+V was pressed: the paste that follows is plain text
+    let lastPaste = null;   // the last paste, for the paste options button: { id, clipboard, mode, caret, end, state }
 
     App.text.isEditing = function isEditing() {
         return editing !== null;
@@ -2723,8 +2724,50 @@
         const action = caret && App.text.pasteAction(editing.element, caret, clipboard, mode);
         if (action) {
             runInEditor(action);
+            rememberPaste({ id: editing.id, clipboard: clipboard, mode: mode, caret: caret });
         }
     }
+
+    function rememberPaste(paste) {
+        lastPaste = Object.assign(paste, { state: App.history.stateId(), end: App.text.getCaret(editing.element) });
+        App.events.emit('text-pasted');
+    }
+
+    /*
+     * The paste options button's choices while the last paste can still be
+     * switched (it is the last step and the cursor is still at its end), else
+     * null. { current, options: [{ mode, label }] }.
+     */
+    App.text.pasteOptions = function pasteOptions() {
+        if (!editing || !lastPaste || lastPaste.id !== editing.id || App.history.isPending() ||
+            App.history.stateId() !== lastPaste.state || !lastPaste.clipboard.html || !lastPaste.clipboard.text) {
+            return null;
+        }
+        const caret = App.text.getCaret(editing.element);
+        if (!caret || JSON.stringify(caret) !== JSON.stringify(lastPaste.end)) {
+            return null;
+        }
+        const fromEditor = lastPaste.clipboard.html.indexOf('data-deck-editor="text"') !== -1;
+        return {
+            current: lastPaste.mode,
+            options: [{ mode: 'normal', label: fromEditor ? 'Keep source formatting' : 'Use destination theme' },
+                { mode: 'plain', label: 'Keep text only' }],
+        };
+    };
+
+    /* Paste the last paste again the other way ('normal' or 'plain'): its step is undone and replaced. */
+    App.text.repaste = function repaste(mode) {
+        if (!App.text.pasteOptions() || mode === lastPaste.mode) {
+            return;
+        }
+        const paste = lastPaste;
+        App.history.undo();   // afterHistoryChange finds the box again and puts the cursor back
+        const action = editing && App.text.pasteAction(editing.element, paste.caret, paste.clipboard, mode);
+        if (action) {
+            runInEditor(action);
+            rememberPaste(Object.assign({}, paste, { mode: mode }));
+        }
+    };
 
     /* Ctrl+C / Ctrl+X while typing: the editor's own clipboard content (copyContent); a cut is one undo step. */
     function onCopy(event) {

@@ -105,6 +105,15 @@
 .space-field { display: flex; align-items: center; gap: 6px; padding: 4px 10px; }
 .space-field span:first-child { flex: 1; }
 .space-field input { width: 48px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
+.paste-options-button {
+    position: fixed; z-index: 600; display: flex; align-items: center; gap: 1px; padding: 1px 3px;
+    border: 1px solid var(--border); border-radius: 3px; background: var(--surface); cursor: pointer;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+.paste-options-button[hidden] { display: none; }
+.paste-options-button .icon { width: 16px; height: 16px; }
+.paste-options-menu { min-width: 0; width: 210px; }
+.paste-options-menu .menu-item[aria-checked="true"] { font-weight: 600; background: var(--accent-soft); }
 .color-picker-input { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; }
 .ribbon-note {
     /* At most four lines, so a narrow window never makes the ribbon taller (the tooltip has it all). */

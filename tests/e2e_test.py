@@ -894,6 +894,45 @@ def test_copy_and_cut_text(browser):
     editor.close()
 
 
+def test_paste_options_button(browser):
+    """After a paste, a button switches it between "Use destination theme" and "Keep text only"; typing hides it."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    lines = lambda: page.evaluate(LINES_OF, "e7")  # noqa: E731
+    start = lines()
+    button = page.locator("#paste-options")
+    page.keyboard.press("Enter")
+    page.keyboard.press("Enter")   # a new, empty bullet
+    check(button.is_hidden(), "no button before a paste")
+    put_on_clipboard(page, WORD_LIST_HTML, "Um\r\nDois")
+    page.keyboard.press("Control+v")
+    check(button.is_visible(), "the paste options button appears")
+    button.click()
+    options = page.locator(".paste-options-menu .menu-item")
+    check(options.all_inner_texts() == ["Use destination theme", "Keep text only"], f"options: {options.all_inner_texts()}")
+    check(page.locator('.paste-options-menu [aria-checked="true"]').inner_text() == "Use destination theme", "current one ticked")
+    page.locator(".paste-options-menu .menu-item", has_text="Keep text only").click()
+    check(lines()[-2:] == ["b1:Um", "b1:Dois"], f"switched to plain text: {lines()}")
+    check(page.evaluate("App.text.isEditing()") and button.is_visible(), "still editing; the button stays")
+    button.click()
+    page.locator(".paste-options-menu .menu-item", has_text="Use destination theme").click()
+    check(lines()[-2:] == ["b1:Um", "b2:Dois"], f"and back: {lines()}")
+    page.keyboard.press("Control+z")
+    check(lines() == start + ["b1:"], f"one Ctrl+Z removes the paste: {lines()}")
+    check(button.is_hidden(), "the button goes with it")
+    page.keyboard.press("Control+v")
+    page.keyboard.type("x")
+    # The ribbon and the button follow the cursor once per screen frame.
+    wait_until(page, "() => document.getElementById('paste-options').hidden", timeout=2000)   # typing hides it
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1848,6 +1887,7 @@ TESTS = [
     test_clipboard_capture_page,
     test_paste_into_text,
     test_copy_and_cut_text,
+    test_paste_options_button,
 ]
 
 

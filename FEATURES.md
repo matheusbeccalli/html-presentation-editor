@@ -139,7 +139,7 @@ Nested bullets are the top priority of this phase.
 
 *Paste*
 - [x] Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets/levels, links), drops fonts, sizes and colors ("Use Destination Theme"); text copied inside the editor keeps all its formatting *(pasted text takes the size and colour where it lands; plain lines pasted into a bullet become bullets)*
-- [ ] Ctrl+Shift+V pastes plain text; paste-options button after a paste switches between the two
+- [x] Ctrl+Shift+V pastes plain text; paste-options button after a paste switches between the two *("Use destination theme" or, for the editor's own copies, "Keep source formatting" / "Keep text only"; it goes away when you type, move the cursor or undo)*
 - [ ] Works for paste from Word, Outlook, PowerPoint, Copilot's chat window and web pages (fixtures captured with `tests/clipboard-capture.html`)
 
 *Undo*
@@ -164,7 +164,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Home > Font, sizes and fonts: select a word, Ctrl+] twice (the size box counts up the list), type 30 in the size box + Enter (the word stays selected, typing goes on in the text), pick 40 from the size list, pick Georgia and then the "(Headings)" theme font from the font list; select a whole line with mixed sizes: the size box is blank; with the box selected (not typing) Ctrl+[ makes all its text one step smaller
   - [ ] Home > Font, colours: select a word, click the Font color arrow: the deck's theme colours come first; pick one, then a standard colour; the button's bar now shows that colour and clicking it colours another word; Highlight paints yellow, its "No color" takes it off; More colors… opens the colour window
   - [ ] Home > Paragraph, alignment and spacing: in a text, Ctrl+E centres the line (the Center button lights up); select two lines, Align right; Line spacing list: 1.5 spreads them out and shows as ticked when reopened; type 12 in Space before + Enter: space above both lines, and the cursor is back in the text; Esc, then Ctrl+L aligns the whole box left; Ctrl+Z undoes each step. With nothing selected, Ctrl+R still reloads the page (it asks first if there are unsaved changes)
-  - [ ] Paste: copy a 3-level bulleted list in Word (or Outlook), type into a text box, Ctrl+V: three levels of bullets, bold kept, Word's font/size/colour gone; Ctrl+Z undoes the whole paste; Ctrl+Shift+V pastes the same as plain lines. Also try a list from Copilot's chat and from a web page
+  - [ ] Paste: copy a 3-level bulleted list in Word (or Outlook), type into a text box, Ctrl+V: three levels of bullets, bold kept, Word's font/size/colour gone; Ctrl+Z undoes the whole paste; Ctrl+Shift+V pastes the same as plain lines. Also try a list from Copilot's chat and from a web page; after a paste, the small button under it switches to "Keep text only" and back
   - [ ] Copy: select two bullets of a deck (one with bold), Ctrl+C, paste into a new Outlook e-mail: two bullets, bold kept, same font and colour; paste into another text box of the deck: same look; Ctrl+X removes them, Ctrl+Z brings them back
   - [ ] Capture real clipboard fixtures: open `tests/clipboard-capture.html` in Edge, copy a list from Word, Outlook, PowerPoint and Copilot (keep "fake letters" on), save each into `tests/fixtures/clipboard/` and list it in `tests/run-tests.html`
 

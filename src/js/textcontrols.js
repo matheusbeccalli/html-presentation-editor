@@ -384,6 +384,57 @@
         return lineSpacingButton;
     }
 
+    // ---- The paste options button (after a paste, at the end of the pasted text) ----
+
+    let pasteButton = null;
+
+    function openPasteMenu() {
+        const choices = App.text.pasteOptions();
+        if (!choices) {
+            return;
+        }
+        const items = choices.options.map((option) => ({ label: option.label, value: option.mode,
+            checked: option.mode === choices.current }));
+        openMenu(pasteButton, 'paste-options-menu', items, (mode) => App.text.repaste(mode));
+    }
+
+    /* Show the button where the pasted text ends while the paste can be switched; hide it otherwise. */
+    function refreshPasteButton() {
+        if (!pasteButton) {
+            pasteButton = keepEdit(el('button', {
+                id: 'paste-options', type: 'button', class: 'paste-options-button', hidden: true,
+                title: 'Paste options', 'aria-label': 'Paste options', 'aria-haspopup': 'menu',
+                onmousedown: (event) => event.preventDefault(),
+                onclick: () => (menu && menu.classList.contains('paste-options-menu') ? closeMenu() : openPasteMenu()),
+            }));
+            pasteButton.innerHTML = App.icons.get('paste');
+            pasteButton.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
+            document.body.appendChild(pasteButton);
+        }
+        const doc = App.deck.getDocument();
+        const selection = doc && doc.getSelection();
+        if (!App.text.pasteOptions() || !selection || selection.rangeCount === 0) {
+            pasteButton.hidden = true;
+            if (menu && menu.classList.contains('paste-options-menu')) {
+                closeMenu();
+            }
+            return;
+        }
+        // The deck iframe shows the slide at 1:1: the cursor's box is in slide pixels.
+        const range = selection.getRangeAt(0);
+        const box = range.getClientRects()[0] || range.startContainer.parentElement.getBoundingClientRect();
+        const overlay = document.getElementById('overlay').getBoundingClientRect();
+        const zoom = App.canvas.getZoom();
+        pasteButton.style.left = (overlay.left + box.right * zoom + 4) + 'px';
+        pasteButton.style.top = (overlay.top + box.bottom * zoom + 2) + 'px';
+        pasteButton.hidden = false;
+    }
+
+    App.textControls.init = function init() {
+        ['text-pasted', 'history-changed', 'text-selection-changed', 'text-edit-changed', 'zoom-changed', 'slide-changed']
+            .forEach((name) => App.events.on(name, refreshPasteButton));
+    };
+
     /* The control named in the ribbon's layout. */
     App.textControls.create = function create(name) {
         if (name === 'lineSpacing') {

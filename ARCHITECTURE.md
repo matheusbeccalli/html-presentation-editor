@@ -50,7 +50,7 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `recent.js` | Recent files (off by default): remembers file handles on open/save, last 10; welcome list and File > Open recent… open the picker in the file's folder | storage, settings, fileio |
 | `commands.js` | Every user action by name; one place that reports errors; toggle commands (`isChecked`) and commands that keep text editing (`keepsEdit`) | fileio, history, deck, text |
 | `clipboard.js` | Clipboard HTML in: Word/Outlook `mso-list` paragraphs, PowerPoint glyph paragraphs (levels from indents), web/Copilot lists, the editor's own marked HTML → normalized flat paragraphs in an inert document (`toParagraphs`); out: copied lines → marked nested `<ul>/<ol>` (`fromLines`) | text |
-| `textcontrols.js` | Home > Font's font list, size box and colour split buttons, and Home > Paragraph's line spacing list (PowerPoint's 1.0 … 3.0 stored as line-height × 1.2, space before/after in pt): show the selection's font and size (blank when mixed), theme fonts and colours first (stored as `var(--…)`); choosing runs `setFontFamily` / `setFontSize` / `setFontColor` / `setHighlight` / `setLineSpacing` / `setSpaceBefore` / `setSpaceAfter` | commands, text, deck |
+| `textcontrols.js` | Home > Font's font list, size box and colour split buttons, Home > Paragraph's line spacing list, and the paste options button (PowerPoint's 1.0 … 3.0 stored as line-height × 1.2, space before/after in pt): show the selection's font and size (blank when mixed), theme fonts and colours first (stored as `var(--…)`); choosing runs `setFontFamily` / `setFontSize` / `setFontColor` / `setHighlight` / `setLineSpacing` / `setSpaceBefore` / `setSpaceAfter` | commands, text, deck |
 | `ribbon.js` | File menu and tabs; buttons only name commands; toggle buttons show `aria-pressed`; `keepsEdit` buttons do not take the focus out of the text | commands |
 | `ui.js` | Title bar, status bar (save state per SPEC 6.4 + last message), notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events, fileio, autosave, drafts |
 
@@ -114,6 +114,8 @@ Bold / Italic … (button or Ctrl+B) → commands → text.applyStyle → text.s
   character → beforeinput → insertStyled types it with that formatting, and the browser types on inside it
 Ctrl+V / Ctrl+Shift+V while typing → the browser's 'paste' event → text.js onPaste (cancels it) → clipboard.toParagraphs(html)
   → text.pasteAction: lines inserted as runs at the cursor → one undo step "Paste"
+  → 'text-pasted' → textcontrols shows the paste options button at the cursor while text.pasteOptions() allows
+  → a choice → text.repaste(mode): history.undo() of the paste, pasteAction again the other way
 cursor moves → iframe 'selectionchange' → 'text-selection-changed' (once per frame) → ribbon shows Bullets/Numbering on/off
 Esc / click outside → text.exitEdit → normalize → box selected   ·   Save → text.commitTyping, serialize normalizes the copy
 ```

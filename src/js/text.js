@@ -2152,7 +2152,7 @@
         const lines = textLines(element);
         let runs = [];
         if (!caret) {
-            runs = [].concat(...lines.map(readRuns));
+            runs = [].concat(...lines.map(readRuns)).filter((run) => !run.br);   // text only, not line breaks
         } else {
             const [from, to] = [caret.anchor, caret.focus].sort(comparePositions);
             for (let p = from.p; p <= Math.min(to.p, lines.length - 1); p++) {

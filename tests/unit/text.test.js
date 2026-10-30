@@ -1345,3 +1345,10 @@ test('cut: removes the selection as one action', async () => {
     assertEqual(describeLines(box.el), ['b1:Al|ta']);
     box.frame.remove();
 });
+
+test('formatting: styleState of a selected box with an empty line or a line break (no cursor) works', async () => {
+    const box = await formatBox(['<b>Al|fa</b><br>Beta', '<br>'], 'font-size: 20pt;');
+    const state = App.text.styleState(box.el, null);
+    assertEqual([state.bold, state.fontSize], [false, 20]);
+    box.frame.remove();
+});

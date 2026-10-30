@@ -1145,3 +1145,115 @@ test('paragraph: paragraphState shows the selected lines’ alignment, spacing a
     assertEqual([state.align, state.spaceBefore, state.spaceAfter], ['left', 12, 6]);
     box.frame.remove();
 });
+
+// ---------------------------------------------------------------
+// Paste (SPEC Phase 3, "Paste into text")
+// ---------------------------------------------------------------
+//
+// Start lines in the bullet-table notation; clipboard = { html, text } or a
+// fixture name (tests/fixtures/clipboard/). Returns the lines with the cursor
+// and each line's HTML.
+
+async function pasted(startLines, clipboard, mode) {
+    const box = await listBox(startLines);
+    const data = typeof clipboard === 'string' ? {
+        html: clipboardFixture(clipboard).types['text/html'] || '',
+        text: clipboardFixture(clipboard).types['text/plain'] || '',
+    } : clipboard;
+    const action = App.text.pasteAction(box.el, box.caret, data, mode || 'normal');
+    if (action) {
+        App.text.runAction(box.el, action);
+    }
+    const result = { lines: describeLines(box.el), html: Array.from(box.el.children).map((p) => p.innerHTML),
+        label: action ? action.label : null };
+    box.frame.remove();
+    return result;
+}
+
+test('paste: Word bullets in three levels become flat paragraphs with levels, glyphs gone', async () => {
+    const result = await pasted(['p1:|'], 'word-bullets-3-levels');
+    assertEqual(result.lines, ['b1:Receita de R$ 480 mi', 'b2:Varejo forte no Sul', 'b3:Detalhe em vermelho|']);
+    assertEqual(result.label, 'Paste');
+});
+
+test('paste: Ctrl+V keeps bold / italic but takes the deck’s fonts, sizes and colours', async () => {
+    const result = await pasted(['p1:|'], 'word-bullets-3-levels');
+    assertEqual(result.html.slice(1), ['Varejo <b>forte</b> no Sul', 'Detalhe em <i>vermelho</i>']);
+});
+
+test('paste: a Word numbered list keeps numbers and levels (1. / a. / i.)', async () => {
+    const result = await pasted(['p1:|'], 'word-numbered');
+    assertEqual(result.lines, ['p1:Próximos passos', 'n1:Diligência', 'n2:Financeira', 'n3:Capital de giro', 'n1:Assinatura|']);
+    assertEqual(result.html[0], '<b>Próximos passos</b>');
+});
+
+test('paste: Outlook keeps its bullets and links', async () => {
+    const result = await pasted(['p1:|'], 'outlook-bullets');
+    assertEqual(result.lines, ['p1:Olá equipe,', 'b1:Ver o modelo', 'b2:Aba de premissas|']);
+    assertEqual(result.html[1], 'Ver o <a href="https://example.com/modelo">modelo</a>');
+});
+
+test('paste: PowerPoint bullets get their levels from the indents', async () => {
+    const result = await pasted(['p1:|'], 'powerpoint-bullets');
+    assertEqual(result.lines, ['b1:Mercado em expansão', 'b2:Sul e Sudeste', 'b3:Capitais', 'b1:Margem estável|']);
+    assertEqual(result.html[1], 'Sul e <b>Sudeste</b>');
+});
+
+test('paste: Copilot’s chat (nested lists, a heading in bold)', async () => {
+    const result = await pasted(['p1:|'], 'copilot-chat');
+    assertEqual(result.lines, ['p1:Resumo do mercado', 'b1:Receita: R$ 480 mi em 2025', 'b2:Varejo: 60%', 'b3:Sul lidera',
+        'b2:Atacado: 40%', 'b1:Margem: 18%|']);
+    assertEqual([result.html[0], result.html[1]], ['<b>Resumo do mercado</b>', '<b>Receita</b>: R$ 480 mi em 2025']);
+});
+
+test('paste: a web page (heading, link, italic, numbered list), its look dropped', async () => {
+    const result = await pasted(['p1:|'], 'web-page');
+    assertEqual(result.lines, ['p1:Setor de alimentos', 'p1:O setor cresceu 8% segundo o relatório anual.', 'n1:Consolidação',
+        'n1:Exportação|']);
+    assertEqual(result.html[1], 'O setor cresceu <i>8%</i> segundo o <a href="https://example.com/relatorio">relatório anual</a>.');
+});
+
+test('paste: in the middle of a line, the first pasted line joins it and the rest of the line follows the last', async () => {
+    assertEqual((await pasted(['p1:Al|fa'], { html: '', text: 'X\nY' })).lines, ['p1:AlX', 'p1:Y|fa']);
+});
+
+test('paste: plain lines pasted into a bullet become bullets at that level', async () => {
+    assertEqual((await pasted(['b2:Alfa |'], { html: '<p>Um</p><p>Dois</p>', text: 'Um\nDois' })).lines,
+        ['b2:Alfa Um', 'b2:Dois|']);
+});
+
+test('paste: the pasted text replaces the selection, also across lines', async () => {
+    assertEqual((await pasted(['p1:A[lf]a'], { html: '', text: 'Z' })).lines, ['p1:AZ|a']);
+    assertEqual((await pasted(['b1:A[lfa', 'p1:Be]ta'], { html: '', text: 'Z' })).lines, ['b1:AZ|ta']);
+});
+
+test('paste: pasted text takes the size and colour where it lands', async () => {
+    const result = await pasted(['p1:|'], { html: '<span style="font-size: 9px; color: blue">Novo</span>', text: 'Novo' });
+    assertEqual(result.html, ['Novo']);
+    const box = await listBox(['p1:x|']);
+    box.el.firstElementChild.innerHTML = '<span style="font-size: 24pt; color: red">Alfa</span>';
+    App.text.setCaret(box.el, { anchor: { p: 0, o: 4 }, focus: { p: 0, o: 4 } });
+    App.text.runAction(box.el, App.text.pasteAction(box.el, App.text.getCaret(box.el),
+        { html: '<b style="color: blue">Novo</b>', text: 'Novo' }, 'normal'));
+    assertEqual(box.el.firstElementChild.innerHTML, '<span style="font-size: 24pt; color: red;">Alfa<b>Novo</b></span>');
+    box.frame.remove();
+});
+
+test('paste: Ctrl+Shift+V pastes the plain text, in the look where it lands', async () => {
+    const result = await pasted(['p1:|'], 'word-numbered', 'plain');
+    assertEqual(result.lines[1], 'p1:1.\tDiligência'.replace('\t', ' '));
+    assertEqual(result.html[0], 'Próximos passos', 'no bold');
+});
+
+test('paste: text copied in the editor keeps all its formatting (theme values as variables)', async () => {
+    const html = '<div data-deck-editor="text"><ul><li data-list="bullet" data-level="2"><span style="font-family: Calibri, ' +
+        'Arial, sans-serif; font-size: 20pt; color: rgb(204, 9, 47);" data-theme-font="--font-body" ' +
+        'data-theme-color="--color-primary">Alfa</span></li></ul></div>';
+    const result = await pasted(['p1:|'], { html: html, text: 'Alfa' });
+    assertEqual(result.lines, ['b2:Alfa|']);
+    assertEqual(result.html, ['<span style="font-family: var(--font-body); font-size: 20pt; color: var(--color-primary);">Alfa</span>']);
+});
+
+test('paste: an empty clipboard does nothing', async () => {
+    assertEqual((await pasted(['p1:Al|fa'], { html: '', text: '' })).label, null);
+});

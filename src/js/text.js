@@ -1931,6 +1931,18 @@
         return { runs: out, selected: selected };
     }
 
+    /* The runs before and after position o of a line, split there (a <br> counts as one). */
+    function splitRunsAt(runs, o) {
+        const split = sliceRuns(runs, o, o).runs;
+        let index = 0;
+        let position = 0;
+        while (index < split.length && position < o) {
+            position += split[index].br ? 1 : split[index].text.length;
+            index++;
+        }
+        return [split.slice(0, index), split.slice(index)];
+    }
+
     function comparePositions(a, b) {
         return a.p !== b.p ? a.p - b.p : a.o - b.o;
     }
@@ -2178,6 +2190,156 @@
         return state;
     };
 
+    // ---------------------------------------------------------------
+    // Paste
+    // ---------------------------------------------------------------
+    //
+    // Ctrl+V: the clipboard's structure and basic formatting (bold, italic,
+    // underline, lists and levels, links) in the look of the text where it
+    // lands ("Use Destination Theme"); text copied in the editor keeps all its
+    // formatting. Ctrl+Shift+V ('plain'): the plain text only. The first pasted
+    // line joins the line at the cursor, the rest of that line follows the last.
+
+    /* A line's runs, without the <br> that only keeps an empty line open. */
+    function contentRuns(line) {
+        return isEmptyLine(line) ? [] : readRuns(line);
+    }
+
+    function runsLength(runs) {
+        return runs.reduce((sum, run) => sum + (run.br ? 1 : run.text.length), 0);
+    }
+
+    /*
+     * The pasted lines: { list, level, start, style, runs, keep, plain }. list
+     * and level null: the line takes those of the line it lands in (plain text
+     * pasted into a bullet becomes bullets). keep: text copied in the editor,
+     * pasted as it was.
+     */
+    function pastedLines(clipboard, mode) {
+        if (mode !== 'plain' && clipboard.html) {
+            const { fromEditor, holder } = App.clipboard.toParagraphs(clipboard.html);
+            const lines = textLines(holder).map((p) => {
+                const list = listOf(p);
+                const level = levelOf(p);
+                const start = list === 'number' ? positiveInt(p.getAttribute('data-start')) : null;
+                const runs = contentRuns(p);
+                if (fromEditor) {
+                    return { list: list, level: level, start: start, style: paragraphStyles(p), runs: runs, keep: true };
+                }
+                const plainLine = list === 'none' && level === 1;
+                return { list: plainLine ? null : list, level: plainLine ? null : level, start: start, runs: runs };
+            });
+            if (lines.some((line) => line.runs.length > 0)) {
+                return lines;
+            }
+        }
+        const text = (clipboard.text || '').replace(/\r\n?/g, '\n').replace(/\n$/, '');
+        if (text === '') {
+            return [];
+        }
+        return text.split('\n').map((line) => ({
+            list: null, level: null, start: null, plain: true,
+            runs: line === '' ? [] : [{ text: line.replace(/\t/g, ' '), formats: new Set(), styles: {}, href: null, shown: null }],
+        }));
+    }
+
+    /* The look of the text at position o (the character before it, else after it, else the line's own). */
+    function lookAt(line, runs, o) {
+        const before = o > 0 ? sliceRuns(runs, o - 1, o).selected[0] : null;
+        const model = before || sliceRuns(runs, o, o + 1).selected[0];
+        if (model) {
+            return { formats: model.formats, styles: model.styles };
+        }
+        const own = spanStyles(line);
+        const styles = {};
+        ['font-size', 'color'].forEach((property) => {
+            if (own[property]) {
+                styles[property] = own[property];
+            }
+        });
+        return { formats: new Set(), styles: styles };
+    }
+
+    /* Remove the selected text (joining its first and last line); returns where it was. */
+    function deleteSelection(element, caret) {
+        const [from, to] = [caret.anchor, caret.focus].sort(comparePositions);
+        if (comparePositions(from, to) === 0) {
+            return from;
+        }
+        const lines = textLines(element);
+        const [head] = splitRunsAt(contentRuns(lines[from.p]), from.o);
+        const [, tail] = splitRunsAt(contentRuns(lines[to.p]), to.o);
+        writeRuns(lines[from.p], head.concat(tail));
+        lines.slice(from.p + 1, to.p + 1).forEach((line) => line.remove());
+        return from;
+    }
+
+    /* Give a line the list type, level and start of a pasted line (and, from the editor, its paragraph look). */
+    function takeParagraph(line, item) {
+        line.setAttribute('data-list', item.list);
+        line.setAttribute('data-level', String(item.level));
+        if (item.start) {
+            line.setAttribute('data-start', String(item.start));
+        } else {
+            line.removeAttribute('data-start');
+        }
+        if (item.keep) {
+            ['text-align', 'line-height', 'margin-top', 'margin-bottom'].forEach((property) => {
+                line.style.removeProperty(property);
+                if (item.style[property]) {
+                    line.style.setProperty(property, item.style[property]);
+                }
+            });
+        }
+    }
+
+    /* The action pasting clipboard { html, text } at the caret; mode 'normal' or 'plain'; null if nothing to paste. */
+    App.text.pasteAction = function pasteAction(element, caret, clipboard, mode) {
+        const pasted = pastedLines(clipboard, mode);
+        if (pasted.length === 0 || !caret || textLines(element).length === 0) {
+            return null;
+        }
+        return {
+            label: mode === 'plain' ? 'Paste as text' : 'Paste',
+            run: () => {
+                const at = deleteSelection(element, caret);
+                const line = textLines(element)[at.p];
+                const runs = contentRuns(line);
+                const look = lookAt(line, runs, at.o);
+                pasted.forEach((item) => item.runs.forEach((run) => {
+                    if (run.br || item.keep) {
+                        return;
+                    }
+                    if (item.plain) {
+                        run.formats = new Set(look.formats);   // plain text: as if typed here
+                    }
+                    run.styles = Object.assign({}, look.styles);
+                }));
+                const [head, tail] = splitRunsAt(runs, at.o);
+                const destination = line.cloneNode(false);
+                destination.removeAttribute('data-start');   // a start number belongs to the first line only
+                if (head.length === 0 && tail.length === 0 && pasted[0].list !== null) {
+                    takeParagraph(line, pasted[0]);   // an empty line takes the first pasted line's list type
+                }
+                let current = line;
+                let currentRuns = head.concat(pasted[0].runs);
+                pasted.slice(1).forEach((item) => {
+                    writeRuns(current, currentRuns);
+                    const next = destination.cloneNode(false);
+                    if (item.list !== null) {
+                        takeParagraph(next, item);
+                    }
+                    current.after(next);
+                    current = next;
+                    currentRuns = item.runs;
+                });
+                const end = runsLength(currentRuns);
+                writeRuns(current, currentRuns.concat(tail));
+                return caretAt({ p: textLines(element).indexOf(current), o: end });
+            },
+        };
+    };
+
     /* Run an action (a key, AutoFormat, a list button): change the lines, tidy them, put the cursor back
        (an action on a selected box, not being edited, has no cursor). */
     App.text.runAction = function runAction(element, action) {
@@ -2205,6 +2367,7 @@
     let applying = false; // a key action is changing the text: its own input events are not typing
     let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
     let looseSpace = null; // { node, index }: a non-breaking space insertStyled typed at the end of a line
+    let plainPaste = false; // Ctrl+Shift+V was pressed: the paste that follows is plain text
 
     App.text.isEditing = function isEditing() {
         return editing !== null;
@@ -2268,11 +2431,13 @@
         markEditable(element);
         element.addEventListener('beforeinput', onBeforeInput);
         element.addEventListener('input', onInput);
+        element.addEventListener('paste', onPaste);
     }
 
     function detachFromElement(element) {
         element.removeEventListener('beforeinput', onBeforeInput);
         element.removeEventListener('input', onInput);
+        element.removeEventListener('paste', onPaste);
         unmarkEditable(element);
     }
 
@@ -2420,15 +2585,8 @@
         const model = before || after;
         const run = model ? copyRun(model, text) : { text: text, formats: new Set(), styles: spanStyles(lines[at.p]),
             href: null, shown: shownLook(lines[at.p]) };
-        const split = sliceRuns(runs, at.o, at.o);
-        let index = 0;
-        let position = 0;
-        while (index < split.runs.length && position < at.o) {
-            position += split.runs[index].br ? 1 : split.runs[index].text.length;
-            index++;
-        }
-        split.runs.splice(index, 0, run);
-        perLine[at.p] = split.runs;
+        const [head, tail] = splitRunsAt(runs, at.o);
+        perLine[at.p] = head.concat([run], tail);
         const allRuns = [].concat(...perLine);
         styles.forEach(([style, value]) => changeRuns(element, style, value, [run], allRuns));
         liftToBox(element, allRuns, lines);
@@ -2465,6 +2623,22 @@
         }
     }
 
+    /* Ctrl+V / Ctrl+Shift+V while typing: the editor pastes (pasteAction), never the browser. */
+    function onPaste(event) {
+        if (!editing) {
+            return;
+        }
+        event.preventDefault();
+        const mode = plainPaste ? 'plain' : 'normal';
+        plainPaste = false;
+        const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
+        const caret = App.text.getCaret(editing.element);
+        const action = caret && App.text.pasteAction(editing.element, caret, clipboard, mode);
+        if (action) {
+            runInEditor(action);
+        }
+    }
+
     /*
      * The browser can leave text outside any <p> (e.g. after deleting everything).
      * Only then is the text normalized during typing, keeping the cursor.
@@ -2490,6 +2664,8 @@
         }
         const ctrl = event.ctrlKey || event.metaKey;
         const key = event.key.toLowerCase();
+        // The browser turns Ctrl+Shift+V into a paste event too; onPaste then pastes plain text.
+        plainPaste = ctrl && event.shiftKey && !event.altKey && key === 'v';
         let command = null;
         if (event.key === 'Escape') {
             command = 'exit';

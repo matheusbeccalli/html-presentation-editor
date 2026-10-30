@@ -102,7 +102,7 @@ Nested bullets are the top priority of this phase.
 - [x] `data-start` mirrored to an inline `counter-set` by the normalizer; each `<p>` gets `--marker-size` / `--marker-color` from its first character (the bullet follows the text, the rest of the line is unchanged); an empty line keeps a real `font-size` / `color`
 - [x] `deck-format` bumped to 2; format-1 decks migrated on open (lists and headings converted, list variables and stylesheet added), noted in the import report
 - [x] Import: nested `<ul>/<ol>/<li>` → flat paragraphs with levels; headings → `<p>`, their look kept (box-wide look on the `.el`, differences as inline formatting); boxes with flex/grid/column layout flattened and listed in the import report *(also: theme fonts/colors written as `var(--…)`, the deck's own list indent/spacing kept per box, icons inside headings become their own elements)*
-- [ ] Import/paste: Word/Outlook `mso-list` levelN paragraphs → flat paragraphs (glyph spans removed); PowerPoint text keeps bullets and levels
+- [x] Import/paste: Word/Outlook `mso-list` levelN paragraphs → flat paragraphs (glyph spans removed); PowerPoint text keeps bullets and levels *(PowerPoint's levels come from its indents; tested on a synthetic fixture until a real capture)*
 - [ ] Copy out of a text element also puts nested `<ul>/<ol>` HTML on the clipboard (bullets survive in Outlook/Word)
 
 *Editing*
@@ -148,7 +148,7 @@ Nested bullets are the top priority of this phase.
 - [x] Undo/redo while editing restores the cursor position
 
 *Tests*
-- [ ] Unit fixtures (fake text): messy execCommand output, Word paste with `mso-list` levels, Copilot 3-level nested `<ul>`, mixed numbered/bulleted lists
+- [x] Unit fixtures (fake text): messy execCommand output, Word paste with `mso-list` levels, Copilot 3-level nested `<ul>`, mixed numbered/bulleted lists *(clipboard fixtures in `tests/fixtures/clipboard/`, synthetic until real captures)*
 - [x] Automated key-sequence table for the bullet behavior (start paragraphs + keys → expected paragraphs, types, levels)
 
 - [ ] **Done when:** a 3-level bulleted slide imported from a Copilot deck and a 3-level list pasted from Word both become editable flat paragraphs; every behavior in the bullet table works; a slide title and a bulleted paragraph can be fully reformatted without touching code; the saved deck prints to PDF (Ctrl+P on the saved file) with bullets, numbers and indents as on screen.
@@ -164,6 +164,8 @@ Nested bullets are the top priority of this phase.
   - [ ] Home > Font, sizes and fonts: select a word, Ctrl+] twice (the size box counts up the list), type 30 in the size box + Enter (the word stays selected, typing goes on in the text), pick 40 from the size list, pick Georgia and then the "(Headings)" theme font from the font list; select a whole line with mixed sizes: the size box is blank; with the box selected (not typing) Ctrl+[ makes all its text one step smaller
   - [ ] Home > Font, colours: select a word, click the Font color arrow: the deck's theme colours come first; pick one, then a standard colour; the button's bar now shows that colour and clicking it colours another word; Highlight paints yellow, its "No color" takes it off; More colors… opens the colour window
   - [ ] Home > Paragraph, alignment and spacing: in a text, Ctrl+E centres the line (the Center button lights up); select two lines, Align right; Line spacing list: 1.5 spreads them out and shows as ticked when reopened; type 12 in Space before + Enter: space above both lines, and the cursor is back in the text; Esc, then Ctrl+L aligns the whole box left; Ctrl+Z undoes each step. With nothing selected, Ctrl+R still reloads the page (it asks first if there are unsaved changes)
+  - [ ] Paste: copy a 3-level bulleted list in Word (or Outlook), type into a text box, Ctrl+V: three levels of bullets, bold kept, Word's font/size/colour gone; Ctrl+Z undoes the whole paste; Ctrl+Shift+V pastes the same as plain lines. Also try a list from Copilot's chat and from a web page
+  - [ ] Capture real clipboard fixtures: open `tests/clipboard-capture.html` in Edge, copy a list from Word, Outlook, PowerPoint and Copilot (keep "fake letters" on), save each into `tests/fixtures/clipboard/` and list it in `tests/run-tests.html`
 
 ## Phase 4: Tables
 

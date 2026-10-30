@@ -3603,6 +3603,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { runs: out, selected: selected };
     }
 
+    /* The runs before and after position o of a line, split there (a <br> counts as one). */
+    function splitRunsAt(runs, o) {
+        const split = sliceRuns(runs, o, o).runs;
+        let index = 0;
+        let position = 0;
+        while (index < split.length && position < o) {
+            position += split[index].br ? 1 : split[index].text.length;
+            index++;
+        }
+        return [split.slice(0, index), split.slice(index)];
+    }
+
     function comparePositions(a, b) {
         return a.p !== b.p ? a.p - b.p : a.o - b.o;
     }
@@ -3850,6 +3862,156 @@ App.template.newDeckHtml = function newDeckHtml() {
         return state;
     };
 
+    // ---------------------------------------------------------------
+    // Paste
+    // ---------------------------------------------------------------
+    //
+    // Ctrl+V: the clipboard's structure and basic formatting (bold, italic,
+    // underline, lists and levels, links) in the look of the text where it
+    // lands ("Use Destination Theme"); text copied in the editor keeps all its
+    // formatting. Ctrl+Shift+V ('plain'): the plain text only. The first pasted
+    // line joins the line at the cursor, the rest of that line follows the last.
+
+    /* A line's runs, without the <br> that only keeps an empty line open. */
+    function contentRuns(line) {
+        return isEmptyLine(line) ? [] : readRuns(line);
+    }
+
+    function runsLength(runs) {
+        return runs.reduce((sum, run) => sum + (run.br ? 1 : run.text.length), 0);
+    }
+
+    /*
+     * The pasted lines: { list, level, start, style, runs, keep, plain }. list
+     * and level null: the line takes those of the line it lands in (plain text
+     * pasted into a bullet becomes bullets). keep: text copied in the editor,
+     * pasted as it was.
+     */
+    function pastedLines(clipboard, mode) {
+        if (mode !== 'plain' && clipboard.html) {
+            const { fromEditor, holder } = App.clipboard.toParagraphs(clipboard.html);
+            const lines = textLines(holder).map((p) => {
+                const list = listOf(p);
+                const level = levelOf(p);
+                const start = list === 'number' ? positiveInt(p.getAttribute('data-start')) : null;
+                const runs = contentRuns(p);
+                if (fromEditor) {
+                    return { list: list, level: level, start: start, style: paragraphStyles(p), runs: runs, keep: true };
+                }
+                const plainLine = list === 'none' && level === 1;
+                return { list: plainLine ? null : list, level: plainLine ? null : level, start: start, runs: runs };
+            });
+            if (lines.some((line) => line.runs.length > 0)) {
+                return lines;
+            }
+        }
+        const text = (clipboard.text || '').replace(/\r\n?/g, '\n').replace(/\n$/, '');
+        if (text === '') {
+            return [];
+        }
+        return text.split('\n').map((line) => ({
+            list: null, level: null, start: null, plain: true,
+            runs: line === '' ? [] : [{ text: line.replace(/\t/g, ' '), formats: new Set(), styles: {}, href: null, shown: null }],
+        }));
+    }
+
+    /* The look of the text at position o (the character before it, else after it, else the line's own). */
+    function lookAt(line, runs, o) {
+        const before = o > 0 ? sliceRuns(runs, o - 1, o).selected[0] : null;
+        const model = before || sliceRuns(runs, o, o + 1).selected[0];
+        if (model) {
+            return { formats: model.formats, styles: model.styles };
+        }
+        const own = spanStyles(line);
+        const styles = {};
+        ['font-size', 'color'].forEach((property) => {
+            if (own[property]) {
+                styles[property] = own[property];
+            }
+        });
+        return { formats: new Set(), styles: styles };
+    }
+
+    /* Remove the selected text (joining its first and last line); returns where it was. */
+    function deleteSelection(element, caret) {
+        const [from, to] = [caret.anchor, caret.focus].sort(comparePositions);
+        if (comparePositions(from, to) === 0) {
+            return from;
+        }
+        const lines = textLines(element);
+        const [head] = splitRunsAt(contentRuns(lines[from.p]), from.o);
+        const [, tail] = splitRunsAt(contentRuns(lines[to.p]), to.o);
+        writeRuns(lines[from.p], head.concat(tail));
+        lines.slice(from.p + 1, to.p + 1).forEach((line) => line.remove());
+        return from;
+    }
+
+    /* Give a line the list type, level and start of a pasted line (and, from the editor, its paragraph look). */
+    function takeParagraph(line, item) {
+        line.setAttribute('data-list', item.list);
+        line.setAttribute('data-level', String(item.level));
+        if (item.start) {
+            line.setAttribute('data-start', String(item.start));
+        } else {
+            line.removeAttribute('data-start');
+        }
+        if (item.keep) {
+            ['text-align', 'line-height', 'margin-top', 'margin-bottom'].forEach((property) => {
+                line.style.removeProperty(property);
+                if (item.style[property]) {
+                    line.style.setProperty(property, item.style[property]);
+                }
+            });
+        }
+    }
+
+    /* The action pasting clipboard { html, text } at the caret; mode 'normal' or 'plain'; null if nothing to paste. */
+    App.text.pasteAction = function pasteAction(element, caret, clipboard, mode) {
+        const pasted = pastedLines(clipboard, mode);
+        if (pasted.length === 0 || !caret || textLines(element).length === 0) {
+            return null;
+        }
+        return {
+            label: mode === 'plain' ? 'Paste as text' : 'Paste',
+            run: () => {
+                const at = deleteSelection(element, caret);
+                const line = textLines(element)[at.p];
+                const runs = contentRuns(line);
+                const look = lookAt(line, runs, at.o);
+                pasted.forEach((item) => item.runs.forEach((run) => {
+                    if (run.br || item.keep) {
+                        return;
+                    }
+                    if (item.plain) {
+                        run.formats = new Set(look.formats);   // plain text: as if typed here
+                    }
+                    run.styles = Object.assign({}, look.styles);
+                }));
+                const [head, tail] = splitRunsAt(runs, at.o);
+                const destination = line.cloneNode(false);
+                destination.removeAttribute('data-start');   // a start number belongs to the first line only
+                if (head.length === 0 && tail.length === 0 && pasted[0].list !== null) {
+                    takeParagraph(line, pasted[0]);   // an empty line takes the first pasted line's list type
+                }
+                let current = line;
+                let currentRuns = head.concat(pasted[0].runs);
+                pasted.slice(1).forEach((item) => {
+                    writeRuns(current, currentRuns);
+                    const next = destination.cloneNode(false);
+                    if (item.list !== null) {
+                        takeParagraph(next, item);
+                    }
+                    current.after(next);
+                    current = next;
+                    currentRuns = item.runs;
+                });
+                const end = runsLength(currentRuns);
+                writeRuns(current, currentRuns.concat(tail));
+                return caretAt({ p: textLines(element).indexOf(current), o: end });
+            },
+        };
+    };
+
     /* Run an action (a key, AutoFormat, a list button): change the lines, tidy them, put the cursor back
        (an action on a selected box, not being edited, has no cursor). */
     App.text.runAction = function runAction(element, action) {
@@ -3877,6 +4039,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     let applying = false; // a key action is changing the text: its own input events are not typing
     let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
     let looseSpace = null; // { node, index }: a non-breaking space insertStyled typed at the end of a line
+    let plainPaste = false; // Ctrl+Shift+V was pressed: the paste that follows is plain text
 
     App.text.isEditing = function isEditing() {
         return editing !== null;
@@ -3940,11 +4103,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         markEditable(element);
         element.addEventListener('beforeinput', onBeforeInput);
         element.addEventListener('input', onInput);
+        element.addEventListener('paste', onPaste);
     }
 
     function detachFromElement(element) {
         element.removeEventListener('beforeinput', onBeforeInput);
         element.removeEventListener('input', onInput);
+        element.removeEventListener('paste', onPaste);
         unmarkEditable(element);
     }
 
@@ -4092,15 +4257,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         const model = before || after;
         const run = model ? copyRun(model, text) : { text: text, formats: new Set(), styles: spanStyles(lines[at.p]),
             href: null, shown: shownLook(lines[at.p]) };
-        const split = sliceRuns(runs, at.o, at.o);
-        let index = 0;
-        let position = 0;
-        while (index < split.runs.length && position < at.o) {
-            position += split.runs[index].br ? 1 : split.runs[index].text.length;
-            index++;
-        }
-        split.runs.splice(index, 0, run);
-        perLine[at.p] = split.runs;
+        const [head, tail] = splitRunsAt(runs, at.o);
+        perLine[at.p] = head.concat([run], tail);
         const allRuns = [].concat(...perLine);
         styles.forEach(([style, value]) => changeRuns(element, style, value, [run], allRuns));
         liftToBox(element, allRuns, lines);
@@ -4137,6 +4295,22 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     }
 
+    /* Ctrl+V / Ctrl+Shift+V while typing: the editor pastes (pasteAction), never the browser. */
+    function onPaste(event) {
+        if (!editing) {
+            return;
+        }
+        event.preventDefault();
+        const mode = plainPaste ? 'plain' : 'normal';
+        plainPaste = false;
+        const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
+        const caret = App.text.getCaret(editing.element);
+        const action = caret && App.text.pasteAction(editing.element, caret, clipboard, mode);
+        if (action) {
+            runInEditor(action);
+        }
+    }
+
     /*
      * The browser can leave text outside any <p> (e.g. after deleting everything).
      * Only then is the text normalized during typing, keeping the cursor.
@@ -4162,6 +4336,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const ctrl = event.ctrlKey || event.metaKey;
         const key = event.key.toLowerCase();
+        // The browser turns Ctrl+Shift+V into a paste event too; onPaste then pastes plain text.
+        plainPaste = ctrl && event.shiftKey && !event.altKey && key === 'v';
         let command = null;
         if (event.key === 'Escape') {
             command = 'exit';
@@ -4435,6 +4611,181 @@ App.template.newDeckHtml = function newDeckHtml() {
             typing = null;
             overlayElement().classList.remove('editing');
         });
+    };
+})();
+
+</script>
+<script>
+// ---- js/clipboard.js ----
+/*
+ * clipboard.js - text on the clipboard, in and out (SPEC Phase 3, "Paste into text").
+ *
+ * In: toParagraphs(html) turns the HTML another program put on the clipboard
+ * into the editor's flat paragraphs (<p data-list data-level>), in a separate
+ * inert document. Each source has its own way of writing lists:
+ *   - Word and Outlook: <p style="mso-list:l0 level2 lfo1"> with the bullet
+ *     glyph in a <span style="mso-list:Ignore"> (removed);
+ *   - PowerPoint: a glyph span (mso-special-format:bullet) and only the indent
+ *     to tell the level;
+ *   - Copilot's chat and web pages: real nested <ul>/<ol>/<li>;
+ *   - the editor itself: marked with data-deck-editor="text"; its theme fonts
+ *     and colours come back as var(--…) (see App.text.copyHtml).
+ * Nothing here touches the deck: text.js inserts the result (pasteAction).
+ *
+ * Talks to: text.js (normalize builds the paragraphs; pasteAction uses them).
+ */
+
+(function () {
+    'use strict';
+
+    App.clipboard = {};
+
+    const WORD_LEVEL_RE = /mso-list:\s*l\d+\s+level(\d+)/i;
+    const GLYPH_STYLE_RE = /mso-list:\s*ignore|mso-special-format|position:\s*absolute/i;
+    const NUMBER_GLYPH_RE = /^\(?(\d+|[a-z]{1,4})[.)]$/i;
+
+    /* A length from a style attribute in pt (in, cm, mm, px, pt), or null. */
+    function points(value) {
+        const match = /^(-?[\d.]+)(in|cm|mm|px|pt)$/.exec((value || '').trim());
+        if (!match) {
+            return null;
+        }
+        const factor = { in: 72, cm: 72 / 2.54, mm: 72 / 25.4, px: 0.75, pt: 1 }[match[2]];
+        return parseFloat(match[1]) * factor;
+    }
+
+    /* A property from the raw style attribute (Word's mso-* properties are not in element.style). */
+    function rawStyle(element, property) {
+        const match = new RegExp('(?:^|;)\\s*' + property + '\\s*:\\s*([^;]+)', 'i').exec(element.getAttribute('style') || '');
+        return match ? match[1].trim() : null;
+    }
+
+    /*
+     * The glyph that starts a list paragraph (Word's "·", PowerPoint's "•",
+     * "1." …): the outermost element around it that holds nothing else.
+     */
+    function glyphOf(paragraph) {
+        // A glyph of this paragraph, not of a paragraph inside it.
+        const marked = Array.from(paragraph.querySelectorAll('span')).find((span) =>
+            GLYPH_STYLE_RE.test(span.getAttribute('style') || '') && span.closest('p, div, li') === paragraph);
+        if (!marked) {
+            return null;
+        }
+        let glyph = marked;
+        while (glyph.parentElement && glyph.parentElement !== paragraph &&
+            glyph.parentElement.textContent.trim() === glyph.textContent.trim()) {
+            glyph = glyph.parentElement;
+        }
+        // It must come first in the paragraph.
+        const before = paragraph.ownerDocument.createRange();
+        before.setStart(paragraph, 0);
+        before.setEndBefore(glyph);
+        return before.toString().trim() === '' ? glyph : null;
+    }
+
+    /*
+     * Word / Outlook / PowerPoint list paragraphs -> <p data-list data-level>.
+     * Levels: Word writes them (mso-list … levelN); PowerPoint only indents, so
+     * its distinct indents, smallest first, are levels 1, 2, 3 …
+     */
+    function convertGlyphParagraphs(doc) {
+        const items = [];
+        doc.querySelectorAll('p, div, li').forEach((paragraph) => {
+            const glyph = glyphOf(paragraph);
+            if (!glyph) {
+                return;
+            }
+            const mark = glyph.textContent.replace(/[\s ]+/g, '');
+            const specialHost = [glyph].concat(Array.from(glyph.querySelectorAll('[style]')))
+                .find((node) => /mso-special-format/i.test(node.getAttribute('style') || ''));
+            const special = specialHost ? rawStyle(specialHost, 'mso-special-format') : '';
+            const isNumber = /^num/i.test(special) || NUMBER_GLYPH_RE.test(mark);
+            const word = WORD_LEVEL_RE.exec(paragraph.getAttribute('style') || '');
+            items.push({
+                paragraph: paragraph, list: isNumber ? 'number' : 'bullet',
+                number: isNumber && /^\(?\d+/.test(mark) ? parseInt(mark.replace('(', ''), 10) : null,
+                level: word ? parseInt(word[1], 10) : null,
+                indent: points(rawStyle(paragraph, 'margin-left')) || 0,
+            });
+            glyph.remove();
+        });
+        const indents = [];
+        items.filter((item) => item.level === null).forEach((item) => {
+            if (!indents.some((indent) => Math.abs(indent - item.indent) < 2)) {
+                indents.push(item.indent);
+            }
+        });
+        indents.sort((a, b) => a - b);
+        const counters = [];
+        items.forEach((item) => {
+            const level = Math.min(5, item.level !== null ? item.level
+                : indents.findIndex((indent) => Math.abs(indent - item.indent) < 2) + 1);
+            item.paragraph.setAttribute('data-list', item.list);
+            item.paragraph.setAttribute('data-level', String(level));
+            // A number that does not follow on (a list starting at 3) becomes a start number.
+            const expected = (counters[level] || 0) + 1;
+            if (item.number !== null && item.number !== expected) {
+                item.paragraph.setAttribute('data-start', String(item.number));
+            }
+            counters[level] = item.list === 'number' ? (item.number || expected) : 0;
+            counters.length = level + 1;
+        });
+    }
+
+    /* Headings keep their weight: bold unless they say otherwise. */
+    function boldHeadings(doc) {
+        doc.querySelectorAll('h1, h2, h3, h4, h5, h6').forEach((heading) => {
+            if (!heading.style.fontWeight) {
+                heading.style.fontWeight = 'bold';
+            }
+        });
+    }
+
+    /* Google Docs wraps everything in <b style="font-weight:normal">: that is not bold. */
+    function unwrapFakeBold(doc) {
+        doc.querySelectorAll('b, strong').forEach((element) => {
+            if (/^(normal|[1-5]00)$/.test(element.style.fontWeight)) {
+                const span = doc.createElement('span');
+                span.append(...element.childNodes);
+                element.replaceWith(span);
+            }
+        });
+    }
+
+    /* Text copied in the editor: its theme fonts and colours back as variables. */
+    function restoreThemeValues(root) {
+        [['data-theme-font', 'font-family'], ['data-theme-color', 'color'], ['data-theme-highlight', 'background-color']]
+            .forEach(([attribute, property]) => {
+                root.querySelectorAll('[' + attribute + ']').forEach((element) => {
+                    const name = element.getAttribute(attribute);
+                    if (/^--[a-z0-9-]+$/.test(name)) {
+                        element.style.setProperty(property, 'var(' + name + ')');
+                    }
+                    element.removeAttribute(attribute);
+                });
+            });
+    }
+
+    /*
+     * Clipboard HTML -> { fromEditor, holder }: holder is an element (in its
+     * own inert document) whose children are the normalized flat paragraphs.
+     */
+    App.clipboard.toParagraphs = function toParagraphs(html) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        const marked = doc.querySelector('[data-deck-editor="text"]');
+        let root = doc.body;
+        if (marked) {
+            restoreThemeValues(marked);
+            root = marked;
+        } else {
+            convertGlyphParagraphs(doc);
+            boldHeadings(doc);
+            unwrapFakeBold(doc);
+        }
+        const holder = doc.createElement('div');
+        holder.append(...root.childNodes);
+        App.text.normalize(holder);
+        return { fromEditor: !!marked, holder: holder };
     };
 })();
 

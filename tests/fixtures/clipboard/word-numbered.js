@@ -1,0 +1,10 @@
+// SYNTHETIC: hand-written to look like a Word 365 numbered list (1. / a. / i.) on the clipboard.
+CLIPBOARD_FIXTURES.push({
+    name: 'word-numbered',
+    source: 'Word 365 on Windows (synthetic)',
+    synthetic: true,
+    types: {
+        'text/html': '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns="http://www.w3.org/TR/REC-html40">\r\n<head><meta name=ProgId content=Word.Document></head>\r\n<body lang=PT-BR>\r\n<!--StartFragment-->\r\n<p class=MsoNormal><b>Próximos passos</b></p>\r\n<p class=MsoListParagraphCxSpFirst style=\'text-indent:-18.0pt;mso-list:l1 level1 lfo2\'><![if !supportLists]><span><span style=\'mso-list:Ignore\'>1.<span style=\'font:7.0pt "Times New Roman"\'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>Diligência</p>\r\n<p class=MsoListParagraphCxSpMiddle style=\'margin-left:72.0pt;mso-add-space:auto;text-indent:-18.0pt;mso-list:l1 level2 lfo2\'><![if !supportLists]><span><span style=\'mso-list:Ignore\'>a.<span style=\'font:7.0pt "Times New Roman"\'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>Financeira</p>\r\n<p class=MsoListParagraphCxSpMiddle style=\'margin-left:108.0pt;mso-add-space:auto;text-indent:-108.0pt;mso-text-indent-alt:-9.0pt;mso-list:l1 level3 lfo2\'><![if !supportLists]><span><span style=\'mso-list:Ignore\'><span style=\'mso-spacerun:yes\'>&nbsp;</span>i.<span style=\'font:7.0pt "Times New Roman"\'>&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>Capital de giro</p>\r\n<p class=MsoListParagraphCxSpLast style=\'text-indent:-18.0pt;mso-list:l1 level1 lfo2\'><![if !supportLists]><span><span style=\'mso-list:Ignore\'>2.<span style=\'font:7.0pt "Times New Roman"\'>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; </span></span></span><![endif]>Assinatura</p>\r\n<!--EndFragment-->\r\n</body>\r\n</html>\r\n',
+        'text/plain': 'Próximos passos\r\n1.\tDiligência\r\na.\tFinanceira\r\n                                                              i.     Capital de giro\r\n2.\tAssinatura\r\n',
+    },
+});

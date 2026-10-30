@@ -796,6 +796,62 @@ def test_clipboard_capture_page(browser):
     page.close()
 
 
+WORD_LIST_HTML = (
+    "<html><head><meta name=ProgId content=Word.Document></head><body><!--StartFragment-->"
+    "<p class=MsoListParagraphCxSpFirst style='text-indent:-18.0pt;mso-list:l0 level1 lfo1'><![if !supportLists]>"
+    "<span style='font-family:Symbol'><span style='mso-list:Ignore'>·<span style='font:7.0pt \"Times New Roman\"'>"
+    "&nbsp;&nbsp; </span></span></span><![endif]><span style='font-size:20pt;color:red'>Um</span></p>"
+    "<p class=MsoListParagraphCxSpLast style='margin-left:72.0pt;text-indent:-18.0pt;mso-list:l0 level2 lfo1'>"
+    "<![if !supportLists]><span style='font-family:\"Courier New\"'><span style='mso-list:Ignore'>o"
+    "<span style='font:7.0pt \"Times New Roman\"'>&nbsp; </span></span></span><![endif]><b>Dois</b></p>"
+    "<!--EndFragment--></body></html>")
+
+
+def put_on_clipboard(page, html, text):
+    """Write HTML and plain text to the system clipboard, as a program copying them would."""
+    page.evaluate("""async ([html, text]) => {
+        await navigator.clipboard.write([new ClipboardItem({
+            'text/html': new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([text], { type: 'text/plain' }),
+        })]);
+    }""", [html, text])
+
+
+def test_paste_into_text(browser):
+    """Ctrl+V (lists and bold kept, the deck's look), Ctrl+Shift+V (plain text), each one undo step."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    lines = lambda: page.evaluate(LINES_OF, "e7")  # noqa: E731
+    html_of = lambda index: page.evaluate(  # noqa: E731
+        "i => App.deck.getDocument().querySelector('[data-id=\"e7\"]').children[i].innerHTML", index)
+    start = lines()
+
+    page.keyboard.press("Enter")   # edit, cursor at the end
+    page.keyboard.press("Enter")   # a new, empty bullet
+    put_on_clipboard(page, WORD_LIST_HTML, "Um\r\nDois\r\n")
+    page.keyboard.press("Control+v")
+    check(lines()[-2:] == ["b1:Um", "b2:Dois"], f"Word's list pasted with its levels: {lines()}")
+    check(html_of(len(lines()) - 1) == "<b>Dois</b>" and html_of(len(lines()) - 2) == "Um",
+          f"bold kept, Word's size and colour dropped: {html_of(len(lines()) - 2)!r}")
+    check(page.evaluate("App.text.isEditing()"), "still editing")
+    page.keyboard.type("!")
+    check(lines()[-1] == "b2:Dois!", f"the cursor is after the pasted text: {lines()[-1]}")
+    page.keyboard.press("Control+z")   # the typing
+    page.keyboard.press("Control+z")   # the paste
+    check(lines() == start + ["b1:"], f"the paste is one undo step: {lines()}")
+
+    page.keyboard.press("Control+Shift+v")
+    check(lines()[-2:] == ["b1:Um", "b1:Dois"], f"Ctrl+Shift+V pastes plain text, lines as bullets here: {lines()}")
+    check("<b>" not in html_of(len(lines()) - 1), "no bold in plain text")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1748,6 +1804,7 @@ TESTS = [
     test_text_colors,
     test_paragraph_formatting,
     test_clipboard_capture_page,
+    test_paste_into_text,
 ]
 
 

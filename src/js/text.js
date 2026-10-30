@@ -2451,6 +2451,7 @@
     let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
     let looseSpace = null; // { node, index }: a non-breaking space insertStyled typed at the end of a line
     let plainPaste = false; // Ctrl+Shift+V was pressed: the paste that follows is plain text
+    let emptyNewBox = null; // { element, slideId }: a new box left empty, removed once it is deselected
     let lastPaste = null;   // the last paste, for the paste options button: { id, clipboard, mode, caret, end, state }
 
     App.text.isEditing = function isEditing() {
@@ -2491,8 +2492,12 @@
             App.text.exitEdit({ select: false });
         }
         const doc = element.ownerDocument;
+        const stillNew = emptyNewBox !== null && emptyNewBox.element === element;
+        if (stillNew) {
+            emptyNewBox = null;   // typing in it again: it is the editing box's "new" again
+        }
         editing = {
-            element: element, id: element.getAttribute('data-id'), doc: doc, isNew: !!settings.isNew,
+            element: element, id: element.getAttribute('data-id'), doc: doc, isNew: !!settings.isNew || stillNew,
             slideId: element.closest('section.slide').getAttribute('data-slide-id'),
         };
         if (!doc.documentElement.getAttribute('lang')) {
@@ -2567,9 +2572,16 @@
             App.text.fitHeight(element);
             element.blur();
             state.doc.getSelection().removeAllRanges();
+            const keepSelected = !options || options.select !== false;
             if (state.isNew && element.textContent.trim() === '') {
-                App.history.change('Delete empty text box', { slideId: state.slideId }, () => element.remove());
-            } else if (!options || options.select !== false) {
+                // As in PowerPoint, an empty new box goes once it is no longer selected, not
+                // when typing stops (a ribbon command may end typing and still work on it).
+                emptyNewBox = { element: element, slideId: state.slideId };
+                if (!keepSelected) {
+                    removeEmptyNewBox();
+                }
+            }
+            if (keepSelected && element.isConnected) {
                 App.selection.select(element);
             }
         }
@@ -2593,6 +2605,15 @@
                     App.events.emit('text-selection-changed');
                 }
             });
+        }
+    }
+
+    /* Remove the new box left empty, unless it got text meanwhile (or an undo took it away already). */
+    function removeEmptyNewBox() {
+        const box = emptyNewBox;
+        emptyNewBox = null;
+        if (box && box.element.isConnected && box.element.textContent.trim() === '') {
+            App.history.change('Delete empty text box', { slideId: box.slideId }, () => box.element.remove());
         }
     }
 
@@ -3079,9 +3100,16 @@
                 App.text.exitEdit({ select: false });
             }
         });
+        // A new box left empty goes once something else (or nothing) is selected.
+        App.events.on('selection-changed', () => {
+            if (emptyNewBox && !editing && App.selection.getElement() !== emptyNewBox.element) {
+                removeEmptyNewBox();
+            }
+        });
         App.events.on('deck-loaded', () => {
             editing = null;
             typing = null;
+            emptyNewBox = null;
             overlayElement().classList.remove('editing');
         });
     };

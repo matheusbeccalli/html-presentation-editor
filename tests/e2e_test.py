@@ -402,9 +402,37 @@ def test_text_editing(browser):
     drag(page, slide_to_screen(page, 700, 520), slide_to_screen(page, 1000, 540))
     dragged = editing_id(page)
     check(element_rect(page, dragged)["width"] == 300, f"dragging set the width: {element_rect(page, dragged)}")
+    exists = lambda box_id: page.evaluate(  # noqa: E731
+        "id => !!App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]')", box_id)
     page.keyboard.press("Escape")
-    check(page.evaluate("id => !App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]')", dragged),
-          "a new text box left empty is removed")
+    check(exists(dragged) and page.evaluate("App.selection.selectedId()") == dragged,
+          "Esc on an empty new box: it stays, selected (as in PowerPoint)")
+    page.keyboard.press("Escape")   # deselect
+    check(not exists(dragged), "an empty new text box is removed once it is deselected")
+
+    # The ribbon while a new box is still empty: the box stays.
+    page.click("button[data-command='insertTextBox']")
+    page.mouse.click(*slide_to_screen(page, 700, 600))
+    fresh = editing_id(page)
+    page.click(".ribbon-tab[data-tab='home']")
+    check(editing_id(page) == fresh, "switching ribbon tabs keeps typing in the new box")
+    page.click("button[data-command='bullets']")
+    check(exists(fresh) and page.evaluate(LINES_OF, fresh) == ["b1:"], "Bullets on the empty new box")
+    page.keyboard.type("Item")
+    check(page.evaluate(LINES_OF, fresh) == ["b1:Item"], "typing goes on in it")
+    page.evaluate("App.history.undo(); App.history.undo(); App.history.undo()")   # typing, bullets, the box
+    check(not exists(fresh), "undone")
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click("button[data-command='insertTextBox']")
+    page.mouse.click(*slide_to_screen(page, 700, 600))
+    fresh = editing_id(page)
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.click("button[data-command='sendBackward']")   # a command that ends typing
+    check(exists(fresh) and page.evaluate("App.selection.selectedId()") == fresh,
+          "a command that ends typing leaves the empty new box selected")
+    page.mouse.click(*slide_to_screen(page, 640, 690))   # empty slide: deselects
+    check(not exists(fresh), "deselected: the empty new box goes")
+    page.click(".ribbon-tab[data-tab='insert']")
 
     page.click("button[data-command='insertTextBox']")
     page.keyboard.press("Escape")

@@ -192,8 +192,10 @@
         tabRow.appendChild(fileButton);
 
         TABS.forEach((tab) => {
+            // Switching tabs is not an action: typing in a text box goes on (data-keep-edit, focus kept).
             tabRow.appendChild(el('button', {
-                type: 'button', class: 'ribbon-tab', role: 'tab', 'data-tab': tab.id,
+                type: 'button', class: 'ribbon-tab', role: 'tab', 'data-tab': tab.id, 'data-keep-edit': '',
+                onmousedown: (event) => event.preventDefault(),
                 onclick: () => selectTab(tab.id),
             }, [tab.label]));
         });

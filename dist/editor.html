@@ -457,6 +457,11 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .format-grid input:focus { outline: 2px solid var(--focus); outline-offset: -1px; border-color: transparent; }
 .format-grid span { color: var(--text-muted); }
 .format-tip { margin: 10px 0 0; font-size: 12px; }
+#format-autofit { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+#format-autofit legend { margin-bottom: 6px; padding: 0; font-weight: 600; }
+#format-autofit label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+#format-autofit input { margin: 0; accent-color: var(--accent); }
+#format-autofit-hint { margin: 8px 0 0; font-size: 12px; }
 
 /* ---- Status bar (bottom) ---- */
 #zoom-controls { display: flex; align-items: center; gap: 4px; }
@@ -622,6 +627,16 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
                 <label for="format-h">Height</label><input id="format-h" data-field="height" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
             </div>
             <p class="panel-hint format-tip">Enter or Tab applies a value, Esc cancels. Arrow keys step 1 px (Shift: 10 px).</p>
+        </section>
+        <section id="format-text" hidden>
+            <h3>Text box</h3>
+            <fieldset id="format-autofit">
+                <legend>Autofit</legend>
+                <label><input type="radio" name="autofit" value="off"> Do not autofit</label>
+                <label><input type="radio" name="autofit" value="shrink"> Shrink text on overflow</label>
+                <label><input type="radio" name="autofit" value="resize"> Resize shape to fit text</label>
+            </fieldset>
+            <p class="panel-hint" id="format-autofit-hint"></p>
         </section>
     </aside>
 </main>
@@ -1815,6 +1830,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         // Like PowerPoint, the first line of a text box gets no space above it.
         rules.push('.el p[data-list]:first-child { margin-top: 0; }');
+        // Autofit "shrink": the lines are drawn at the scale the editor measured (fitText). zoom,
+        // unlike a transform, lets the smaller text wrap again over the full width of the box.
+        rules.push('.el[data-autofit="shrink"] > p { zoom: var(--autofit-scale, 1); }');
         return rules.join('\n') + '\n';
     };
 
@@ -3050,6 +3068,77 @@ App.template.newDeckHtml = function newDeckHtml() {
             'px; height: 40px; font-size: 18pt; line-height: 1.2;');
         element.innerHTML = '<p data-list="none" data-level="1"><br></p>';
         return element;
+    };
+
+    // ---------------------------------------------------------------
+    // Autofit: data-autofit="shrink|resize|off"
+    // ---------------------------------------------------------------
+
+    const MIN_SHRINK = 0.25;   // text never gets smaller than a quarter of its size
+    const AUTOFIT_LABELS = { off: 'Do not autofit', shrink: 'Shrink text on overflow', resize: 'Resize shape to fit text' };
+
+    function fits(element) {
+        return element.scrollHeight <= element.clientHeight + 1;
+    }
+
+    /* A "shrink" box: the largest scale (two decimals) at which its text fits; none when it fits as it is. */
+    function shrinkToFit(element) {
+        const old = element.style.getPropertyValue('--autofit-scale');
+        element.style.removeProperty('--autofit-scale');
+        if (!fits(element)) {
+            let low = MIN_SHRINK;
+            let high = 1;
+            for (let i = 0; i < 10; i++) {   // halving the gap: 10 steps are finer than 0.01
+                const middle = (low + high) / 2;
+                element.style.setProperty('--autofit-scale', String(middle));
+                if (fits(element)) {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            element.style.setProperty('--autofit-scale', String(Math.floor(low * 100) / 100));
+        }
+        return element.style.getPropertyValue('--autofit-scale') !== old;
+    }
+
+    /*
+     * Fit a text box to its text after a change (typing, a command, a resize):
+     * "resize" sets the box's height, "shrink" the text's scale; "off" (or no
+     * attribute, as for imported boxes) leaves both. Returns true if it changed.
+     */
+    App.text.fitText = function fitText(element) {
+        if (!element || element.getAttribute('data-type') !== 'text') {
+            return false;
+        }
+        const mode = element.getAttribute('data-autofit');
+        if (mode === 'resize') {
+            return App.text.fitHeight(element);
+        }
+        return mode === 'shrink' ? shrinkToFit(element) : false;
+    };
+
+    /* The autofit mode of a box ('off' when it has none). */
+    App.text.autofitOf = function autofitOf(element) {
+        const mode = element.getAttribute('data-autofit');
+        return AUTOFIT_LABELS[mode] ? mode : 'off';
+    };
+
+    /* The action switching a box to autofit `mode` (fitting it at once), or null if it has that mode already. */
+    App.text.autofitAction = function autofitAction(element, mode) {
+        if (!AUTOFIT_LABELS[mode] || App.text.autofitOf(element) === mode && element.hasAttribute('data-autofit')) {
+            return null;
+        }
+        return {
+            label: AUTOFIT_LABELS[mode],
+            run: () => {
+                element.setAttribute('data-autofit', mode);
+                if (mode !== 'shrink') {
+                    element.style.removeProperty('--autofit-scale');
+                }
+                App.text.fitText(element);
+            },
+        };
     };
 
     /* A data-autofit="resize" box takes exactly the height of its text. Returns true if it changed. */
@@ -4366,7 +4455,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (element.isConnected) {
             detachFromElement(element);
             App.text.normalize(element);
-            App.text.fitHeight(element);
+            App.text.fitText(element);
             element.blur();
             state.doc.getSelection().removeAllRanges();
             const keepSelected = !options || options.select !== false;
@@ -4464,7 +4553,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 event.preventDefault();   // typed here by insertStyled instead, with the chosen formatting
                 insertStyled(editing.element, caret.focus, event.data, pending.styles);
                 pending = null;
-                if (App.text.fitHeight(editing.element)) {
+                if (App.text.fitText(editing.element)) {
                     App.selection.refresh();
                 }
             }
@@ -4524,7 +4613,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 runInEditor(format);   // its own undo step, after the typed "- "
             }
         }
-        if (App.text.fitHeight(element)) {
+        if (App.text.fitText(element)) {
             App.selection.refresh();
         }
     }
@@ -4675,7 +4764,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             applying = false;
         }
         meta.caretAfter = App.text.getCaret(element);
-        if (App.text.fitHeight(element)) {
+        if (App.text.fitText(element)) {
             App.selection.refresh();
         }
     }
@@ -4754,7 +4843,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     function runOnBox(element, action) {
         App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, () => {
             App.text.runAction(element, action);
-            App.text.fitHeight(element);
+            App.text.fitText(element);
         });
         App.selection.refresh();
     }
@@ -8009,6 +8098,9 @@ App.template.newDeckHtml = function newDeckHtml() {
                 ? App.transform.moveRect(startRect, dx, dy)
                 : App.transform.resizeRect(startRect, handle, dx, dy, event.shiftKey);
             App.transform.writeRect(element, rect);
+            if (kind === 'resize') {
+                App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
+            }
             App.selection.refresh();
             App.events.emit('selection-dragged');   // the Format pane shows the values live
         }
@@ -8125,7 +8217,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
         App.selection.select(element);
         App.text.enterEdit(element, { caret: 'start', isNew: true });
-        App.text.fitHeight(element);
+        App.text.fitText(element);
         App.selection.refresh();
     };
 
@@ -8294,7 +8386,11 @@ App.template.newDeckHtml = function newDeckHtml() {
  * 10 px, like PowerPoint's spinner fields. Later phases add their own
  * sections here (text, table, image, chart options).
  *
- * Talks to: selection.js (what is selected), transform.js, history.js,
+ * Text boxes also get "Text box" options: Autofit (do not autofit / shrink
+ * text on overflow / resize shape to fit text), as in PowerPoint's Text
+ * Options.
+ *
+ * Talks to: selection.js (what is selected), transform.js, history.js, text.js (autofit),
  *           events (selection-changed, selection-dragged, history-changed).
  */
 
@@ -8340,6 +8436,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     let section = null;
     let typeLabel = null;
     let inputs = [];
+    let textSection = null;
+    let autofitHint = null;
     const edited = new Set();   // fields the user is typing in, not applied yet
 
     App.formatPane.init = function init() {
@@ -8354,7 +8452,13 @@ App.template.newDeckHtml = function newDeckHtml() {
             input.addEventListener('keydown', (event) => onFieldKey(event, input));
         });
 
-        ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded'].forEach((name) => {
+        textSection = document.getElementById('format-text');
+        autofitHint = document.getElementById('format-autofit-hint');
+        textSection.querySelectorAll('input[name="autofit"]').forEach((radio) => {
+            radio.addEventListener('change', () => setAutofit(radio.value));
+        });
+
+        ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded', 'text-edit-changed'].forEach((name) => {
             App.events.on(name, () => App.formatPane.refresh());
         });
         App.events.on('selection-dragged', () => App.formatPane.refresh());
@@ -8365,9 +8469,17 @@ App.template.newDeckHtml = function newDeckHtml() {
         const element = App.selection.getElement();
         hint.hidden = !!element;
         section.hidden = !element;
+        const isText = !!element && element.getAttribute('data-type') === 'text';
+        textSection.hidden = !isText;
         if (!element) {
             edited.clear();
             return;
+        }
+        if (isText) {
+            const mode = App.text.autofitOf(element);
+            textSection.querySelectorAll('input[name="autofit"]').forEach((radio) => { radio.checked = radio.value === mode; });
+            const scale = parseFloat(element.style.getPropertyValue('--autofit-scale'));
+            autofitHint.textContent = mode === 'shrink' && scale < 1 ? 'Text shrunk to ' + Math.round(scale * 100) + '%' : '';
         }
         typeLabel.textContent = TYPE_LABELS[element.getAttribute('data-type')] || 'Object';
         const rect = App.transform.readRect(element);
@@ -8401,8 +8513,23 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const label = (field === 'left' || field === 'top') ? 'Move' : 'Resize';
         const scope = { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
-        App.history.change(label, scope, () => App.transform.writeRect(element, next));
+        App.history.change(label, scope, () => {
+            App.transform.writeRect(element, next);
+            App.text.fitText(element);   // autofit follows a new size
+        });
         // history-changed redraws the selection box and this pane.
+    }
+
+    /* Autofit chosen in the pane: one undo step (text.js does the fitting). */
+    function setAutofit(mode) {
+        const element = App.selection.getElement();
+        const action = element && App.text.autofitAction(element, mode);
+        if (!action) {
+            return;
+        }
+        App.text.exitEdit({ select: false });
+        App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, action.run);
+        App.selection.select(element);
     }
 
     function onFieldKey(event, input) {

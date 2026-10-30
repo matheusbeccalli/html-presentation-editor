@@ -157,6 +157,11 @@
 .format-grid input:focus { outline: 2px solid var(--focus); outline-offset: -1px; border-color: transparent; }
 .format-grid span { color: var(--text-muted); }
 .format-tip { margin: 10px 0 0; font-size: 12px; }
+#format-autofit { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
+#format-autofit legend { margin-bottom: 6px; padding: 0; font-weight: 600; }
+#format-autofit label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+#format-autofit input { margin: 0; accent-color: var(--accent); }
+#format-autofit-hint { margin: 8px 0 0; font-size: 12px; }
 
 /* ---- Status bar (bottom) ---- */
 #zoom-controls { display: flex; align-items: center; gap: 4px; }

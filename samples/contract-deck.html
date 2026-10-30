@@ -69,6 +69,7 @@
 .el p[data-list="bullet"][data-level="5"]::before { content: var(--list-5-bullet, "·"); }
 .el p[data-list="number"][data-level="5"]::before { content: counter(list-5, var(--list-5-number, lower-alpha)) "."; }
 .el p[data-list]:first-child { margin-top: 0; }
+.el[data-autofit="shrink"] > p { zoom: var(--autofit-scale, 1); }
 </style></head>
 <body>
 

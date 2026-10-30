@@ -1085,6 +1085,60 @@ def test_format_painter(browser):
     editor.close()
 
 
+def test_autofit(browser):
+    """Format pane > Text box > Autofit: off / shrink text on overflow / resize shape to fit text."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    box = """() => { const el = App.deck.getDocument().querySelector('[data-id="e7"]');
+        return { mode: el.getAttribute('data-autofit'), scale: el.style.getPropertyValue('--autofit-scale'),
+                 height: el.style.height, fits: el.scrollHeight <= el.clientHeight + 1 }; }"""
+    radio = lambda mode: page.locator(f'#format-autofit input[value="{mode}"]')  # noqa: E731
+    check(radio("off").is_checked(), "an imported box: Do not autofit")
+
+    page.keyboard.press("Enter")   # edit, cursor at the end
+    for i in range(14):   # the box is 480 px tall: 14 more lines overflow it
+        page.keyboard.press("Enter")
+        page.keyboard.type(f"Mais uma linha {i}")
+    page.keyboard.press("Escape")
+    check(not page.evaluate(box)["fits"], "the text now overflows the box (autofit off)")
+
+    radio("shrink").check()
+    shrunk = page.evaluate(box)
+    check(shrunk["mode"] == "shrink" and 0 < float(shrunk["scale"]) < 1 and shrunk["fits"], f"shrunk to fit: {shrunk}")
+    hint = page.inner_text("#format-autofit-hint")
+    check(hint == f"Text shrunk to {round(float(shrunk['scale']) * 100)}%", f"the pane says how much: {hint!r}")
+
+    page.keyboard.press("Enter")   # type more: it shrinks further, live
+    page.keyboard.press("Enter")
+    page.keyboard.type("Ainda mais")
+    page.keyboard.press("Escape")
+    smaller = page.evaluate(box)
+    check(float(smaller["scale"]) < float(shrunk["scale"]) and smaller["fits"], f"typing shrinks it further: {smaller}")
+
+    height = page.locator("#format-h")
+    height.fill("560")
+    height.press("Enter")
+    taller = page.evaluate(box)
+    check(float(taller["scale"] or 1) > float(smaller["scale"]) and taller["fits"], f"a taller box: bigger text: {taller}")
+
+    radio("resize").check()
+    resized = page.evaluate(box)
+    check(resized["mode"] == "resize" and resized["scale"] == "" and resized["fits"] and float(resized["height"][:-2]) > 560,
+          f"resize: the box grows instead: {resized}")
+    check(page.inner_text("#format-autofit-hint") == "", "no shrink hint")
+
+    for _ in range(8):
+        if page.evaluate(box)["mode"] is None and page.evaluate(box)["fits"] is False:
+            break
+        page.keyboard.press("Control+z")
+    check(page.evaluate(box)["mode"] is None, f"undone, step by step: {page.evaluate(box)}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -2042,6 +2096,7 @@ TESTS = [
     test_paste_options_button,
     test_double_click_empty_slide_adds_text_box,
     test_format_painter,
+    test_autofit,
 ]
 
 

@@ -7,7 +7,11 @@
  * 10 px, like PowerPoint's spinner fields. Later phases add their own
  * sections here (text, table, image, chart options).
  *
- * Talks to: selection.js (what is selected), transform.js, history.js,
+ * Text boxes also get "Text box" options: Autofit (do not autofit / shrink
+ * text on overflow / resize shape to fit text), as in PowerPoint's Text
+ * Options.
+ *
+ * Talks to: selection.js (what is selected), transform.js, history.js, text.js (autofit),
  *           events (selection-changed, selection-dragged, history-changed).
  */
 
@@ -53,6 +57,8 @@
     let section = null;
     let typeLabel = null;
     let inputs = [];
+    let textSection = null;
+    let autofitHint = null;
     const edited = new Set();   // fields the user is typing in, not applied yet
 
     App.formatPane.init = function init() {
@@ -67,7 +73,13 @@
             input.addEventListener('keydown', (event) => onFieldKey(event, input));
         });
 
-        ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded'].forEach((name) => {
+        textSection = document.getElementById('format-text');
+        autofitHint = document.getElementById('format-autofit-hint');
+        textSection.querySelectorAll('input[name="autofit"]').forEach((radio) => {
+            radio.addEventListener('change', () => setAutofit(radio.value));
+        });
+
+        ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded', 'text-edit-changed'].forEach((name) => {
             App.events.on(name, () => App.formatPane.refresh());
         });
         App.events.on('selection-dragged', () => App.formatPane.refresh());
@@ -78,9 +90,17 @@
         const element = App.selection.getElement();
         hint.hidden = !!element;
         section.hidden = !element;
+        const isText = !!element && element.getAttribute('data-type') === 'text';
+        textSection.hidden = !isText;
         if (!element) {
             edited.clear();
             return;
+        }
+        if (isText) {
+            const mode = App.text.autofitOf(element);
+            textSection.querySelectorAll('input[name="autofit"]').forEach((radio) => { radio.checked = radio.value === mode; });
+            const scale = parseFloat(element.style.getPropertyValue('--autofit-scale'));
+            autofitHint.textContent = mode === 'shrink' && scale < 1 ? 'Text shrunk to ' + Math.round(scale * 100) + '%' : '';
         }
         typeLabel.textContent = TYPE_LABELS[element.getAttribute('data-type')] || 'Object';
         const rect = App.transform.readRect(element);
@@ -114,8 +134,23 @@
         }
         const label = (field === 'left' || field === 'top') ? 'Move' : 'Resize';
         const scope = { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
-        App.history.change(label, scope, () => App.transform.writeRect(element, next));
+        App.history.change(label, scope, () => {
+            App.transform.writeRect(element, next);
+            App.text.fitText(element);   // autofit follows a new size
+        });
         // history-changed redraws the selection box and this pane.
+    }
+
+    /* Autofit chosen in the pane: one undo step (text.js does the fitting). */
+    function setAutofit(mode) {
+        const element = App.selection.getElement();
+        const action = element && App.text.autofitAction(element, mode);
+        if (!action) {
+            return;
+        }
+        App.text.exitEdit({ select: false });
+        App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, action.run);
+        App.selection.select(element);
     }
 
     function onFieldKey(event, input) {

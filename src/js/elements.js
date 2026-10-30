@@ -72,7 +72,7 @@
         });
         App.selection.select(element);
         App.text.enterEdit(element, { caret: 'start', isNew: true });
-        App.text.fitHeight(element);
+        App.text.fitText(element);
         App.selection.refresh();
     };
 

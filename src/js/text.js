@@ -132,6 +132,9 @@
         }
         // Like PowerPoint, the first line of a text box gets no space above it.
         rules.push('.el p[data-list]:first-child { margin-top: 0; }');
+        // Autofit "shrink": the lines are drawn at the scale the editor measured (fitText). zoom,
+        // unlike a transform, lets the smaller text wrap again over the full width of the box.
+        rules.push('.el[data-autofit="shrink"] > p { zoom: var(--autofit-scale, 1); }');
         return rules.join('\n') + '\n';
     };
 
@@ -1367,6 +1370,77 @@
             'px; height: 40px; font-size: 18pt; line-height: 1.2;');
         element.innerHTML = '<p data-list="none" data-level="1"><br></p>';
         return element;
+    };
+
+    // ---------------------------------------------------------------
+    // Autofit: data-autofit="shrink|resize|off"
+    // ---------------------------------------------------------------
+
+    const MIN_SHRINK = 0.25;   // text never gets smaller than a quarter of its size
+    const AUTOFIT_LABELS = { off: 'Do not autofit', shrink: 'Shrink text on overflow', resize: 'Resize shape to fit text' };
+
+    function fits(element) {
+        return element.scrollHeight <= element.clientHeight + 1;
+    }
+
+    /* A "shrink" box: the largest scale (two decimals) at which its text fits; none when it fits as it is. */
+    function shrinkToFit(element) {
+        const old = element.style.getPropertyValue('--autofit-scale');
+        element.style.removeProperty('--autofit-scale');
+        if (!fits(element)) {
+            let low = MIN_SHRINK;
+            let high = 1;
+            for (let i = 0; i < 10; i++) {   // halving the gap: 10 steps are finer than 0.01
+                const middle = (low + high) / 2;
+                element.style.setProperty('--autofit-scale', String(middle));
+                if (fits(element)) {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            element.style.setProperty('--autofit-scale', String(Math.floor(low * 100) / 100));
+        }
+        return element.style.getPropertyValue('--autofit-scale') !== old;
+    }
+
+    /*
+     * Fit a text box to its text after a change (typing, a command, a resize):
+     * "resize" sets the box's height, "shrink" the text's scale; "off" (or no
+     * attribute, as for imported boxes) leaves both. Returns true if it changed.
+     */
+    App.text.fitText = function fitText(element) {
+        if (!element || element.getAttribute('data-type') !== 'text') {
+            return false;
+        }
+        const mode = element.getAttribute('data-autofit');
+        if (mode === 'resize') {
+            return App.text.fitHeight(element);
+        }
+        return mode === 'shrink' ? shrinkToFit(element) : false;
+    };
+
+    /* The autofit mode of a box ('off' when it has none). */
+    App.text.autofitOf = function autofitOf(element) {
+        const mode = element.getAttribute('data-autofit');
+        return AUTOFIT_LABELS[mode] ? mode : 'off';
+    };
+
+    /* The action switching a box to autofit `mode` (fitting it at once), or null if it has that mode already. */
+    App.text.autofitAction = function autofitAction(element, mode) {
+        if (!AUTOFIT_LABELS[mode] || App.text.autofitOf(element) === mode && element.hasAttribute('data-autofit')) {
+            return null;
+        }
+        return {
+            label: AUTOFIT_LABELS[mode],
+            run: () => {
+                element.setAttribute('data-autofit', mode);
+                if (mode !== 'shrink') {
+                    element.style.removeProperty('--autofit-scale');
+                }
+                App.text.fitText(element);
+            },
+        };
     };
 
     /* A data-autofit="resize" box takes exactly the height of its text. Returns true if it changed. */
@@ -2683,7 +2757,7 @@
         if (element.isConnected) {
             detachFromElement(element);
             App.text.normalize(element);
-            App.text.fitHeight(element);
+            App.text.fitText(element);
             element.blur();
             state.doc.getSelection().removeAllRanges();
             const keepSelected = !options || options.select !== false;
@@ -2781,7 +2855,7 @@
                 event.preventDefault();   // typed here by insertStyled instead, with the chosen formatting
                 insertStyled(editing.element, caret.focus, event.data, pending.styles);
                 pending = null;
-                if (App.text.fitHeight(editing.element)) {
+                if (App.text.fitText(editing.element)) {
                     App.selection.refresh();
                 }
             }
@@ -2841,7 +2915,7 @@
                 runInEditor(format);   // its own undo step, after the typed "- "
             }
         }
-        if (App.text.fitHeight(element)) {
+        if (App.text.fitText(element)) {
             App.selection.refresh();
         }
     }
@@ -2992,7 +3066,7 @@
             applying = false;
         }
         meta.caretAfter = App.text.getCaret(element);
-        if (App.text.fitHeight(element)) {
+        if (App.text.fitText(element)) {
             App.selection.refresh();
         }
     }
@@ -3071,7 +3145,7 @@
     function runOnBox(element, action) {
         App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, () => {
             App.text.runAction(element, action);
-            App.text.fitHeight(element);
+            App.text.fitText(element);
         });
         App.selection.refresh();
     }

@@ -1416,3 +1416,64 @@ test('format painter: values the target box already has are not repeated on the 
     assertEqual(box.el.firstElementChild.innerHTML, 'Alfa <span style="font-size: 20pt;"><b>Beta</b></span>');
     box.frame.remove();
 });
+
+// ---------------------------------------------------------------
+// Autofit (SPEC Phase 3): data-autofit="shrink|resize|off"
+// ---------------------------------------------------------------
+
+async function autofitBox(lineCount, autofit) {
+    const lines = [];
+    for (let i = 0; i < lineCount; i++) {
+        lines.push('<p data-list="bullet" data-level="1">Linha ' + (i + 1) + ' com algum texto</p>');
+    }
+    const frame = await renderedBox(App.text.deckTextCss(), lines.join(''), 'width: 300px; height: 120px; font-size: 20pt; line-height: 1.2;');
+    const el = frame.contentDocument.querySelector('.el');
+    if (autofit) {
+        el.setAttribute('data-autofit', autofit);
+    }
+    return { frame: frame, el: el };
+}
+
+test('autofit: the text stylesheet shrinks the lines of a "shrink" box by its --autofit-scale', () => {
+    assertIncludes(App.text.deckTextCss(), '.el[data-autofit="shrink"] > p { zoom: var(--autofit-scale, 1); }');
+});
+
+test('autofit: shrink scales the text down until it fits the box, and back to 100% when it fits again', async () => {
+    const box = await autofitBox(6, 'shrink');
+    assert(box.el.scrollHeight > box.el.clientHeight, 'it overflows at first');
+    assertEqual(App.text.fitText(box.el), true);
+    const scale = parseFloat(box.el.style.getPropertyValue('--autofit-scale'));
+    assert(scale > 0.3 && scale < 1, 'scaled down: ' + scale);
+    assert(box.el.scrollHeight <= box.el.clientHeight + 1, 'now it fits');
+    assertEqual(String(scale), scale.toFixed(2).replace(/0+$/, '').replace(/\.$/, ''), 'two decimals at most');
+    while (box.el.children.length > 1) {   // one line (two on screen: it wraps) fits
+        box.el.lastElementChild.remove();
+    }
+    App.text.fitText(box.el);
+    assertEqual(box.el.style.getPropertyValue('--autofit-scale'), '', 'fits again: no scale');
+    box.frame.remove();
+});
+
+test('autofit: "resize" grows the box; "off" (or none) leaves box and text alone', async () => {
+    let box = await autofitBox(6, 'resize');
+    App.text.fitText(box.el);
+    assert(parseFloat(box.el.style.height) > 120 && box.el.scrollHeight <= box.el.clientHeight + 1, 'grown: ' + box.el.style.height);
+    box.frame.remove();
+    box = await autofitBox(6, 'off');
+    assertEqual(App.text.fitText(box.el), false);
+    assertEqual([box.el.style.height, box.el.style.getPropertyValue('--autofit-scale')], ['120px', '']);
+    box.frame.remove();
+});
+
+test('autofit: autofitAction switches the mode and fits at once; leaving shrink drops the scale', async () => {
+    const box = await autofitBox(6, null);
+    let action = App.text.autofitAction(box.el, 'shrink');
+    assertEqual(action.label, 'Shrink text on overflow');
+    action.run();
+    assertEqual(box.el.getAttribute('data-autofit'), 'shrink');
+    assert(box.el.style.getPropertyValue('--autofit-scale') !== '', 'scaled');
+    App.text.autofitAction(box.el, 'off').run();
+    assertEqual([box.el.getAttribute('data-autofit'), box.el.style.getPropertyValue('--autofit-scale')], ['off', '']);
+    assertEqual(App.text.autofitAction(box.el, 'off'), null, 'already off: nothing to do');
+    box.frame.remove();
+});

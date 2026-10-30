@@ -113,7 +113,7 @@ Nested bullets are the top priority of this phase.
 - [x] Toolbar: align left / center / right / justify *(Ctrl+L / E / R / J while a text box is selected or edited)*
 - [x] Line spacing and paragraph spacing *(PowerPoint's 1.0 … 3.0, stored as line-height × 1.2; space before / after in pt)*
 - [x] Format painter (copy the style of one text, apply to another) *(Home > Clipboard; the look of the character at the cursor or of the selected box; paints a mouse selection, the word clicked in, or a whole box clicked; whole lines also get alignment and spacing; double-click keeps it on, Esc stops; works across slides)*
-- [ ] Autofit (`data-autofit="shrink|resize|off"`): shrink text to fit, or grow the box; new boxes `resize`, imported boxes `off`
+- [x] Autofit (`data-autofit="shrink|resize|off"`): shrink text to fit, or grow the box; new boxes `resize`, imported boxes `off` *(Format pane > Text box > Autofit; shrink = CSS `zoom` on the lines by `--autofit-scale`, measured by the editor and saved with the deck; refits while typing and when the box is resized)*
 - [x] Spell check in Portuguese (`spellcheck="true"`, `lang="pt-BR"`)
 - [ ] Find & replace across all slides
 
@@ -168,6 +168,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Paste: copy a 3-level bulleted list in Word (or Outlook), type into a text box, Ctrl+V: three levels of bullets, bold kept, Word's font/size/colour gone; Ctrl+Z undoes the whole paste; Ctrl+Shift+V pastes the same as plain lines. Also try a list from Copilot's chat and from a web page; after a paste, the small button under it switches to "Keep text only" and back
   - [ ] Copy: select two bullets of a deck (one with bold), Ctrl+C, paste into a new Outlook e-mail: two bullets, bold kept, same font and colour; paste into another text box of the deck: same look; Ctrl+X removes them, Ctrl+Z brings them back
   - [ ] Format painter: click a slide title, Home > Format painter, click a bulleted box: its text now looks like the title (one Ctrl+Z undoes it). In a text, bold a word, click inside it, Format painter, click inside another word: that word is bold. Double-click Format painter, click three words, Esc: the painter stops, typing goes on
+  - [ ] Autofit: select a bulleted box, Format pane > Text box: "Do not autofit"; type many lines until they spill out of the box; choose "Shrink text on overflow": the text gets smaller to fit (the pane says "Text shrunk to N%"); drag the box taller: the text grows back; choose "Resize shape to fit text": the box grows instead; save, open the saved file on its own: the shrunk text looks the same
   - [x] Capture real clipboard fixtures: open `tests/clipboard-capture.html` in Edge, copy a list from Word, Outlook, PowerPoint and Copilot (keep "fake letters" on), save each into `tests/fixtures/clipboard/` and list it in `tests/run-tests.html`
 
 ## Phase 4: Tables

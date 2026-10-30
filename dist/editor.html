@@ -3919,11 +3919,17 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (text === '') {
             return [];
         }
-        return text.split('\n').map((line) => ({
-            list: null, level: null, start: null, plain: true,
-            runs: line === '' ? [] : [{ text: line.replace(/\t/g, ' '), formats: new Set(), styles: {}, href: null, shown: null }],
-        }));
+        return text.split('\n').map((line) => {
+            const clean = line.replace(LIST_SYMBOL_RE, '').replace(/\t/g, ' ');
+            return { list: null, level: null, start: null, plain: true,
+                runs: clean === '' ? [] : [{ text: clean, formats: new Set(), styles: {}, href: null, shown: null }] };
+        });
     }
+
+    // Word's plain text starts list lines with its bullet symbol and a tab ("•\tText", "o\tText", a
+    // Symbol/Wingdings character from U+F000-U+F0FF that other fonts show as an empty box). Numbers
+    // ("1.\t", "a.\t") stay: they mean something.
+    const LIST_SYMBOL_RE = /^[ \u00a0]*[\u2022\u00b7\u25aa\u25cf\u25e6\u25a0\u2013\u2023\u00a7o\uf000-\uf0ff][ \u00a0]*\t/;
 
     /* The look of the text at position o (the character before it, else after it, else the line's own). */
     function lookAt(line, runs, o) {

@@ -1352,3 +1352,14 @@ test('formatting: styleState of a selected box with an empty line or a line brea
     assertEqual([state.bold, state.fontSize], [false, 20]);
     box.frame.remove();
 });
+
+test('paste as plain text (real capture): Word’s bullet symbols and tabs are not pasted as text', async () => {
+    assertEqual((await pasted(['p1:|'], '3-level-bullet-word', 'plain')).lines, ['p1:Aaaaaaaaaaa', 'p1:Aaaa', 'p1:Aaa|']);
+    assertEqual((await pasted(['b1:|'], '3-level-bullet-word', 'plain')).lines, ['b1:Aaaaaaaaaaa', 'b1:Aaaa', 'b1:Aaa|'],
+        'into a bullet: one bullet each, the editor’s');
+});
+
+test('paste as plain text: numbers stay (they mean something), a tab after them becomes a space', async () => {
+    assertEqual((await pasted(['p1:|'], { html: '', text: '1.\tUm\r\na.\tDois\r\n•\tTrês\r\no\tQuatro' }, 'plain')).lines,
+        ['p1:1. Um', 'p1:a. Dois', 'p1:Três', 'p1:Quatro|']);
+});

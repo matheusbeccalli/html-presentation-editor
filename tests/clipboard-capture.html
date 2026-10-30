@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<!--
+  clipboard-capture.html - saves what a program really puts on the clipboard,
+  as a test fixture for paste (SPEC Phase 3, "Paste into text").
+
+  Open this file in Edge, copy some text in Word / Outlook / PowerPoint /
+  Copilot / a web page, click the paste area and press Ctrl+V. The page shows
+  every format on the clipboard (text/html, text/plain …) and saves them as a
+  .js file for tests/fixtures/clipboard/ (add it to tests/run-tests.html).
+
+  Confidential text: "Replace the text with fake letters" is on by default. It
+  swaps every letter and digit in the text (never in tags, styles or comments)
+  for a fake one of the same kind, so the structure (lists, levels, bold …)
+  stays and the words are gone. Check the preview before saving.
+
+  Python comparison: like a small Flask page that dumps request.files, but it
+  runs in the browser with no server.
+-->
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Clipboard capture</title>
+    <style>
+        body { font-family: "Segoe UI", Arial, sans-serif; margin: 24px; color: #222; max-width: 1100px; }
+        h1 { font-size: 20px; margin: 0 0 8px; }
+        #paste-area { border: 2px dashed #b7472a; border-radius: 8px; padding: 28px; text-align: center; color: #8f3720; }
+        #paste-area:focus { outline: none; background: #f6e3dd; }
+        .row { display: flex; gap: 12px; align-items: center; margin: 12px 0; flex-wrap: wrap; }
+        label { font-size: 14px; }
+        input[type=text] { padding: 4px 6px; width: 220px; }
+        button { padding: 6px 14px; }
+        h2 { font-size: 15px; margin: 18px 0 4px; }
+        pre { white-space: pre-wrap; word-break: break-all; background: #f3f2f1; padding: 8px; max-height: 260px;
+              overflow: auto; font-size: 12px; }
+        .warning { background: #fff4ce; padding: 8px 12px; border-radius: 4px; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>Clipboard capture</h1>
+    <p class="warning">Real decks and documents are confidential. Keep "Replace the text with fake letters" on, and read
+        the preview below before saving. Only commit fixtures whose text is fake.</p>
+    <div id="paste-area" tabindex="0">Click here and press Ctrl+V</div>
+    <div class="row">
+        <label><input type="checkbox" id="fake" checked> Replace the text with fake letters</label>
+        <label>Name <input type="text" id="name" placeholder="word-3-level-bullets"></label>
+        <label>Copied from <input type="text" id="source" placeholder="Word 365 on Windows"></label>
+        <button id="save" disabled>Save fixture</button>
+    </div>
+    <div id="formats"></div>
+
+    <script>
+        'use strict';
+
+        let captured = null;   // { type: data } as pasted
+
+        /* A fake letter of the same kind: 'a' for lower case, 'A' for upper, '0' for digits (accents too). */
+        function fakeText(text) {
+            return text.replace(/[\p{Ll}]/gu, 'a').replace(/[\p{Lu}\p{Lt}]/gu, 'A').replace(/\p{N}/gu, '0');
+        }
+
+        /*
+         * Fake the text of an HTML string without touching its markup: tags,
+         * comments (Word's <![if …]> too), <style> blocks and entities (&nbsp;)
+         * stay exactly as they were.
+         */
+        function fakeHtml(html) {
+            const parts = html.split(/(<style[\s\S]*?<\/style>|<!--[\s\S]*?-->|<[^>]*>|&[#a-zA-Z0-9]+;)/i);
+            return parts.map((part, index) => (index % 2 === 1 ? part : fakeText(part))).join('');
+        }
+
+        function shown(type, data) {
+            return document.getElementById('fake').checked && /^text\//.test(type)
+                ? (type === 'text/html' ? fakeHtml(data) : fakeText(data)) : data;
+        }
+
+        function render() {
+            const box = document.getElementById('formats');
+            box.innerHTML = '';
+            Object.keys(captured).forEach((type) => {
+                const heading = document.createElement('h2');
+                heading.textContent = type + ' (' + captured[type].length + ' characters)';
+                const pre = document.createElement('pre');
+                pre.textContent = shown(type, captured[type]);
+                box.append(heading, pre);
+            });
+        }
+
+        document.addEventListener('paste', (event) => {
+            event.preventDefault();
+            captured = {};
+            Array.from(event.clipboardData.types).forEach((type) => {
+                if (type !== 'Files') {
+                    captured[type] = event.clipboardData.getData(type);
+                }
+            });
+            document.getElementById('save').disabled = false;
+            render();
+        });
+        document.getElementById('fake').addEventListener('change', () => captured && render());
+
+        document.getElementById('save').addEventListener('click', () => {
+            const name = (document.getElementById('name').value.trim() || 'capture').replace(/[^\w-]+/g, '-');
+            const types = {};
+            Object.keys(captured).forEach((type) => { types[type] = shown(type, captured[type]); });
+            const fixture = {
+                name: name,
+                source: document.getElementById('source').value.trim(),
+                captured: new Date().toISOString().slice(0, 10),
+                browser: navigator.userAgent,
+                fakeText: document.getElementById('fake').checked,
+                types: types,
+            };
+            const text = '// Clipboard fixture captured with tests/clipboard-capture.html (fake text).\n' +
+                'CLIPBOARD_FIXTURES.push(' + JSON.stringify(fixture, null, 2) + ');\n';
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+            link.download = name + '.js';
+            link.click();
+            URL.revokeObjectURL(link.href);
+        });
+    </script>
+</body>
+</html>

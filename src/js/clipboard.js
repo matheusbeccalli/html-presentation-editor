@@ -6,8 +6,8 @@
  * inert document. Each source has its own way of writing lists:
  *   - Word and Outlook: <p style="mso-list:l0 level2 lfo1"> with the bullet
  *     glyph in a <span style="mso-list:Ignore"> (removed);
- *   - PowerPoint: a glyph span (mso-special-format:bullet) and only the indent
- *     to tell the level;
+ *   - PowerPoint: <div>s starting with a glyph span (mso-special-format:bullet);
+ *     levels 2, 3 … have class O1, O2 … (else the indents tell the level);
  *   - Copilot's chat and web pages: real nested <ul>/<ol>/<li>;
  *   - the editor itself: marked with data-deck-editor="text"; its theme fonts
  *     and colours come back as var(--…) (see App.text.copyHtml).
@@ -29,6 +29,7 @@
     const WORD_LEVEL_RE = /mso-list:\s*l\d+\s+level(\d+)/i;
     const GLYPH_STYLE_RE = /mso-list:\s*ignore|mso-special-format|position:\s*absolute/i;
     const NUMBER_GLYPH_RE = /^\(?(\d+|[a-z]{1,4})[.)]$/i;
+    const POWERPOINT_LEVEL_RE = /(?:^|\s)O(\d)(?:\s|$)/;
 
     /* A length from a style attribute in pt (in, cm, mm, px, pt), or null. */
     function points(value) {
@@ -87,10 +88,12 @@
             const special = specialHost ? rawStyle(specialHost, 'mso-special-format') : '';
             const isNumber = /^num/i.test(special) || NUMBER_GLYPH_RE.test(mark);
             const word = WORD_LEVEL_RE.exec(paragraph.getAttribute('style') || '');
+            const outline = POWERPOINT_LEVEL_RE.exec(paragraph.getAttribute('class') || '');
             items.push({
                 paragraph: paragraph, list: isNumber ? 'number' : 'bullet',
                 number: isNumber && /^\(?\d+/.test(mark) ? parseInt(mark.replace('(', ''), 10) : null,
                 level: word ? parseInt(word[1], 10) : null,
+                outline: outline ? parseInt(outline[1], 10) + 1 : 1,
                 indent: points(rawStyle(paragraph, 'margin-left')) || 0,
             });
             glyph.remove();
@@ -102,9 +105,11 @@
             }
         });
         indents.sort((a, b) => a - b);
+        // PowerPoint names levels 2, 3 … with class O1, O2 …: then that decides, even for lines copied without level 1.
+        const hasOutline = items.some((item) => item.outline > 1);
         const counters = [];
         items.forEach((item) => {
-            const level = Math.min(5, item.level !== null ? item.level
+            const level = Math.min(5, item.level !== null ? item.level : hasOutline ? item.outline
                 : indents.findIndex((indent) => Math.abs(indent - item.indent) < 2) + 1);
             item.paragraph.setAttribute('data-list', item.list);
             item.paragraph.setAttribute('data-level', String(level));

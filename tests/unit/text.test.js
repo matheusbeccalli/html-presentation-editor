@@ -1193,10 +1193,29 @@ test('paste: Outlook keeps its bullets and links', async () => {
     assertEqual(result.html[1], 'Ver o <a href="https://example.com/modelo">modelo</a>');
 });
 
-test('paste: PowerPoint bullets get their levels from the indents', async () => {
-    const result = await pasted(['p1:|'], 'powerpoint-bullets');
-    assertEqual(result.lines, ['b1:Mercado em expansão', 'b2:Sul e Sudeste', 'b3:Capitais', 'b1:Margem estável|']);
-    assertEqual(result.html[1], 'Sul e <b>Sudeste</b>');
+test('paste (real capture): PowerPoint bullets in three levels, bold kept, highlight and colour dropped', async () => {
+    const result = await pasted(['p1:|'], '3-level-bullet-powerpoint');
+    assertEqual(result.lines, ['b1:Aaaa aaaaaa', 'b2:Aaa', 'b3:aaaa|']);
+    assertEqual(result.html[0], '<b>Aaaa </b>aaaaaa');
+});
+
+test('paste (real capture): PowerPoint lines copied from level 2 keep their levels (class O1 = level 2)', async () => {
+    const html = clipboardFixture('3-level-bullet-powerpoint').types['text/html'];
+    const withoutFirst = html.replace(/<div style=[^>]*>[\s\S]*?<\/div>/, '');   // the level-1 line (the only one without a class)
+    assertEqual((await pasted(['p1:|'], { html: withoutFirst, text: 'x' })).lines, ['b2:Aaa', 'b3:aaaa|']);
+});
+
+test('paste (real capture): PowerPoint formatted text: bold kept, Aptos 18pt, black and yellow dropped', async () => {
+    const result = await pasted(['p1:|'], 'formatted-text-powerpoint');
+    assertEqual(result.html, ['<b>Aaaa </b>aaaaaa']);
+});
+
+test('paste (real capture): Word bullets in three levels', async () => {
+    assertEqual((await pasted(['p1:|'], '3-level-bullet-word')).lines, ['b1:Aaaaaaaaaaa', 'b2:Aaaa', 'b3:Aaa|']);
+});
+
+test('paste (real capture): Word formatted text: red and highlight dropped', async () => {
+    assertEqual((await pasted(['p1:|'], 'formatted-text-word')).html, ['aaaaaaaaaaa']);
 });
 
 test('paste: Copilot’s chat (nested lists, a heading in bold)', async () => {

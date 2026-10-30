@@ -11,7 +11,8 @@
   Confidential text: "Replace the text with fake letters" is on by default. It
   swaps every letter and digit in the text (never in tags, styles or comments)
   for a fake one of the same kind, so the structure (lists, levels, bold …)
-  stays and the words are gone. Check the preview before saving.
+  stays and the words are gone. It also replaces the Windows user name in the
+  temporary file paths Word writes (C:/Users/<name>/…). Check the preview before saving.
 
   Python comparison: like a small Flask page that dumps request.files, but it
   runs in the browser with no server.
@@ -65,7 +66,12 @@
          */
         function fakeHtml(html) {
             const parts = html.split(/(<style[\s\S]*?<\/style>|<!--[\s\S]*?-->|<[^>]*>|&[#a-zA-Z0-9]+;)/i);
-            return parts.map((part, index) => (index % 2 === 1 ? part : fakeText(part))).join('');
+            return withoutUserName(parts.map((part, index) => (index % 2 === 1 ? part : fakeText(part))).join(''));
+        }
+
+        /* Word writes temporary file paths with the Windows user name (C:/Users/<name>/AppData/…): not in a fixture. */
+        function withoutUserName(text) {
+            return text.replace(/([\\/]Users[\\/])[^\\/"'<>]+([\\/])/gi, '$1user$2');
         }
 
         function shown(type, data) {

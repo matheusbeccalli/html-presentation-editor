@@ -770,7 +770,8 @@ def test_clipboard_capture_page(browser):
     """tests/clipboard-capture.html saves every clipboard format, with the text replaced by fake letters."""
     page = browser.new_page(accept_downloads=True)
     page.goto((Path(__file__).parent / "clipboard-capture.html").as_uri())
-    html = ("<style>p.MsoNormal{font-family:\"Calibri\"}</style><!--StartFragment-->"
+    html = ("<link rel=File-List href=\"file:///C:/Users/maria.silva/AppData/Local/Temp/msohtmlclip1/01/clip_filelist.xml\">"
+            "<style>p.MsoNormal{font-family:\"Calibri\"}</style><!--StartFragment-->"
             "<p class=MsoNormal style='mso-list:l0 level1 lfo1'><![if !supportLists]><span style='mso-list:Ignore'>1."
             "<span>&nbsp;</span></span><![endif]><b>Receita</b> São Paulo 2025</p>")
     page.evaluate("""([html, text]) => {
@@ -789,8 +790,9 @@ def test_clipboard_capture_page(browser):
     start = content.index("CLIPBOARD_FIXTURES.push(") + len("CLIPBOARD_FIXTURES.push(")
     fixture = json.loads(content[start:content.rindex(")")])
     faked = fixture["types"]["text/html"]
-    check(faked == html.replace("1.", "0.").replace("Receita", "Aaaaaaa").replace("São Paulo 2025", "Aaa Aaaaa 0000"),
-          f"only the text is faked, the markup is untouched: {faked}")
+    check(faked == html.replace("1.", "0.").replace("Receita", "Aaaaaaa").replace("São Paulo 2025", "Aaa Aaaaa 0000")
+          .replace("Users/maria.silva/", "Users/user/"),
+          f"only the text and the Windows user name are faked, the markup is untouched: {faked}")
     check(fixture["types"]["text/plain"] == "Aaaaaaa Aaa Aaaaa 0000", f"plain text faked: {fixture['types']['text/plain']}")
     check(fixture["fakeText"] is True, "the fixture says its text is fake")
     page.close()

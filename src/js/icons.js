@@ -41,6 +41,11 @@
         growFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 7l2-2.5L18 7"/>',
         shrinkFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 4.5l2 2.5 2-2.5"/>',
         clearFormatting: '<path d="M5 4.5h10M10 4.5l-3 11"/><path d="M12 12l5 5M17 12l-5 5"/>',
+        alignLeft: '<path d="M3 4.5h14M3 8.5h9M3 12.5h14M3 16.5h9"/>',
+        alignCenter: '<path d="M3 4.5h14M5.5 8.5h9M3 12.5h14M5.5 16.5h9"/>',
+        alignRight: '<path d="M3 4.5h14M8 8.5h9M3 12.5h14M8 16.5h9"/>',
+        alignJustify: '<path d="M3 4.5h14M3 8.5h14M3 12.5h14M3 16.5h14"/>',
+        lineSpacing: '<path d="M9 4.5h8.5M9 8.5h8.5M9 12.5h8.5M9 16.5h8.5"/><path d="M2.5 6L4.5 3.5 6.5 6M2.5 14l2 2.5 2-2.5M4.5 3.5v13"/>',
         bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
             '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
         numbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M2.8 12.2a1.6 1.6 0 1 1 2.6 1.2l-2.6 2.6h3.4"/>' +

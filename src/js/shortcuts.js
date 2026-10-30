@@ -212,6 +212,12 @@
         ['Ctrl+I', 'italic', { whileTyping: true }],
         // Ctrl+U would otherwise show the page source.
         ['Ctrl+U', 'underline', { whileTyping: true, blockBrowserDefault: true }],
+        // Alignment, as in PowerPoint. With no text box selected they stay the browser's
+        // (Ctrl+R reloads, Ctrl+L goes to the address bar …).
+        ['Ctrl+L', 'alignLeft', { whileTyping: true }],
+        ['Ctrl+E', 'alignCenter', { whileTyping: true }],
+        ['Ctrl+R', 'alignRight', { whileTyping: true }],
+        ['Ctrl+J', 'alignJustify', { whileTyping: true }],
         // Font size: Ctrl+] / Ctrl+[ and, as in PowerPoint, Ctrl+Shift+> / Ctrl+Shift+<.
         ['Ctrl+]', 'growFont', { whileTyping: true }],
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],

@@ -33,13 +33,15 @@
                 {
                     label: 'Paragraph',
                     rows: [[['bullets', 'bullets'], ['numbering', 'numbering'], ['decreaseIndent', 'outdent'],
-                        ['increaseIndent', 'indent']],
-                    [['restartNumbering', 'restartNumbering'], ['continueNumbering', 'continueNumbering']]],
+                        ['increaseIndent', 'indent'], ['restartNumbering', 'restartNumbering'],
+                        ['continueNumbering', 'continueNumbering']],
+                    [['alignLeft', 'alignLeft'], ['alignCenter', 'alignCenter'], ['alignRight', 'alignRight'],
+                        ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }]],
                 },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
-            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). ' +
-                'Double-click a text box (or press Enter) to type in it; Esc stops typing. The Paragraph buttons work on the selected lines, or on the whole text box.',
+            note: 'Double-click a text box (or press Enter) to type in it; Esc stops typing. ' +
+                'With a box selected, Font and Paragraph change all its text.',
         },
         {
             id: 'insert', label: 'Insert',
@@ -116,7 +118,7 @@
             if (group.rows) {
                 buttonsNode = el('div', { class: 'ribbon-rows' }, group.rows.map((row) =>
                     el('div', { class: 'ribbon-row' }, row.map((item) => (item.control
-                        ? App.fontControls.create(item.control) : commandButton(item[0], item[1], true))))));
+                        ? App.textControls.create(item.control) : commandButton(item[0], item[1], true))))));
             } else {
                 buttonsNode = el('div', { class: 'ribbon-group-buttons' });
                 group.commands.forEach(([command, icon]) => buttonsNode.appendChild(commandButton(command, icon)));
@@ -125,7 +127,7 @@
             panel.appendChild(groupNode);
         });
         if (tab.note) {
-            panel.appendChild(el('div', { class: 'ribbon-note' }, [tab.note]));
+            panel.appendChild(el('div', { class: 'ribbon-note', title: tab.note }, [tab.note]));
         }
         App.ribbon.refresh();
     }
@@ -226,6 +228,6 @@
                 button.setAttribute('aria-pressed', checked ? 'true' : 'false');
             }
         });
-        App.fontControls.refresh();
+        App.textControls.refresh();
     };
 })();

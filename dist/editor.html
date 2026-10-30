@@ -201,12 +201,12 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .ribbon-button-label { font-size: 12px; white-space: nowrap; }
 .ribbon-rows { display: flex; flex-direction: column; gap: 2px; }
 .ribbon-row { display: flex; gap: 2px; align-items: center; }
-.ribbon-button.small { min-width: 0; padding: 3px; }
+.ribbon-button.small { min-width: 0; padding: 2px; }
 .ribbon-button.small .icon { width: 20px; height: 20px; }
 
-/* Home > Font: the font list and the size box (fontcontrols.js). */
+/* Home > Font: the font list and the size box (textcontrols.js). */
 .font-family-button, .font-size-box {
-    display: flex; align-items: center; height: 28px;
+    display: flex; align-items: center; height: 26px;
     border: 1px solid var(--border); border-radius: 3px; background: var(--surface);
 }
 .font-family-button { width: 168px; gap: 4px; padding: 0 4px 0 6px; cursor: pointer; text-align: left; }
@@ -221,7 +221,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .font-size-menu { width: 64px; }
 .font-family-menu .menu-item, .font-size-menu .menu-item { padding: 5px 10px; }
 
-/* Font color / Highlight split buttons and their colour lists (fontcontrols.js). */
+/* Font color / Highlight split buttons and their colour lists (textcontrols.js). */
 .color-split { display: flex; align-items: stretch; }
 .color-main { position: relative; padding-bottom: 6px; }
 .color-bar { position: absolute; left: 4px; right: 4px; bottom: 2px; height: 4px; border: 1px solid rgba(0, 0, 0, 0.15); }
@@ -236,9 +236,16 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .color-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 4px; padding: 0 6px 6px; }
 .color-swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 2px; cursor: pointer; }
 .color-swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.line-spacing-button { flex-direction: row; gap: 1px; }
+.line-spacing-menu { width: 200px; }
+.line-spacing-menu .menu-item[aria-checked="true"] { font-weight: 600; background: var(--accent-soft); }
+.space-field { display: flex; align-items: center; gap: 6px; padding: 4px 10px; }
+.space-field span:first-child { flex: 1; }
+.space-field input { width: 48px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
 .color-picker-input { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; }
 .ribbon-note {
-    align-self: center; max-width: 560px; padding: 0 14px;
+    /* At most four lines, so a narrow window never makes the ribbon taller (the tooltip has it all). */
+    align-self: center; max-width: 560px; max-height: 68px; overflow: hidden; padding: 0 14px;
     color: var(--text-muted); font-size: 12px; line-height: 1.4;
 }
 
@@ -1208,6 +1215,12 @@ App.createEventBus = function createEventBus() {
         ['Ctrl+I', 'italic', { whileTyping: true }],
         // Ctrl+U would otherwise show the page source.
         ['Ctrl+U', 'underline', { whileTyping: true, blockBrowserDefault: true }],
+        // Alignment, as in PowerPoint. With no text box selected they stay the browser's
+        // (Ctrl+R reloads, Ctrl+L goes to the address bar …).
+        ['Ctrl+L', 'alignLeft', { whileTyping: true }],
+        ['Ctrl+E', 'alignCenter', { whileTyping: true }],
+        ['Ctrl+R', 'alignRight', { whileTyping: true }],
+        ['Ctrl+J', 'alignJustify', { whileTyping: true }],
         // Font size: Ctrl+] / Ctrl+[ and, as in PowerPoint, Ctrl+Shift+> / Ctrl+Shift+<.
         ['Ctrl+]', 'growFont', { whileTyping: true }],
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
@@ -3347,6 +3360,65 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     // ---------------------------------------------------------------
+    // Paragraph formatting
+    // ---------------------------------------------------------------
+    //
+    // Alignment, line spacing and space before / after go on the selected lines'
+    // own <p> style (text-align, line-height, margin-top, margin-bottom), or on
+    // every line of a selected box. Enter copies them to the new line.
+
+    const ALIGN_LABELS = { left: 'Align left', center: 'Center', right: 'Align right', justify: 'Justify' };
+    const PARAGRAPH_LABELS = { 'line-height': 'Line spacing', 'margin-top': 'Space before', 'margin-bottom': 'Space after' };
+
+    /* The action setting `property` to `value` on the selected lines (every line without a caret). */
+    App.text.paragraphAction = function paragraphAction(element, property, value, caret) {
+        const lines = textLines(element);
+        const label = property === 'text-align' ? ALIGN_LABELS[value] : PARAGRAPH_LABELS[property];
+        if (lines.length === 0 || !label) {
+            return null;
+        }
+        const { first, last } = selectedRange(element, caret);
+        return {
+            label: label,
+            run: () => {
+                lines.slice(first, last + 1).forEach((line) => line.style.setProperty(property, value));
+                return caret;
+            },
+        };
+    };
+
+    /*
+     * The selected lines' { align, lineHeight (a multiple of the font size),
+     * spaceBefore, spaceAfter (pt) }, as the browser shows them; null where
+     * the lines differ.
+     */
+    App.text.paragraphState = function paragraphState(element, caret) {
+        const view = element.ownerDocument.defaultView;
+        const { first, last } = selectedRange(element, caret);
+        const lines = textLines(element).slice(first, last + 1);
+        if (!view || lines.length === 0) {
+            return { align: null, lineHeight: null, spaceBefore: null, spaceAfter: null };
+        }
+        const round = (number) => (isNaN(number) ? null : Math.round(number * 100) / 100);
+        const looks = lines.map((line) => {
+            const computed = view.getComputedStyle(line);
+            const align = { start: 'left', end: 'right', '-webkit-left': 'left', '-webkit-center': 'center',
+                '-webkit-right': 'right' }[computed.textAlign] || computed.textAlign;
+            return {
+                align: align,
+                lineHeight: round(parseFloat(computed.lineHeight) / parseFloat(computed.fontSize)),
+                spaceBefore: round(parseFloat(computed.marginTop) * 0.75),
+                spaceAfter: round(parseFloat(computed.marginBottom) * 0.75),
+            };
+        });
+        const state = {};
+        Object.keys(looks[0]).forEach((key) => {
+            state[key] = looks.every((look) => look[key] === looks[0][key]) ? looks[0][key] : null;
+        });
+        return state;
+    };
+
+    // ---------------------------------------------------------------
     // Character formatting
     // ---------------------------------------------------------------
     //
@@ -4217,6 +4289,29 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
         App.selection.refresh();
     }
+
+    /*
+     * Alignment, line spacing or space before / after (paragraphAction) on the
+     * selected lines, the cursor's line, or every line of a selected box.
+     */
+    App.text.applyParagraph = function applyParagraph(property, value) {
+        const target = listTarget();
+        const action = target && App.text.paragraphAction(target.element, property, value, target.caret);
+        if (!action) {
+            return;
+        }
+        if (editing) {
+            runInEditor(action);
+        } else {
+            runOnBox(target.element, action);
+        }
+    };
+
+    /* The selected lines' paragraph look for the ribbon (see paragraphState), or {} without a text box. */
+    App.text.currentParagraphState = function currentParagraphState() {
+        const target = listTarget();
+        return target ? App.text.paragraphState(target.element, target.caret) : {};
+    };
 
     /* Put the focus back into the text being edited (after the size box had it), keeping the selection. */
     App.text.refocus = function refocus() {
@@ -6072,6 +6167,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         growFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 7l2-2.5L18 7"/>',
         shrinkFont: '<path d="M2.5 16.5L7.5 4l5 12.5M4.5 12h6"/><path d="M14 4.5l2 2.5 2-2.5"/>',
         clearFormatting: '<path d="M5 4.5h10M10 4.5l-3 11"/><path d="M12 12l5 5M17 12l-5 5"/>',
+        alignLeft: '<path d="M3 4.5h14M3 8.5h9M3 12.5h14M3 16.5h9"/>',
+        alignCenter: '<path d="M3 4.5h14M5.5 8.5h9M3 12.5h14M5.5 16.5h9"/>',
+        alignRight: '<path d="M3 4.5h14M8 8.5h9M3 12.5h14M8 16.5h9"/>',
+        alignJustify: '<path d="M3 4.5h14M3 8.5h14M3 12.5h14M3 16.5h14"/>',
+        lineSpacing: '<path d="M9 4.5h8.5M9 8.5h8.5M9 12.5h8.5M9 16.5h8.5"/><path d="M2.5 6L4.5 3.5 6.5 6M2.5 14l2 2.5 2-2.5M4.5 3.5v13"/>',
         bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
             '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
         numbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M2.8 12.2a1.6 1.6 0 1 1 2.6 1.2l-2.6 2.6h3.4"/>' +
@@ -9923,7 +10023,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 isChecked: () => !!App.text.currentStyleState()[name],
             });
         });
-        // The font list and size box pass the chosen value (fontcontrols.js).
+        // The font list and size box pass the chosen value (textcontrols.js).
         App.commands.define('setFontFamily', {
             label: 'Font', keepsEdit: true, run: (value) => App.text.applyStyle('font-family', value),
             isEnabled: () => App.text.canStyle(),
@@ -9935,7 +10035,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Font color / Highlight: the split button applies its current colour, its list a chosen one.
         App.commands.define('fontColor', {
             label: 'Font color', keepsEdit: true, isEnabled: () => App.text.canStyle(),
-            run: () => App.text.applyStyle('color', App.fontControls.currentColor('color')),
+            run: () => App.text.applyStyle('color', App.textControls.currentColor('color')),
         });
         App.commands.define('setFontColor', {
             label: 'Font color', keepsEdit: true, run: (value) => App.text.applyStyle('color', value),
@@ -9943,7 +10043,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
         App.commands.define('highlight', {
             label: 'Text highlight color', keepsEdit: true, isEnabled: () => App.text.canStyle(),
-            run: () => App.text.applyStyle('background-color', App.fontControls.currentColor('background-color')),
+            run: () => App.text.applyStyle('background-color', App.textControls.currentColor('background-color')),
         });
         App.commands.define('setHighlight', {
             label: 'Text highlight color', keepsEdit: true, run: (value) => App.text.applyStyle('background-color', value),
@@ -9960,6 +10060,23 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('clearFormatting', {
             label: 'Clear formatting', keepsEdit: true, run: () => App.text.applyStyle('clear'),
             isEnabled: () => App.text.canStyle(),
+        });
+        // Paragraph formatting (Home > Paragraph): alignment works like radio buttons.
+        [['alignLeft', 'Align left', 'left'], ['alignCenter', 'Center', 'center'], ['alignRight', 'Align right', 'right'],
+         ['alignJustify', 'Justify', 'justify']].forEach(([name, label, align]) => {
+            App.commands.define(name, {
+                label: label, keepsEdit: true, run: () => App.text.applyParagraph('text-align', align),
+                isEnabled: () => App.text.canStyle(),
+                isChecked: () => App.text.currentParagraphState().align === align,
+            });
+        });
+        // The line spacing list passes the CSS value (textcontrols.js).
+        [['setLineSpacing', 'Line spacing', 'line-height'], ['setSpaceBefore', 'Space before', 'margin-top'],
+         ['setSpaceAfter', 'Space after', 'margin-bottom']].forEach(([name, label, property]) => {
+            App.commands.define(name, {
+                label: label, keepsEdit: true, run: (value) => App.text.applyParagraph(property, value),
+                isEnabled: () => App.text.canStyle(),
+            });
         });
         // The list buttons (Home > Paragraph): the selected lines, or every line of a selected box.
         [['bullets', 'Bullets', 'bullet', () => App.text.toggleList('bullet')],
@@ -10022,10 +10139,11 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
-// ---- js/fontcontrols.js ----
+// ---- js/textcontrols.js ----
 /*
- * fontcontrols.js - the font list, the font size box and the colour buttons
- * of Home > Font (SPEC Phase 3).
+ * textcontrols.js - the ribbon's text controls that show a value or open a
+ * list (SPEC Phase 3): Home > Font's font list, font size box and colour
+ * buttons, and Home > Paragraph's line spacing list.
  *
  * Unlike the other ribbon buttons, these show a value: the font and size of
  * the selected text (blank when the selection mixes them, as in PowerPoint).
@@ -10041,15 +10159,19 @@ App.template.newDeckHtml = function newDeckHtml() {
  *   applies the colour shown under its icon (the last one chosen), the arrow
  *   opens the colours: the deck's theme colours first (stored as
  *   var(--color-…)), then standard colours, and "More colors…".
+ * - Line spacing lists PowerPoint's values (1.0, 1.15 … 3.0) and takes the
+ *   space before / after a paragraph in pt. PowerPoint's single spacing is
+ *   about 1.2 times the font size, so "1.0" is stored as line-height: 1.2.
  *
- * Talks to: commands.js (setFontFamily, setFontSize, setFontColor, setHighlight), text.js (what the
- * selection has), deck.js (the theme fonts), ribbon.js (places the controls).
+ * Talks to: commands.js (setFontFamily, setFontSize, setFontColor, setHighlight,
+ * setLineSpacing, setSpaceBefore, setSpaceAfter), text.js (what the selection
+ * has), deck.js (the theme fonts and colours), ribbon.js (places the controls).
  */
 
 (function () {
     'use strict';
 
-    App.fontControls = {};
+    App.textControls = {};
 
     const el = (...args) => App.util.el(...args);
 
@@ -10076,6 +10198,10 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     // The colour each split button applies: the last one chosen (null = its default).
     const lastColors = { color: null, 'background-color': null };
+
+    // Line spacing as PowerPoint names it; stored as line-height = value x SINGLE_LINE.
+    const LINE_SPACINGS = [1, 1.15, 1.5, 2, 2.5, 3];
+    const SINGLE_LINE = 1.2;
 
     let fontButton = null;
     let sizeInput = null;
@@ -10138,35 +10264,48 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     }
 
+    /* Show `node` as the open list under `anchor`; a press outside it or Esc closes it. */
+    function showMenu(anchor, node) {
+        closeMenu();
+        menu = keepEdit(node);
+        const rect = anchor.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = rect.bottom + 'px';
+        document.body.appendChild(menu);
+        // Near the right edge of the window, the list opens to the left instead.
+        const overflow = menu.getBoundingClientRect().right - (window.innerWidth - 4);
+        if (overflow > 0) {
+            menu.style.left = Math.max(4, rect.left - overflow) + 'px';
+        }
+        window.addEventListener('pointerdown', onOutsidePointerDown, true);
+        window.addEventListener('keydown', onMenuKey, true);
+    }
+
     /*
      * Open a list under `anchor`. items: [{ label, value, style }]; choosing one
      * calls onChoose(value). Its items never take the focus, so the text keeps
      * its cursor and selection.
      */
     function openMenu(anchor, className, items, onChoose) {
-        closeMenu();
-        menu = keepEdit(el('div', { class: 'menu ' + className, role: 'menu' }));
+        const list = el('div', { class: 'menu ' + className, role: 'menu' });
         items.forEach((item) => {
             if (item.separator) {
-                menu.appendChild(el('div', { class: 'menu-separator', role: 'separator' }));
+                list.appendChild(el('div', { class: 'menu-separator', role: 'separator' }));
                 return;
             }
             const button = el('button', {
-                type: 'button', class: 'menu-item', role: 'menuitem',
+                type: 'button', class: 'menu-item', role: item.checked === undefined ? 'menuitem' : 'menuitemradio',
+                'aria-checked': item.checked === undefined ? null : String(item.checked),
                 onmousedown: (event) => event.preventDefault(),
                 onclick: () => {
                     closeMenu();
                     onChoose(item.value);
                 },
             }, [el('span', { class: 'menu-label', style: item.style || null }, [item.label])]);
-            menu.appendChild(button);
+            list.appendChild(button);
         });
-        const rect = anchor.getBoundingClientRect();
-        menu.style.left = rect.left + 'px';
-        menu.style.top = rect.bottom + 'px';
-        document.body.appendChild(menu);
-        window.addEventListener('pointerdown', onOutsidePointerDown, true);
-        window.addEventListener('keydown', onMenuKey, true);
+        showMenu(anchor, list);
+        return list;
     }
 
     function openFontMenu() {
@@ -10198,7 +10337,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         } else if (event.key === 'Escape') {
             event.preventDefault();
             App.text.refocus();
-            App.fontControls.refresh();
+            App.textControls.refresh();
         }
     }
 
@@ -10215,7 +10354,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         sizeInput = keepEdit(el('input', {
             type: 'text', class: 'font-size-input', title: 'Font size', 'aria-label': 'Font size', inputmode: 'decimal',
             onkeydown: onSizeKey,
-            onblur: () => App.fontControls.refresh(),
+            onblur: () => App.textControls.refresh(),
         }));
         const arrow = keepEdit(el('button', {
             type: 'button', class: 'font-size-menu-button', title: 'Font sizes', 'aria-haspopup': 'menu',
@@ -10242,7 +10381,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     /* The colour a split button applies now: the last chosen, else the theme's primary colour / yellow. */
-    App.fontControls.currentColor = function currentColor(property) {
+    App.textControls.currentColor = function currentColor(property) {
         if (lastColors[property] !== null) {
             return lastColors[property];
         }
@@ -10257,7 +10396,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     function chooseColor(property, value) {
         lastColors[property] = value;
         App.commands.run(property === 'color' ? 'setFontColor' : 'setHighlight', value);
-        App.fontControls.refresh();
+        App.textControls.refresh();
     }
 
     function swatch(title, value, property) {
@@ -10273,10 +10412,9 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* The colours of a split button's arrow. */
     function openColorMenu(anchor, property) {
-        closeMenu();
-        menu = keepEdit(el('div', { class: 'menu color-menu ' + (property === 'color' ? 'font-color-menu' : 'highlight-menu'), role: 'menu' }));
+        const list = el('div', { class: 'menu color-menu ' + (property === 'color' ? 'font-color-menu' : 'highlight-menu'), role: 'menu' });
         const section = (label, colors) => {
-            menu.append(el('div', { class: 'color-menu-label' }, [label]),
+            list.append(el('div', { class: 'color-menu-label' }, [label]),
                 el('div', { class: 'color-grid' }, colors.map(([title, value]) => swatch(title, value, property))));
         };
         if (property === 'color') {
@@ -10287,7 +10425,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
             section('Standard colors', STANDARD_COLORS);
         } else {
-            menu.appendChild(el('button', {
+            list.appendChild(el('button', {
                 type: 'button', class: 'menu-item', title: 'No color', onmousedown: (event) => event.preventDefault(),
                 onclick: () => {
                     closeMenu();
@@ -10303,7 +10441,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             App.text.refocus();
             picker.remove();
         });
-        menu.appendChild(el('button', {
+        list.appendChild(el('button', {
             type: 'button', class: 'menu-item', onmousedown: (event) => event.preventDefault(),
             onclick: () => {
                 closeMenu();
@@ -10312,12 +10450,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 picker.click();
             },
         }, [el('span', { class: 'menu-label' }, ['More colors…'])]));
-        const rect = anchor.getBoundingClientRect();
-        menu.style.left = rect.left + 'px';
-        menu.style.top = rect.bottom + 'px';
-        document.body.appendChild(menu);
-        window.addEventListener('pointerdown', onOutsidePointerDown, true);
-        window.addEventListener('keydown', onMenuKey, true);
+        showMenu(anchor, list);
     }
 
     const colorButtons = {};   // property -> { main, arrow, bar }
@@ -10345,8 +10478,59 @@ App.template.newDeckHtml = function newDeckHtml() {
         return el('div', { class: 'color-split' }, [main, arrow]);
     }
 
+    let lineSpacingButton = null;
+
+    /* A space field of the line spacing list: Enter applies the typed pt, then the text gets the focus back. */
+    function spaceField(label, className, command, value) {
+        const input = el('input', {
+            type: 'text', class: className, inputmode: 'decimal', 'aria-label': label + ' (pt)',
+            value: value === null || value === undefined ? '' : String(value),
+            onkeydown: (event) => {
+                if (event.key !== 'Enter') {
+                    return;
+                }
+                event.preventDefault();
+                const points = parseFloat(input.value.replace(',', '.'));
+                if (points >= 0 && points <= 999) {
+                    closeMenu();
+                    App.commands.run(command, points + 'pt').then(() => App.text.refocus());
+                } else {
+                    App.ui.setStatus('Type a space between 0 and 999 pt');
+                }
+            },
+        });
+        return el('label', { class: 'space-field' }, [el('span', {}, [label]), input, el('span', {}, ['pt'])]);
+    }
+
+    function openLineSpacingMenu() {
+        const state = App.text.currentParagraphState();
+        const items = LINE_SPACINGS.map((spacing) => {
+            const css = Math.round(spacing * SINGLE_LINE * 1000) / 1000;
+            return { label: spacing.toFixed(spacing === 1.15 ? 2 : 1), value: String(css), checked: state.lineHeight === css };
+        });
+        const list = openMenu(lineSpacingButton, 'line-spacing-menu', items, (value) => App.commands.run('setLineSpacing', value));
+        list.append(el('div', { class: 'menu-separator', role: 'separator' }),
+            spaceField('Space before', 'space-before-input', 'setSpaceBefore', state.spaceBefore),
+            spaceField('Space after', 'space-after-input', 'setSpaceAfter', state.spaceAfter));
+    }
+
+    function createLineSpacing() {
+        lineSpacingButton = keepEdit(el('button', {
+            type: 'button', class: 'ribbon-button small line-spacing-button', title: 'Line spacing and paragraph spacing',
+            'aria-label': 'Line spacing', 'aria-haspopup': 'menu',
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => (menu && menu.classList.contains('line-spacing-menu') ? closeMenu() : openLineSpacingMenu()),
+        }));
+        lineSpacingButton.innerHTML = App.icons.get('lineSpacing');
+        lineSpacingButton.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
+        return lineSpacingButton;
+    }
+
     /* The control named in the ribbon's layout. */
-    App.fontControls.create = function create(name) {
+    App.textControls.create = function create(name) {
+        if (name === 'lineSpacing') {
+            return createLineSpacing();
+        }
         if (name === 'fontColor') {
             return createColorButton('color');
         }
@@ -10357,7 +10541,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     /* Show the selection's font and size; grey out when there is no text to format. */
-    App.fontControls.refresh = function refresh() {
+    App.textControls.refresh = function refresh() {
         if (!fontButton || !fontButton.isConnected) {
             return;
         }
@@ -10370,11 +10554,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (document.activeElement !== sizeInput) {
             sizeInput.value = state.fontSize ? String(state.fontSize) : '';
         }
+        if (lineSpacingButton) {
+            lineSpacingButton.disabled = !enabled;
+        }
         Object.keys(colorButtons).forEach((property) => {
             const parts = colorButtons[property];
             parts.main.disabled = !enabled;
             parts.arrow.disabled = !enabled;
-            parts.bar.style.background = shownColor(App.fontControls.currentColor(property));
+            parts.bar.style.background = shownColor(App.textControls.currentColor(property));
         });
     };
 })();
@@ -10417,13 +10604,15 @@ App.template.newDeckHtml = function newDeckHtml() {
                 {
                     label: 'Paragraph',
                     rows: [[['bullets', 'bullets'], ['numbering', 'numbering'], ['decreaseIndent', 'outdent'],
-                        ['increaseIndent', 'indent']],
-                    [['restartNumbering', 'restartNumbering'], ['continueNumbering', 'continueNumbering']]],
+                        ['increaseIndent', 'indent'], ['restartNumbering', 'restartNumbering'],
+                        ['continueNumbering', 'continueNumbering']],
+                    [['alignLeft', 'alignLeft'], ['alignCenter', 'alignCenter'], ['alignRight', 'alignRight'],
+                        ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }]],
                 },
                 { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
             ],
-            note: 'Click an element to select it, drag to move it, drag a handle to resize (Shift keeps the proportions). ' +
-                'Double-click a text box (or press Enter) to type in it; Esc stops typing. The Paragraph buttons work on the selected lines, or on the whole text box.',
+            note: 'Double-click a text box (or press Enter) to type in it; Esc stops typing. ' +
+                'With a box selected, Font and Paragraph change all its text.',
         },
         {
             id: 'insert', label: 'Insert',
@@ -10500,7 +10689,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (group.rows) {
                 buttonsNode = el('div', { class: 'ribbon-rows' }, group.rows.map((row) =>
                     el('div', { class: 'ribbon-row' }, row.map((item) => (item.control
-                        ? App.fontControls.create(item.control) : commandButton(item[0], item[1], true))))));
+                        ? App.textControls.create(item.control) : commandButton(item[0], item[1], true))))));
             } else {
                 buttonsNode = el('div', { class: 'ribbon-group-buttons' });
                 group.commands.forEach(([command, icon]) => buttonsNode.appendChild(commandButton(command, icon)));
@@ -10509,7 +10698,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             panel.appendChild(groupNode);
         });
         if (tab.note) {
-            panel.appendChild(el('div', { class: 'ribbon-note' }, [tab.note]));
+            panel.appendChild(el('div', { class: 'ribbon-note', title: tab.note }, [tab.note]));
         }
         App.ribbon.refresh();
     }
@@ -10610,7 +10799,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 button.setAttribute('aria-pressed', checked ? 'true' : 'false');
             }
         });
-        App.fontControls.refresh();
+        App.textControls.refresh();
     };
 })();
 

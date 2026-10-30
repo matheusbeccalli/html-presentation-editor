@@ -719,6 +719,52 @@ def test_text_colors(browser):
     editor.close()
 
 
+def test_paragraph_formatting(browser):
+    """Home > Paragraph: alignment (buttons and Ctrl+L/E/R/J), line spacing, space before / after."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e7\"]'))")
+    styles = lambda: page.evaluate(  # noqa: E731
+        "() => Array.from(App.deck.getDocument().querySelector('[data-id=\"e7\"]').children).map(p => p.style.cssText)")
+    button = lambda command: page.locator(f'#ribbon-panel [data-command="{command}"]')  # noqa: E731
+    start = styles()
+
+    page.keyboard.press("Enter")   # edit, cursor at the end of the last line
+    page.keyboard.press("Control+e")
+    check("text-align: center" in styles()[-1] and "text-align" not in styles()[-2], f"Ctrl+E centres the line: {styles()}")
+    wait_until(page, "() => document.querySelector('#ribbon-panel [data-command=\"alignCenter\"]').ariaPressed === 'true'",
+               timeout=3000)
+    page.keyboard.press("Shift+ArrowUp")
+    button("alignRight").click()
+    check(all("text-align: right" in style for style in styles()[-2:]), f"Align right on two lines: {styles()}")
+    check(page.evaluate("App.text.isEditing()"), "still editing")
+
+    page.locator("#ribbon-panel .line-spacing-button").click()
+    page.locator(".line-spacing-menu .menu-item", has_text="1.5").click()
+    check(all("line-height: 1.8" in style for style in styles()[-2:]), f"line spacing 1.5 (x 1.2 = 1.8): {styles()}")
+    page.locator("#ribbon-panel .line-spacing-button").click()
+    checked = page.locator('.line-spacing-menu [aria-checked="true"]').inner_text()
+    check(checked.strip() == "1.5", f"the menu shows the current spacing: {checked!r}")
+    before = page.locator(".line-spacing-menu .space-before-input")
+    before.fill("12")
+    before.press("Enter")
+    check(all("margin-top: 12pt" in style for style in styles()[-2:]), f"space before 12 pt: {styles()}")
+    check(page.evaluate("App.text.isEditing() && document.activeElement.id === 'deck-frame'"), "back in the text")
+
+    page.keyboard.press("Escape")
+    page.keyboard.press("Control+l")   # the box is selected: every line
+    check(all("text-align: left" in style for style in styles()), f"Ctrl+L on the box: {styles()}")
+    for _ in range(8):
+        if styles() == start:
+            break
+        page.keyboard.press("Control+z")
+    check(styles() == start, f"every step undoes: {styles()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -980,6 +1026,7 @@ def test_nudge_delete_clipboard_and_order(browser):
     check(element_rect(page, page.evaluate(selected))["left"] == 74, "cut then paste: same spot")
 
     # Stacking order from the Arrange tab: the logo (z 1, at the back) to the front and back again.
+    page.keyboard.press("Escape")   # no selection handles in the way, whatever the zoom
     page.mouse.click(*slide_to_screen(page, 68, 60))   # the corner the pasted copy (at 74, 66) does not cover
     check(page.evaluate(selected) == "e1", "logo selected")
     page.click(".ribbon-tab[data-tab='arrange']")
@@ -1668,6 +1715,7 @@ TESTS = [
     test_character_formatting,
     test_font_and_size,
     test_text_colors,
+    test_paragraph_formatting,
 ]
 
 

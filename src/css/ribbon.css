@@ -64,12 +64,12 @@
 .ribbon-button-label { font-size: 12px; white-space: nowrap; }
 .ribbon-rows { display: flex; flex-direction: column; gap: 2px; }
 .ribbon-row { display: flex; gap: 2px; align-items: center; }
-.ribbon-button.small { min-width: 0; padding: 3px; }
+.ribbon-button.small { min-width: 0; padding: 2px; }
 .ribbon-button.small .icon { width: 20px; height: 20px; }
 
-/* Home > Font: the font list and the size box (fontcontrols.js). */
+/* Home > Font: the font list and the size box (textcontrols.js). */
 .font-family-button, .font-size-box {
-    display: flex; align-items: center; height: 28px;
+    display: flex; align-items: center; height: 26px;
     border: 1px solid var(--border); border-radius: 3px; background: var(--surface);
 }
 .font-family-button { width: 168px; gap: 4px; padding: 0 4px 0 6px; cursor: pointer; text-align: left; }
@@ -84,7 +84,7 @@
 .font-size-menu { width: 64px; }
 .font-family-menu .menu-item, .font-size-menu .menu-item { padding: 5px 10px; }
 
-/* Font color / Highlight split buttons and their colour lists (fontcontrols.js). */
+/* Font color / Highlight split buttons and their colour lists (textcontrols.js). */
 .color-split { display: flex; align-items: stretch; }
 .color-main { position: relative; padding-bottom: 6px; }
 .color-bar { position: absolute; left: 4px; right: 4px; bottom: 2px; height: 4px; border: 1px solid rgba(0, 0, 0, 0.15); }
@@ -99,9 +99,16 @@
 .color-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 4px; padding: 0 6px 6px; }
 .color-swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 2px; cursor: pointer; }
 .color-swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+.line-spacing-button { flex-direction: row; gap: 1px; }
+.line-spacing-menu { width: 200px; }
+.line-spacing-menu .menu-item[aria-checked="true"] { font-weight: 600; background: var(--accent-soft); }
+.space-field { display: flex; align-items: center; gap: 6px; padding: 4px 10px; }
+.space-field span:first-child { flex: 1; }
+.space-field input { width: 48px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; font: inherit; }
 .color-picker-input { position: fixed; left: -100px; top: 0; width: 1px; height: 1px; opacity: 0; }
 .ribbon-note {
-    align-self: center; max-width: 560px; padding: 0 14px;
+    /* At most four lines, so a narrow window never makes the ribbon taller (the tooltip has it all). */
+    align-self: center; max-width: 560px; max-height: 68px; overflow: hidden; padding: 0 14px;
     color: var(--text-muted); font-size: 12px; line-height: 1.4;
 }
 

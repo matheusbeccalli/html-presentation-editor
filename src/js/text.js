@@ -1688,6 +1688,65 @@
     };
 
     // ---------------------------------------------------------------
+    // Paragraph formatting
+    // ---------------------------------------------------------------
+    //
+    // Alignment, line spacing and space before / after go on the selected lines'
+    // own <p> style (text-align, line-height, margin-top, margin-bottom), or on
+    // every line of a selected box. Enter copies them to the new line.
+
+    const ALIGN_LABELS = { left: 'Align left', center: 'Center', right: 'Align right', justify: 'Justify' };
+    const PARAGRAPH_LABELS = { 'line-height': 'Line spacing', 'margin-top': 'Space before', 'margin-bottom': 'Space after' };
+
+    /* The action setting `property` to `value` on the selected lines (every line without a caret). */
+    App.text.paragraphAction = function paragraphAction(element, property, value, caret) {
+        const lines = textLines(element);
+        const label = property === 'text-align' ? ALIGN_LABELS[value] : PARAGRAPH_LABELS[property];
+        if (lines.length === 0 || !label) {
+            return null;
+        }
+        const { first, last } = selectedRange(element, caret);
+        return {
+            label: label,
+            run: () => {
+                lines.slice(first, last + 1).forEach((line) => line.style.setProperty(property, value));
+                return caret;
+            },
+        };
+    };
+
+    /*
+     * The selected lines' { align, lineHeight (a multiple of the font size),
+     * spaceBefore, spaceAfter (pt) }, as the browser shows them; null where
+     * the lines differ.
+     */
+    App.text.paragraphState = function paragraphState(element, caret) {
+        const view = element.ownerDocument.defaultView;
+        const { first, last } = selectedRange(element, caret);
+        const lines = textLines(element).slice(first, last + 1);
+        if (!view || lines.length === 0) {
+            return { align: null, lineHeight: null, spaceBefore: null, spaceAfter: null };
+        }
+        const round = (number) => (isNaN(number) ? null : Math.round(number * 100) / 100);
+        const looks = lines.map((line) => {
+            const computed = view.getComputedStyle(line);
+            const align = { start: 'left', end: 'right', '-webkit-left': 'left', '-webkit-center': 'center',
+                '-webkit-right': 'right' }[computed.textAlign] || computed.textAlign;
+            return {
+                align: align,
+                lineHeight: round(parseFloat(computed.lineHeight) / parseFloat(computed.fontSize)),
+                spaceBefore: round(parseFloat(computed.marginTop) * 0.75),
+                spaceAfter: round(parseFloat(computed.marginBottom) * 0.75),
+            };
+        });
+        const state = {};
+        Object.keys(looks[0]).forEach((key) => {
+            state[key] = looks.every((look) => look[key] === looks[0][key]) ? looks[0][key] : null;
+        });
+        return state;
+    };
+
+    // ---------------------------------------------------------------
     // Character formatting
     // ---------------------------------------------------------------
     //
@@ -2558,6 +2617,29 @@
         });
         App.selection.refresh();
     }
+
+    /*
+     * Alignment, line spacing or space before / after (paragraphAction) on the
+     * selected lines, the cursor's line, or every line of a selected box.
+     */
+    App.text.applyParagraph = function applyParagraph(property, value) {
+        const target = listTarget();
+        const action = target && App.text.paragraphAction(target.element, property, value, target.caret);
+        if (!action) {
+            return;
+        }
+        if (editing) {
+            runInEditor(action);
+        } else {
+            runOnBox(target.element, action);
+        }
+    };
+
+    /* The selected lines' paragraph look for the ribbon (see paragraphState), or {} without a text box. */
+    App.text.currentParagraphState = function currentParagraphState() {
+        const target = listTarget();
+        return target ? App.text.paragraphState(target.element, target.caret) : {};
+    };
 
     /* Put the focus back into the text being edited (after the size box had it), keeping the selection. */
     App.text.refocus = function refocus() {

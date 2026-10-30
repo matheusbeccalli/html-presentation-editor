@@ -1092,3 +1092,56 @@ test('highlight: on a selection, and "No color" takes it off; it never goes on t
     assertEqual((await styled(['<span style="background-color: yellow; color: red">Al[fa]</span> Beta'], 'background-color', null)).lines,
         ['<span style="color: red; background-color: yellow;">Al</span><span style="color: red;">fa</span> Beta']);
 });
+
+// ---------------------------------------------------------------
+// Paragraph formatting: alignment, line spacing, space before / after
+// ---------------------------------------------------------------
+
+async function paragraphed(lines, property, value, elStyle, noCaret) {
+    const box = await formatBox(lines, elStyle);
+    const action = App.text.paragraphAction(box.el, property, value, noCaret ? null : box.caret);
+    App.text.runAction(box.el, action);
+    const result = { styles: Array.from(box.el.children).map((p) => p.getAttribute('style') || ''),
+        label: action.label, caret: App.text.getCaret(box.el), html: box.el.innerHTML };
+    box.frame.remove();
+    return result;
+}
+
+test('paragraph: alignment goes on every selected line', async () => {
+    const result = await paragraphed(['Alfa', 'Be[ta', 'Ga]ma'], 'text-align', 'center');
+    assertEqual(result.styles, ['', 'text-align: center;', 'text-align: center;']);
+    assertEqual(result.label, 'Center');
+    assertEqual(result.caret, { anchor: { p: 1, o: 2 }, focus: { p: 2, o: 2 } }, 'the selection stays');
+});
+
+test('paragraph: a cursor aligns its line; a selected box aligns all its lines', async () => {
+    assertEqual((await paragraphed(['Alfa', 'Be|ta'], 'text-align', 'right')).styles, ['', 'text-align: right;']);
+    assertEqual((await paragraphed(['Alfa', 'Be|ta'], 'text-align', 'justify', '', true)).styles,
+        ['text-align: justify;', 'text-align: justify;']);
+});
+
+test('paragraph: line spacing, space before and after on the line; normalize keeps them', async () => {
+    const result = await paragraphed(['Al|fa'], 'line-height', '1.8');
+    assertEqual(result.styles, ['line-height: 1.8;']);
+    assertEqual(result.label, 'Line spacing');
+    assertEqual((await paragraphed(['Al|fa'], 'margin-top', '12pt')).styles, ['margin-top: 12pt;']);
+    assertEqual((await paragraphed(['Al|fa'], 'margin-bottom', '6pt')).label, 'Space after');
+    assertEqual(normalized(result.html), result.html, 'normalize changes nothing');
+});
+
+test('paragraph: paragraphState shows the selected lines’ alignment, spacing and space (null when mixed)', async () => {
+    let box = await formatBox(['<span style="font-size: 20pt">Al[fa</span>', 'Be]ta'], 'font-size: 20pt; text-align: center; line-height: 1.38;');
+    let state = App.text.paragraphState(box.el, box.caret);
+    assertEqual([state.align, state.lineHeight], ['center', 1.38]);
+    box.frame.remove();
+    box = await formatBox(['Al[fa', 'Be]ta'], 'font-size: 20px;');
+    box.el.children[1].style.textAlign = 'right';
+    box.el.children[0].style.marginTop = '12pt';
+    box.el.children[0].style.marginBottom = '6pt';
+    state = App.text.paragraphState(box.el, box.caret);
+    assertEqual(state.align, null, 'left and right: mixed');
+    assertEqual(state.spaceBefore, null, '12 and 0: mixed');
+    state = App.text.paragraphState(box.el, { anchor: { p: 0, o: 1 }, focus: { p: 0, o: 1 } });
+    assertEqual([state.align, state.spaceBefore, state.spaceAfter], ['left', 12, 6]);
+    box.frame.remove();
+});

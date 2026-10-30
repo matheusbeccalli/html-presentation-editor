@@ -1,6 +1,7 @@
 /*
- * fontcontrols.js - the font list, the font size box and the colour buttons
- * of Home > Font (SPEC Phase 3).
+ * textcontrols.js - the ribbon's text controls that show a value or open a
+ * list (SPEC Phase 3): Home > Font's font list, font size box and colour
+ * buttons, and Home > Paragraph's line spacing list.
  *
  * Unlike the other ribbon buttons, these show a value: the font and size of
  * the selected text (blank when the selection mixes them, as in PowerPoint).
@@ -16,15 +17,19 @@
  *   applies the colour shown under its icon (the last one chosen), the arrow
  *   opens the colours: the deck's theme colours first (stored as
  *   var(--color-…)), then standard colours, and "More colors…".
+ * - Line spacing lists PowerPoint's values (1.0, 1.15 … 3.0) and takes the
+ *   space before / after a paragraph in pt. PowerPoint's single spacing is
+ *   about 1.2 times the font size, so "1.0" is stored as line-height: 1.2.
  *
- * Talks to: commands.js (setFontFamily, setFontSize, setFontColor, setHighlight), text.js (what the
- * selection has), deck.js (the theme fonts), ribbon.js (places the controls).
+ * Talks to: commands.js (setFontFamily, setFontSize, setFontColor, setHighlight,
+ * setLineSpacing, setSpaceBefore, setSpaceAfter), text.js (what the selection
+ * has), deck.js (the theme fonts and colours), ribbon.js (places the controls).
  */
 
 (function () {
     'use strict';
 
-    App.fontControls = {};
+    App.textControls = {};
 
     const el = (...args) => App.util.el(...args);
 
@@ -51,6 +56,10 @@
 
     // The colour each split button applies: the last one chosen (null = its default).
     const lastColors = { color: null, 'background-color': null };
+
+    // Line spacing as PowerPoint names it; stored as line-height = value x SINGLE_LINE.
+    const LINE_SPACINGS = [1, 1.15, 1.5, 2, 2.5, 3];
+    const SINGLE_LINE = 1.2;
 
     let fontButton = null;
     let sizeInput = null;
@@ -113,35 +122,48 @@
         }
     }
 
+    /* Show `node` as the open list under `anchor`; a press outside it or Esc closes it. */
+    function showMenu(anchor, node) {
+        closeMenu();
+        menu = keepEdit(node);
+        const rect = anchor.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = rect.bottom + 'px';
+        document.body.appendChild(menu);
+        // Near the right edge of the window, the list opens to the left instead.
+        const overflow = menu.getBoundingClientRect().right - (window.innerWidth - 4);
+        if (overflow > 0) {
+            menu.style.left = Math.max(4, rect.left - overflow) + 'px';
+        }
+        window.addEventListener('pointerdown', onOutsidePointerDown, true);
+        window.addEventListener('keydown', onMenuKey, true);
+    }
+
     /*
      * Open a list under `anchor`. items: [{ label, value, style }]; choosing one
      * calls onChoose(value). Its items never take the focus, so the text keeps
      * its cursor and selection.
      */
     function openMenu(anchor, className, items, onChoose) {
-        closeMenu();
-        menu = keepEdit(el('div', { class: 'menu ' + className, role: 'menu' }));
+        const list = el('div', { class: 'menu ' + className, role: 'menu' });
         items.forEach((item) => {
             if (item.separator) {
-                menu.appendChild(el('div', { class: 'menu-separator', role: 'separator' }));
+                list.appendChild(el('div', { class: 'menu-separator', role: 'separator' }));
                 return;
             }
             const button = el('button', {
-                type: 'button', class: 'menu-item', role: 'menuitem',
+                type: 'button', class: 'menu-item', role: item.checked === undefined ? 'menuitem' : 'menuitemradio',
+                'aria-checked': item.checked === undefined ? null : String(item.checked),
                 onmousedown: (event) => event.preventDefault(),
                 onclick: () => {
                     closeMenu();
                     onChoose(item.value);
                 },
             }, [el('span', { class: 'menu-label', style: item.style || null }, [item.label])]);
-            menu.appendChild(button);
+            list.appendChild(button);
         });
-        const rect = anchor.getBoundingClientRect();
-        menu.style.left = rect.left + 'px';
-        menu.style.top = rect.bottom + 'px';
-        document.body.appendChild(menu);
-        window.addEventListener('pointerdown', onOutsidePointerDown, true);
-        window.addEventListener('keydown', onMenuKey, true);
+        showMenu(anchor, list);
+        return list;
     }
 
     function openFontMenu() {
@@ -173,7 +195,7 @@
         } else if (event.key === 'Escape') {
             event.preventDefault();
             App.text.refocus();
-            App.fontControls.refresh();
+            App.textControls.refresh();
         }
     }
 
@@ -190,7 +212,7 @@
         sizeInput = keepEdit(el('input', {
             type: 'text', class: 'font-size-input', title: 'Font size', 'aria-label': 'Font size', inputmode: 'decimal',
             onkeydown: onSizeKey,
-            onblur: () => App.fontControls.refresh(),
+            onblur: () => App.textControls.refresh(),
         }));
         const arrow = keepEdit(el('button', {
             type: 'button', class: 'font-size-menu-button', title: 'Font sizes', 'aria-haspopup': 'menu',
@@ -217,7 +239,7 @@
     }
 
     /* The colour a split button applies now: the last chosen, else the theme's primary colour / yellow. */
-    App.fontControls.currentColor = function currentColor(property) {
+    App.textControls.currentColor = function currentColor(property) {
         if (lastColors[property] !== null) {
             return lastColors[property];
         }
@@ -232,7 +254,7 @@
     function chooseColor(property, value) {
         lastColors[property] = value;
         App.commands.run(property === 'color' ? 'setFontColor' : 'setHighlight', value);
-        App.fontControls.refresh();
+        App.textControls.refresh();
     }
 
     function swatch(title, value, property) {
@@ -248,10 +270,9 @@
 
     /* The colours of a split button's arrow. */
     function openColorMenu(anchor, property) {
-        closeMenu();
-        menu = keepEdit(el('div', { class: 'menu color-menu ' + (property === 'color' ? 'font-color-menu' : 'highlight-menu'), role: 'menu' }));
+        const list = el('div', { class: 'menu color-menu ' + (property === 'color' ? 'font-color-menu' : 'highlight-menu'), role: 'menu' });
         const section = (label, colors) => {
-            menu.append(el('div', { class: 'color-menu-label' }, [label]),
+            list.append(el('div', { class: 'color-menu-label' }, [label]),
                 el('div', { class: 'color-grid' }, colors.map(([title, value]) => swatch(title, value, property))));
         };
         if (property === 'color') {
@@ -262,7 +283,7 @@
             }
             section('Standard colors', STANDARD_COLORS);
         } else {
-            menu.appendChild(el('button', {
+            list.appendChild(el('button', {
                 type: 'button', class: 'menu-item', title: 'No color', onmousedown: (event) => event.preventDefault(),
                 onclick: () => {
                     closeMenu();
@@ -278,7 +299,7 @@
             App.text.refocus();
             picker.remove();
         });
-        menu.appendChild(el('button', {
+        list.appendChild(el('button', {
             type: 'button', class: 'menu-item', onmousedown: (event) => event.preventDefault(),
             onclick: () => {
                 closeMenu();
@@ -287,12 +308,7 @@
                 picker.click();
             },
         }, [el('span', { class: 'menu-label' }, ['More colors…'])]));
-        const rect = anchor.getBoundingClientRect();
-        menu.style.left = rect.left + 'px';
-        menu.style.top = rect.bottom + 'px';
-        document.body.appendChild(menu);
-        window.addEventListener('pointerdown', onOutsidePointerDown, true);
-        window.addEventListener('keydown', onMenuKey, true);
+        showMenu(anchor, list);
     }
 
     const colorButtons = {};   // property -> { main, arrow, bar }
@@ -320,8 +336,59 @@
         return el('div', { class: 'color-split' }, [main, arrow]);
     }
 
+    let lineSpacingButton = null;
+
+    /* A space field of the line spacing list: Enter applies the typed pt, then the text gets the focus back. */
+    function spaceField(label, className, command, value) {
+        const input = el('input', {
+            type: 'text', class: className, inputmode: 'decimal', 'aria-label': label + ' (pt)',
+            value: value === null || value === undefined ? '' : String(value),
+            onkeydown: (event) => {
+                if (event.key !== 'Enter') {
+                    return;
+                }
+                event.preventDefault();
+                const points = parseFloat(input.value.replace(',', '.'));
+                if (points >= 0 && points <= 999) {
+                    closeMenu();
+                    App.commands.run(command, points + 'pt').then(() => App.text.refocus());
+                } else {
+                    App.ui.setStatus('Type a space between 0 and 999 pt');
+                }
+            },
+        });
+        return el('label', { class: 'space-field' }, [el('span', {}, [label]), input, el('span', {}, ['pt'])]);
+    }
+
+    function openLineSpacingMenu() {
+        const state = App.text.currentParagraphState();
+        const items = LINE_SPACINGS.map((spacing) => {
+            const css = Math.round(spacing * SINGLE_LINE * 1000) / 1000;
+            return { label: spacing.toFixed(spacing === 1.15 ? 2 : 1), value: String(css), checked: state.lineHeight === css };
+        });
+        const list = openMenu(lineSpacingButton, 'line-spacing-menu', items, (value) => App.commands.run('setLineSpacing', value));
+        list.append(el('div', { class: 'menu-separator', role: 'separator' }),
+            spaceField('Space before', 'space-before-input', 'setSpaceBefore', state.spaceBefore),
+            spaceField('Space after', 'space-after-input', 'setSpaceAfter', state.spaceAfter));
+    }
+
+    function createLineSpacing() {
+        lineSpacingButton = keepEdit(el('button', {
+            type: 'button', class: 'ribbon-button small line-spacing-button', title: 'Line spacing and paragraph spacing',
+            'aria-label': 'Line spacing', 'aria-haspopup': 'menu',
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => (menu && menu.classList.contains('line-spacing-menu') ? closeMenu() : openLineSpacingMenu()),
+        }));
+        lineSpacingButton.innerHTML = App.icons.get('lineSpacing');
+        lineSpacingButton.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
+        return lineSpacingButton;
+    }
+
     /* The control named in the ribbon's layout. */
-    App.fontControls.create = function create(name) {
+    App.textControls.create = function create(name) {
+        if (name === 'lineSpacing') {
+            return createLineSpacing();
+        }
         if (name === 'fontColor') {
             return createColorButton('color');
         }
@@ -332,7 +399,7 @@
     };
 
     /* Show the selection's font and size; grey out when there is no text to format. */
-    App.fontControls.refresh = function refresh() {
+    App.textControls.refresh = function refresh() {
         if (!fontButton || !fontButton.isConnected) {
             return;
         }
@@ -345,11 +412,14 @@
         if (document.activeElement !== sizeInput) {
             sizeInput.value = state.fontSize ? String(state.fontSize) : '';
         }
+        if (lineSpacingButton) {
+            lineSpacingButton.disabled = !enabled;
+        }
         Object.keys(colorButtons).forEach((property) => {
             const parts = colorButtons[property];
             parts.main.disabled = !enabled;
             parts.arrow.disabled = !enabled;
-            parts.bar.style.background = shownColor(App.fontControls.currentColor(property));
+            parts.bar.style.background = shownColor(App.textControls.currentColor(property));
         });
     };
 })();

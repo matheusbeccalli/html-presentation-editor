@@ -161,7 +161,7 @@
                 isChecked: () => !!App.text.currentStyleState()[name],
             });
         });
-        // The font list and size box pass the chosen value (fontcontrols.js).
+        // The font list and size box pass the chosen value (textcontrols.js).
         App.commands.define('setFontFamily', {
             label: 'Font', keepsEdit: true, run: (value) => App.text.applyStyle('font-family', value),
             isEnabled: () => App.text.canStyle(),
@@ -173,7 +173,7 @@
         // Font color / Highlight: the split button applies its current colour, its list a chosen one.
         App.commands.define('fontColor', {
             label: 'Font color', keepsEdit: true, isEnabled: () => App.text.canStyle(),
-            run: () => App.text.applyStyle('color', App.fontControls.currentColor('color')),
+            run: () => App.text.applyStyle('color', App.textControls.currentColor('color')),
         });
         App.commands.define('setFontColor', {
             label: 'Font color', keepsEdit: true, run: (value) => App.text.applyStyle('color', value),
@@ -181,7 +181,7 @@
         });
         App.commands.define('highlight', {
             label: 'Text highlight color', keepsEdit: true, isEnabled: () => App.text.canStyle(),
-            run: () => App.text.applyStyle('background-color', App.fontControls.currentColor('background-color')),
+            run: () => App.text.applyStyle('background-color', App.textControls.currentColor('background-color')),
         });
         App.commands.define('setHighlight', {
             label: 'Text highlight color', keepsEdit: true, run: (value) => App.text.applyStyle('background-color', value),
@@ -198,6 +198,23 @@
         App.commands.define('clearFormatting', {
             label: 'Clear formatting', keepsEdit: true, run: () => App.text.applyStyle('clear'),
             isEnabled: () => App.text.canStyle(),
+        });
+        // Paragraph formatting (Home > Paragraph): alignment works like radio buttons.
+        [['alignLeft', 'Align left', 'left'], ['alignCenter', 'Center', 'center'], ['alignRight', 'Align right', 'right'],
+         ['alignJustify', 'Justify', 'justify']].forEach(([name, label, align]) => {
+            App.commands.define(name, {
+                label: label, keepsEdit: true, run: () => App.text.applyParagraph('text-align', align),
+                isEnabled: () => App.text.canStyle(),
+                isChecked: () => App.text.currentParagraphState().align === align,
+            });
+        });
+        // The line spacing list passes the CSS value (textcontrols.js).
+        [['setLineSpacing', 'Line spacing', 'line-height'], ['setSpaceBefore', 'Space before', 'margin-top'],
+         ['setSpaceAfter', 'Space after', 'margin-bottom']].forEach(([name, label, property]) => {
+            App.commands.define(name, {
+                label: label, keepsEdit: true, run: (value) => App.text.applyParagraph(property, value),
+                isEnabled: () => App.text.canStyle(),
+            });
         });
         // The list buttons (Home > Paragraph): the selected lines, or every line of a selected box.
         [['bullets', 'Bullets', 'bullet', () => App.text.toggleList('bullet')],

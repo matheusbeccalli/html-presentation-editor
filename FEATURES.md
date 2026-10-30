@@ -110,8 +110,8 @@ Nested bullets are the top priority of this phase.
 - [x] Insert text box, PowerPoint style: click the button, then click on the slide (grows as you type) or drag to set the width *(click = 360 px wide, grows in height; an empty new box is removed)*
 - [x] Toolbar: bold, italic, underline, strikethrough, superscript, subscript *(Home > Font; Ctrl+B / Ctrl+I / Ctrl+U; a cursor inside a word formats the word, elsewhere the text typed next; with the box selected: all its text)*
 - [x] Toolbar: font family (Windows fonts from 2.1), color, highlight, clear formatting; theme fonts and theme colors stored as `var(--…)` *(Font color / Highlight are split buttons that remember the last colour; More colors… opens the browser's colour window)*
-- [ ] Toolbar: align left / center / right / justify
-- [ ] Line spacing and paragraph spacing
+- [x] Toolbar: align left / center / right / justify *(Ctrl+L / E / R / J while a text box is selected or edited)*
+- [x] Line spacing and paragraph spacing *(PowerPoint's 1.0 … 3.0, stored as line-height × 1.2; space before / after in pt)*
 - [ ] Format painter (copy the style of one text, apply to another)
 - [ ] Autofit (`data-autofit="shrink|resize|off"`): shrink text to fit, or grow the box; new boxes `resize`, imported boxes `off`
 - [x] Spell check in Portuguese (`spellcheck="true"`, `lang="pt-BR"`)
@@ -163,6 +163,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Home > Font: select a word, Ctrl+B, then the Italic button (both light up); click inside another word and Ctrl+U underlines the word; at the end of a line Ctrl+B then type: only the new text is bold; select a box (not typing) and Ctrl+B: all its text; Clear formatting removes it; Ctrl+Z undoes each step
   - [ ] Home > Font, sizes and fonts: select a word, Ctrl+] twice (the size box counts up the list), type 30 in the size box + Enter (the word stays selected, typing goes on in the text), pick 40 from the size list, pick Georgia and then the "(Headings)" theme font from the font list; select a whole line with mixed sizes: the size box is blank; with the box selected (not typing) Ctrl+[ makes all its text one step smaller
   - [ ] Home > Font, colours: select a word, click the Font color arrow: the deck's theme colours come first; pick one, then a standard colour; the button's bar now shows that colour and clicking it colours another word; Highlight paints yellow, its "No color" takes it off; More colors… opens the colour window
+  - [ ] Home > Paragraph, alignment and spacing: in a text, Ctrl+E centres the line (the Center button lights up); select two lines, Align right; Line spacing list: 1.5 spreads them out and shows as ticked when reopened; type 12 in Space before + Enter: space above both lines, and the cursor is back in the text; Esc, then Ctrl+L aligns the whole box left; Ctrl+Z undoes each step. With nothing selected, Ctrl+R still reloads the page (it asks first if there are unsaved changes)
 
 ## Phase 4: Tables
 

@@ -80,6 +80,7 @@
 #overlay.editing .selection-handle { display: none; }
 /* Insert > Text box: the next click or drag on the slide places the box. */
 #overlay.inserting { cursor: crosshair; }
+#overlay.painting { cursor: copy; }
 .selection-box {
     position: absolute;
     outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);

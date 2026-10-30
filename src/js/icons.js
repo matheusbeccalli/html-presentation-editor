@@ -27,6 +27,7 @@
         warning: '<path d="M10 2.5l8 14.5H2z"/><path d="M10 8v4.5"/><circle cx="10" cy="14.8" r="0.4"/>',
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
         check: '<path d="M4 10.5l4 4 8-9"/>',
+        formatPainter: '<rect x="3" y="2.5" width="12" height="5" rx="1"/><path d="M15 5h2v4.5h-7.5V12"/><rect x="8" y="12" width="3" height="5.5" rx="0.5"/>',
         textBox: '<rect x="2.5" y="4" width="15" height="12" stroke-dasharray="2 1.5"/><path d="M6.5 7.5h7M10 7.5v6"/>',
         close: '<path d="M5 5l10 10M15 5L5 15"/>',
         bold: '<path stroke-width="2" d="M6 3.5h4.8a3 3 0 0 1 0 6H6zM6 9.5h5.5a3.5 3.5 0 0 1 0 7H6z"/>',

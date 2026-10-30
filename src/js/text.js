@@ -2068,9 +2068,14 @@
             });
             return;
         }
+        moveOffBox(element, format, allRuns);
+        selected.forEach((run) => run.formats.delete(format));
+    }
+
+    /* If the box itself is bold (or italic), that moves onto its text, so part of the text can lose it. */
+    function moveOffBox(element, format, allRuns) {
         const box = shownLook(element);
         if (BOX_FORMATS[format] && box && box[format]) {
-            // The box is bold: the bold moves onto its text, so part of it can lose it.
             element.style.setProperty(BOX_FORMATS[format][0], 'normal');
             allRuns.forEach((run) => {
                 if (!run.br && run.shown && run.shown[format]) {
@@ -2078,7 +2083,6 @@
                 }
             });
         }
-        selected.forEach((run) => run.formats.delete(format));
     }
 
     /*
@@ -2429,6 +2433,107 @@
         return { label: 'Cut', run: () => caretAt(deleteSelection(element, caret)) };
     };
 
+    // ---------------------------------------------------------------
+    // Format painter
+    // ---------------------------------------------------------------
+    //
+    // pickLook takes the whole look of one character (its own formatting, else
+    // the box's, else what the browser shows) and of its line (alignment,
+    // spacing); lookAction gives it to other text. Lines painted whole also get
+    // the paragraph look; a word or part of a line only the character look.
+
+    /* The look at the cursor (the character before it), the selection's first character, or a box's first text. */
+    App.text.pickLook = function pickLook(element, caret) {
+        const lines = textLines(element);
+        let line;
+        let run = null;
+        if (!caret) {
+            line = lines.find((candidate) => !isEmptyLine(candidate)) || lines[0];
+            run = line ? contentRuns(line).find((candidate) => !candidate.br) : null;
+        } else {
+            const [from, to] = [caret.anchor, caret.focus].sort(comparePositions);
+            line = lines[from.p];
+            const runs = line ? contentRuns(line) : [];
+            if (comparePositions(from, to) !== 0) {
+                run = sliceRuns(runs, from.o, from.p === to.p ? to.o : Infinity).selected[0] || null;
+            }
+            run = run || (from.o > 0 ? sliceRuns(runs, from.o - 1, from.o).selected[0] : null) ||
+                sliceRuns(runs, from.o, from.o + 1).selected[0] || null;
+        }
+        if (!line) {
+            return null;
+        }
+        // An empty line: the look it keeps for what is typed into it.
+        const source = run || { text: '', formats: new Set(), styles: lookAt(line, [], 0).styles, href: null, shown: shownLook(line) };
+        const full = fullLook(element, source);
+        const paragraph = paragraphStyles(line);
+        ['text-align', 'line-height'].forEach((property) => {
+            if (!paragraph[property] && element.style.getPropertyValue(property)) {
+                paragraph[property] = element.style.getPropertyValue(property);   // the box's, when the line has none
+            }
+        });
+        const styles = {};
+        Object.keys(full.styles).filter((property) => SPAN_ORDER.indexOf(property) !== -1).forEach((property) => {
+            styles[property] = full.styles[property];
+        });
+        return { formats: FORMAT_TAGS.filter((format) => full.formats.has(format)), styles: styles, paragraph: paragraph };
+    };
+
+    /* The action giving `look` (from pickLook) to the selection, the word at the cursor, or the whole box (caret null). */
+    App.text.lookAction = function lookAction(element, caret, look) {
+        const segments = formatSegments(element, caret);
+        if (!segments || !look) {
+            return null;
+        }
+        const lines = textLines(element);
+        return {
+            label: 'Format painter',
+            run: () => {
+                const perLine = lines.map((line) => readRuns(line));
+                const selected = [];
+                const wholeLines = [];
+                segments.forEach((segment) => {
+                    const line = lines[segment.index];
+                    if (segment.start === 0 && segment.end >= lineLength(line)) {
+                        wholeLines.push(line);
+                    }
+                    const sliced = sliceRuns(perLine[segment.index], segment.start, segment.end);
+                    perLine[segment.index] = sliced.runs;
+                    selected.push(...sliced.selected);
+                });
+                const allRuns = [].concat(...perLine);
+                if (selected.length > 0) {
+                    Object.keys(BOX_FORMATS).filter((format) => look.formats.indexOf(format) === -1)
+                        .forEach((format) => moveOffBox(element, format, allRuns));
+                }
+                // What the box itself already has need not be repeated on its text.
+                const styles = {};
+                Object.keys(look.styles).forEach((property) => {
+                    if (element.style.getPropertyValue(property) !== look.styles[property]) {
+                        styles[property] = look.styles[property];
+                    }
+                });
+                selected.forEach((run) => {
+                    run.formats = new Set(look.formats);
+                    run.styles = Object.assign({}, styles);
+                });
+                liftToBox(element, allRuns, lines);
+                lines.forEach((line, index) => writeRuns(line, perLine[index]));
+                wholeLines.forEach((line) => {
+                    Object.keys(look.paragraph).forEach((property) => line.style.setProperty(property, look.paragraph[property]));
+                    if (isEmptyLine(line)) {
+                        ['font-size', 'color'].forEach((property) => {
+                            if (look.styles[property]) {
+                                line.style.setProperty(property, look.styles[property]);
+                            }
+                        });
+                    }
+                });
+                return caret;
+            },
+        };
+    };
+
     /* Run an action (a key, AutoFormat, a list button): change the lines, tidy them, put the cursor back
        (an action on a selected box, not being edited, has no cursor). */
     App.text.runAction = function runAction(element, action) {
@@ -2457,6 +2562,7 @@
     let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
     let looseSpace = null; // { node, index }: a non-breaking space insertStyled typed at the end of a line
     let plainPaste = false; // Ctrl+Shift+V was pressed: the paste that follows is plain text
+    let painter = null;     // the format painter while it is on: { look, locked }
     let emptyNewBox = null; // { element, slideId }: a new box left empty, removed once it is deselected
     let lastPaste = null;   // the last paste, for the paste options button: { id, clipboard, mode, caret, end, state }
 
@@ -2513,6 +2619,7 @@
         attachToElement(element);
         doc.addEventListener('keydown', onKeyDown, true);
         doc.addEventListener('pointerdown', onDeckPointerDown, true);
+        doc.addEventListener('pointerup', onDeckPointerUp, true);
         doc.addEventListener('selectionchange', onSelectionChange);
         window.addEventListener('pointerdown', onEditorPointerDown, true);
         overlayElement().classList.add('editing');
@@ -2568,6 +2675,7 @@
         pending = null;
         state.doc.removeEventListener('keydown', onKeyDown, true);
         state.doc.removeEventListener('pointerdown', onDeckPointerDown, true);
+        state.doc.removeEventListener('pointerup', onDeckPointerUp, true);
         state.doc.removeEventListener('selectionchange', onSelectionChange);
         window.removeEventListener('pointerdown', onEditorPointerDown, true);
         overlayElement().classList.remove('editing');
@@ -2860,7 +2968,9 @@
         // Ours, not the browser's: its text undo would bypass the editor's history.
         event.preventDefault();
         event.stopPropagation();
-        if (command === 'exit') {
+        if (command === 'exit' && painter) {
+            App.text.stopPainter();   // Esc first stops the painter, then (pressed again) the typing
+        } else if (command === 'exit') {
             App.text.exitEdit();
         } else {
             App.commands.run(command);
@@ -2989,6 +3099,70 @@
         return target ? App.text.paragraphState(target.element, target.caret) : {};
     };
 
+    /*
+     * The format painter: startPainter picks up the look of the text at the
+     * cursor (or of the selected box); then a mouse selection, a click inside a
+     * word, or a click on another text box gets it, on any slide (as in
+     * PowerPoint). locked (double-click on the button): it stays on until Esc
+     * or the button again.
+     */
+    App.text.startPainter = function startPainter(locked) {
+        const target = listTarget();
+        const look = target && App.text.pickLook(target.element, target.caret);
+        if (!look) {
+            return;
+        }
+        painter = { look: look, locked: !!locked };
+        showPainterCursor(true);
+        App.ui.setStatus('Format painter: select text, click inside a word or click a text box (Esc stops)');
+        App.events.emit('painter-changed', { on: true });
+    };
+
+    App.text.stopPainter = function stopPainter() {
+        if (!painter) {
+            return;
+        }
+        painter = null;
+        showPainterCursor(false);
+        App.ui.setStatus('');
+        App.events.emit('painter-changed', { on: false });
+    };
+
+    App.text.isPainting = function isPainting() {
+        return painter !== null;
+    };
+
+    /* With the painter on, a click on a text box paints all of it (one undo step). Returns false for anything else. */
+    App.text.paintBox = function paintBox(element) {
+        if (!painter || !element || element.getAttribute('data-type') !== 'text') {
+            return false;
+        }
+        const action = App.text.lookAction(element, null, painter.look);
+        if (action) {
+            runOnBox(element, action);
+        }
+        App.selection.select(element);
+        if (painter && !painter.locked) {
+            App.text.stopPainter();
+        }
+        return true;
+    };
+
+    /* The paint-brush cursor over the slide (the overlay) and inside the deck (a rule removed on save, see serialize.js). */
+    function showPainterCursor(on) {
+        overlayElement().classList.toggle('painting', on);
+        const doc = App.deck.getDocument();
+        const rule = doc && doc.head.querySelector('style[data-editor-only="painter"]');
+        if (on && doc && !rule) {
+            const style = doc.createElement('style');
+            style.setAttribute('data-editor-only', 'painter');
+            style.textContent = '* { cursor: copy !important; }';
+            doc.head.appendChild(style);
+        } else if (!on && rule) {
+            rule.remove();
+        }
+    }
+
     /* Put the focus back into the text being edited (after the size box had it), keeping the selection. */
     App.text.refocus = function refocus() {
         if (!editing) {
@@ -3057,7 +3231,26 @@
         event.preventDefault();
         App.text.exitEdit({ select: false });
         // The deck iframe shows the slide at 1:1, so its coordinates are slide pixels.
-        App.selection.select(App.selection.elementAt(event.clientX, event.clientY));
+        const element = App.selection.elementAt(event.clientX, event.clientY);
+        if (painter && !App.text.paintBox(element)) {
+            App.text.stopPainter();
+        }
+        App.selection.select(element);
+    }
+
+    /* A mouse selection (or a click inside a word) in the text being edited, with the painter on: paint it. */
+    function onDeckPointerUp(event) {
+        if (!painter || !editing || !editing.element.contains(event.target)) {
+            return;
+        }
+        const caret = App.text.getCaret(editing.element);
+        const action = caret && App.text.lookAction(editing.element, caret, painter.look);
+        if (action) {
+            runInEditor(action);
+            if (painter && !painter.locked) {
+                App.text.stopPainter();
+            }
+        }
     }
 
     /* A press anywhere in the editor outside the deck (rail, ribbon …) leaves edit mode,
@@ -3099,6 +3292,8 @@
     /* Wiring, called once from App.start(). */
     App.text.init = function init() {
         App.events.on('history-changed', afterHistoryChange);
+        // An undo of a whole-deck change may bring back a cursor rule from while the painter was on.
+        App.events.on('history-changed', () => showPainterCursor(painter !== null));
         // deck.js also re-marks the same slide after undo; only a real slide change ends editing.
         App.events.on('slide-changed', () => {
             const slide = App.deck.getCurrentSlide();
@@ -3112,7 +3307,17 @@
                 removeEmptyNewBox();
             }
         });
+        // Esc stops the painter before it does anything else (deselect, close …).
+        window.addEventListener('keydown', (event) => {
+            if (painter && event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                App.text.stopPainter();
+            }
+        }, true);
         App.events.on('deck-loaded', () => {
+            painter = null;
+            overlayElement().classList.remove('painting');
             editing = null;
             typing = null;
             emptyNewBox = null;

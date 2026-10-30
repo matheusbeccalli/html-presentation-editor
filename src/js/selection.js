@@ -196,6 +196,13 @@
         }
         const point = toSlidePoint(event);
         const element = App.selection.elementAt(point.x, point.y);
+        // The format painter on: a text box gets the look; anything else stops the painter.
+        if (App.text.isPainting() && event.button === 0) {
+            if (App.text.paintBox(element)) {
+                return;
+            }
+            App.text.stopPainter();
+        }
         App.selection.select(element);
         if (element && event.button === 0) {
             startDrag(event, 'move', null);

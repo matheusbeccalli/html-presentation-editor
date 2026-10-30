@@ -239,6 +239,21 @@
                 App.ui.setStatus('Click on the slide to place the text box, or drag to set its width (Esc cancels)');
             },
         });
+        // Format painter: a click picks up a look for one use; a double-click (formatPainterLocked) keeps it on.
+        App.commands.define('formatPainter', {
+            label: 'Format painter', keepsEdit: true,
+            isEnabled: () => App.text.isPainting() || App.text.canStyle(),
+            isChecked: () => App.text.isPainting(),
+            run: () => (App.text.isPainting() ? App.text.stopPainter() : App.text.startPainter(false)),
+        });
+        App.commands.define('formatPainterLocked', {
+            label: 'Format painter (stays on)', keepsEdit: true,
+            isEnabled: () => App.text.isPainting() || App.text.canStyle(),
+            run: () => {
+                App.text.stopPainter();
+                App.text.startPainter(true);
+            },
+        });
         App.commands.define('cut', { label: 'Cut', isEnabled: hasSelection, run: () => App.elements.cut() });
         App.commands.define('copy', { label: 'Copy', isEnabled: hasSelection, run: () => App.elements.copy() });
         App.commands.define('paste', { label: 'Paste', isEnabled: () => App.elements.canPaste(), run: () => App.elements.paste() });

@@ -1000,6 +1000,91 @@ def test_double_click_empty_slide_adds_text_box(browser):
     editor.close()
 
 
+def word_on_screen(page, box_id, line, word):
+    """Screen position of the middle of `word` in line `line` of a text box (the deck iframe is at slide scale 1:1)."""
+    point = page.evaluate("""([id, line, word]) => {
+        const p = App.deck.getDocument().querySelector('[data-id="' + id + '"]').children[line];
+        const walker = p.ownerDocument.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            const at = node.data.indexOf(word);
+            if (at !== -1) {
+                const range = p.ownerDocument.createRange();
+                range.setStart(node, at);
+                range.setEnd(node, at + word.length);
+                const r = range.getBoundingClientRect();
+                return [r.left + r.width / 2, r.top + r.height / 2];
+            }
+        }
+        return null;
+    }""", [box_id, line, word])
+    return slide_to_screen(page, *point)
+
+
+def test_format_painter(browser):
+    """Home > Format painter: pick up a look, paint a whole box, a word; double-click keeps it on; Esc stops."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(1)")
+    style_of = lambda box_id: page.evaluate(  # noqa: E731
+        "id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').getAttribute('style')", box_id)
+    line_html = lambda box_id, index: page.evaluate(  # noqa: E731
+        "([id, i]) => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').children[i].innerHTML", [box_id, index])
+    painter = page.locator('#ribbon-panel [data-command="formatPainter"]')
+    start_e7 = style_of("e7")
+
+    # The title's look onto the bullets box: a click on the box paints all of it.
+    page.mouse.click(*slide_to_screen(page, 300, 90))   # the title
+    check(page.evaluate("App.selection.selectedId()") == "e5", "title selected")
+    painter.click()
+    check(painter.get_attribute("aria-pressed") == "true", "the painter is on")
+    page.mouse.click(*slide_to_screen(page, 300, 300))   # the bullets box
+    title = page.evaluate("""() => { const c = getComputedStyle(App.deck.getDocument().querySelector('[data-id="e5"] p'));
+        return [c.fontWeight, c.fontSize, c.color]; }""")
+    painted = page.evaluate("""() => { const c = getComputedStyle(App.deck.getDocument().querySelector('[data-id="e7"] p'));
+        return [c.fontWeight, c.fontSize, c.color]; }""")
+    check(painted == title, f"the bullets now look like the title: {painted} vs {title}")
+    check(painter.get_attribute("aria-pressed") == "false", "one use: the painter is off again")
+    check(page.evaluate("App.selection.selectedId()") == "e7", "the painted box is selected")
+    page.keyboard.press("Control+z")
+    check(style_of("e7") == start_e7, "Ctrl+Z undoes the painting")
+
+    # Inside a text: bold one word, pick it up, click inside another word.
+    page.keyboard.press("Enter")   # edit e7, cursor at the end
+    page.keyboard.press("Control+Shift+ArrowLeft")
+    page.keyboard.press("Control+b")   # "compras" bold
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("ArrowRight")   # cursor inside the bold word
+    painter.click()
+    page.mouse.click(*word_on_screen(page, "e7", 3, "Plano"))
+    check(line_html("e7", 3).startswith("<b>Plano</b>"), f"a click inside a word paints the word: {line_html('e7', 3)}")
+    check(page.evaluate("App.text.isEditing()"), "still editing")
+
+    # Double-click: stays on for several words, until Esc.
+    painter.dblclick()
+    check(painter.get_attribute("aria-pressed") == "true", "double-click: on")
+    page.mouse.click(*word_on_screen(page, "e7", 3, "valor"))
+    page.mouse.click(*word_on_screen(page, "e7", 3, "Sudeste"))
+    check("<b>valor</b>" in line_html("e7", 3) and "<b>Sudeste</b>" in line_html("e7", 3),
+          f"two words painted: {line_html('e7', 3)}")
+    page.keyboard.press("Escape")
+    check(painter.get_attribute("aria-pressed") == "false" and page.evaluate("App.text.isEditing()"),
+          "Esc stops the painter (and only that: still editing)")
+    page.keyboard.press("Escape")
+
+    # A click on empty slide space with the painter on: it stops, nothing changes.
+    page.mouse.click(*slide_to_screen(page, 300, 90))
+    painter.click()
+    before = page.evaluate("App.deck.getCurrentSlide().innerHTML")
+    page.mouse.click(*slide_to_screen(page, 640, 690))
+    check(painter.get_attribute("aria-pressed") == "false", "a click on empty space stops the painter")
+    check(page.evaluate("App.deck.getCurrentSlide().innerHTML") == before, "and changes nothing")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('style[data-editor-only=\"painter\"]').length") == 0,
+          "the painter's cursor rule is gone")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -1956,6 +2041,7 @@ TESTS = [
     test_copy_and_cut_text,
     test_paste_options_button,
     test_double_click_empty_slide_adds_text_box,
+    test_format_painter,
 ]
 
 

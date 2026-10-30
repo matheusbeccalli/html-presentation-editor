@@ -19,7 +19,9 @@
         {
             id: 'home', label: 'Home',
             groups: [
-                { label: 'Clipboard', commands: [['paste', 'paste'], ['cut', 'cut'], ['copy', 'copy'], ['duplicate', 'duplicate']] },
+                // A third entry: the command a double-click runs (the format painter stays on).
+                { label: 'Clipboard', commands: [['paste', 'paste'], ['cut', 'cut'], ['copy', 'copy'], ['duplicate', 'duplicate'],
+                    ['formatPainter', 'formatPainter', 'formatPainterLocked']] },
                 { label: 'History', commands: [['undo', 'undo'], ['redo', 'redo']] },
                 // Text groups: rows of small buttons (the name shows on hover), as in PowerPoint.
                 {
@@ -81,7 +83,7 @@
     const buttons = [];   // [{ button, command }] so enabled states can be refreshed
 
     /* A ribbon button; small ones show only the icon (the name is in the tooltip). */
-    function commandButton(command, iconName, small) {
+    function commandButton(command, iconName, small, doubleClickCommand) {
         const keys = App.shortcuts.keysFor(command);
         const button = el('button', {
             type: 'button', class: 'ribbon-button' + (small ? ' small' : ''),
@@ -90,6 +92,9 @@
             'data-command': command,
             onclick: () => App.commands.run(command),
         });
+        if (doubleClickCommand) {
+            button.addEventListener('dblclick', () => App.commands.run(doubleClickCommand));
+        }
         if (App.commands.keepsEdit(command)) {
             // Works on the text being edited: pressing it must not end editing (text.js) or
             // take the focus, and with it the cursor, out of the text.
@@ -121,7 +126,8 @@
                         ? App.textControls.create(item.control) : commandButton(item[0], item[1], true))))));
             } else {
                 buttonsNode = el('div', { class: 'ribbon-group-buttons' });
-                group.commands.forEach(([command, icon]) => buttonsNode.appendChild(commandButton(command, icon)));
+                group.commands.forEach(([command, icon, onDouble]) =>
+                    buttonsNode.appendChild(commandButton(command, icon, false, onDouble)));
             }
             groupNode.append(buttonsNode, el('div', { class: 'ribbon-group-label' }, [group.label]));
             panel.appendChild(groupNode);
@@ -212,7 +218,7 @@
         });
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
-         'recent-changed', 'text-edit-changed', 'text-selection-changed']
+         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 

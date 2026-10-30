@@ -1363,3 +1363,56 @@ test('paste as plain text: numbers stay (they mean something), a tab after them 
     assertEqual((await pasted(['p1:|'], { html: '', text: '1.\tUm\r\na.\tDois\r\n•\tTrês\r\no\tQuatro' }, 'plain')).lines,
         ['p1:1. Um', 'p1:a. Dois', 'p1:Três', 'p1:Quatro|']);
 });
+
+// ---------------------------------------------------------------
+// Format painter (SPEC Phase 3): pickLook / lookAction
+// ---------------------------------------------------------------
+
+test('format painter: picks up the full look of the character at the cursor, and its line’s paragraph look', async () => {
+    const box = await formatBox(['<b><span style="color: red; font-size: 24pt">Al|fa</span></b>'], 'font-family: Georgia, serif; text-align: center;');
+    box.el.firstElementChild.style.lineHeight = '1.8';
+    const look = App.text.pickLook(box.el, box.caret);
+    assertEqual(look.formats, ['b']);
+    assertEqual(look.styles, { 'font-size': '24pt', color: 'red', 'font-family': 'Georgia, serif' });
+    assertEqual(look.paragraph, { 'line-height': '1.8', 'text-align': 'center' });
+    box.frame.remove();
+});
+
+test('format painter: the look replaces the selection’s (other formatting goes)', async () => {
+    const box = await formatBox(['Alfa <u>[Beta]</u> Gama']);
+    const look = { formats: ['b', 'i'], styles: { 'font-size': '24pt', color: 'red' }, paragraph: { 'text-align': 'right' } };
+    App.text.runAction(box.el, App.text.lookAction(box.el, box.caret, look));
+    assertEqual(box.el.firstElementChild.innerHTML, 'Alfa <span style="font-size: 24pt; color: red;"><b><i>Beta</i></b></span> Gama');
+    assertEqual(box.el.firstElementChild.style.textAlign, '', 'part of a line: no paragraph look');
+    box.frame.remove();
+});
+
+test('format painter: a cursor inside a word paints the word; whole lines also get the paragraph look', async () => {
+    let box = await formatBox(['Alfa Be|ta']);
+    const look = { formats: ['i'], styles: {}, paragraph: { 'text-align': 'center', 'margin-top': '12pt' } };
+    App.text.runAction(box.el, App.text.lookAction(box.el, box.caret, look));
+    assertEqual(box.el.firstElementChild.innerHTML, 'Alfa <i>Beta</i>');
+    box.frame.remove();
+    box = await formatBox(['[Alfa', 'Beta]', 'Gama']);
+    App.text.runAction(box.el, App.text.lookAction(box.el, box.caret, look));
+    assertEqual(Array.from(box.el.children).map((p) => [p.innerHTML, p.style.textAlign, p.style.marginTop]),
+        [['<i>Alfa</i>', 'center', '12pt'], ['<i>Beta</i>', 'center', '12pt'], ['Gama', '', '']]);
+    box.frame.remove();
+});
+
+test('format painter: on a whole box (no cursor) every line takes the look; a not-bold look un-bolds a bold box', async () => {
+    const box = await formatBox(['Al|fa', '<span style="color: blue">Beta</span>'], 'font-weight: bold; font-size: 18pt;');
+    App.text.runAction(box.el, App.text.lookAction(box.el, null,
+        { formats: [], styles: { 'font-size': '30pt', color: 'red' }, paragraph: { 'text-align': 'center' } }));
+    assertEqual(Array.from(box.el.children).map((p) => [p.innerHTML, p.style.textAlign]), [['Alfa', 'center'], ['Beta', 'center']]);
+    assertEqual([box.el.style.fontWeight, box.el.style.fontSize, box.el.style.color], ['normal', '30pt', 'red']);
+    box.frame.remove();
+});
+
+test('format painter: values the target box already has are not repeated on the text', async () => {
+    const box = await formatBox(['Alfa [Beta]'], 'font-family: var(--font-body); font-size: 16.5pt;');
+    App.text.runAction(box.el, App.text.lookAction(box.el, box.caret,
+        { formats: ['b'], styles: { 'font-family': 'var(--font-body)', 'font-size': '20pt' }, paragraph: {} }));
+    assertEqual(box.el.firstElementChild.innerHTML, 'Alfa <span style="font-size: 20pt;"><b>Beta</b></span>');
+    box.frame.remove();
+});

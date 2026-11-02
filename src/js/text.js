@@ -821,6 +821,56 @@
         }
     };
 
+    // ---------------------------------------------------------------
+    // Where text lives: text boxes and table cells ("containers")
+    // ---------------------------------------------------------------
+
+    function isCell(container) {
+        return tagOf(container) === 'td';
+    }
+
+    /* The slide element around a container: the text box itself, or the table of a cell. */
+    function boxOf(container) {
+        return isCell(container) ? container.closest('.el') : container;
+    }
+
+    /* Every text box and table cell inside `root`, in reading order (find & replace walks them). */
+    App.text.containersIn = function containersIn(root) {
+        return Array.from(root.querySelectorAll('.el[data-type="text"], ' + App.tables.CELL_SELECTOR));
+    };
+
+    /*
+     * A name for a container that survives the slide being rebuilt (undo):
+     * a text box's data-id, or "tableId/row/cell" for a table cell.
+     */
+    App.text.containerKey = function containerKey(container) {
+        if (!isCell(container)) {
+            return container.getAttribute('data-id');
+        }
+        const row = container.parentElement;
+        return boxOf(container).getAttribute('data-id') + '/' + row.rowIndex + '/' + container.cellIndex;
+    };
+
+    /* The container named `key` on slide `slideId` of `doc`, or null. */
+    App.text.findContainer = function findContainer(doc, slideId, key) {
+        const [id, row, cell] = key.split('/');
+        const element = doc.querySelector('[data-slide-id="' + CSS.escape(slideId) + '"] [data-id="' + CSS.escape(id) + '"]');
+        if (!element || row === undefined) {
+            return element;
+        }
+        const table = element.querySelector(':scope > table');
+        const tableRow = table && table.rows[Number(row)];
+        return (tableRow && tableRow.cells[Number(cell)]) || null;
+    };
+
+    /*
+     * After the text changed: a text box fits its text (autofit), a table its
+     * rows (a row grows with its text). Returns true when the box changed size.
+     */
+    App.text.fitBox = function fitBox(container) {
+        return isCell(container) ? App.tables.fitTable(boxOf(container)) : App.text.fitText(container);
+    };
+
     /*
      * The text as data: [{ list, level, start, text }] per paragraph; a <br>
      * inside a line is '\n' (a <br> that only keeps an empty line open is not).
@@ -2785,9 +2835,11 @@
     }
 
     /*
-     * Start editing `element`. options.point { x, y } (slide px) puts the cursor
-     * where the user double-clicked; options.caret 'start' or (default) the end.
-     * options.isNew: a box just inserted, removed again if left empty.
+     * Start editing `element`: a text box, or a table cell (the table stays the
+     * selected element). options.point { x, y } (slide px) puts the cursor where
+     * the user clicked; options.caret 'start', 'all' (all its text selected, as
+     * Tab into a cell does) or (default) the end. options.isNew: a box just
+     * inserted, removed again if left empty.
      */
     App.text.enterEdit = function enterEdit(element, options) {
         const settings = options || {};
@@ -2803,7 +2855,7 @@
             emptyNewBox = null;   // typing in it again: it is the editing box's "new" again
         }
         editing = {
-            element: element, id: element.getAttribute('data-id'), doc: doc, isNew: !!settings.isNew || stillNew,
+            element: element, id: App.text.containerKey(element), doc: doc, isNew: !!settings.isNew || stillNew,
             slideId: element.closest('section.slide').getAttribute('data-slide-id'),
         };
         if (!doc.documentElement.getAttribute('lang')) {
@@ -2851,8 +2903,9 @@
                 return;
             }
         }
-        App.text.setCaret(element, settings.caret === 'start'
-            ? { anchor: { p: 0, o: 0 }, focus: { p: 0, o: 0 } } : END_OF_TEXT);
+        const start = { p: 0, o: 0 };
+        const caret = { start: caretAt(start), all: { anchor: start, focus: END_OF_TEXT.focus } }[settings.caret];
+        App.text.setCaret(element, caret || END_OF_TEXT);
     }
 
     /*
@@ -2876,8 +2929,12 @@
         const element = state.element;
         if (element.isConnected) {
             detachFromElement(element);
-            App.text.normalize(element);
-            App.text.fitText(element);
+            if (isCell(element)) {
+                App.text.normalizeCell(element);
+            } else {
+                App.text.normalize(element);
+            }
+            App.text.fitBox(element);
             element.blur();
             state.doc.getSelection().removeAllRanges();
             const keepSelected = !options || options.select !== false;
@@ -2890,7 +2947,7 @@
                 }
             }
             if (keepSelected && element.isConnected) {
-                App.selection.select(element);
+                App.selection.select(boxOf(element));
             }
         }
         window.focus();
@@ -2975,7 +3032,7 @@
                 event.preventDefault();   // typed here by insertStyled instead, with the chosen formatting
                 insertStyled(editing.element, caret.focus, event.data, pending.styles);
                 pending = null;
-                if (App.text.fitText(editing.element)) {
+                if (App.text.fitBox(editing.element)) {
                     App.selection.refresh();
                 }
             }
@@ -3035,7 +3092,7 @@
                 runInEditor(format);   // its own undo step, after the typed "- "
             }
         }
-        if (App.text.fitText(element)) {
+        if (App.text.fitBox(element)) {
             App.selection.refresh();
         }
     }
@@ -3148,6 +3205,13 @@
         } else if (ctrl && !event.altKey && !event.shiftKey && key === 'y') {
             command = 'redo';
         }
+        if (!command && event.key === 'Tab' && !ctrl && !event.altKey && isCell(editing.element)) {
+            // In a table, Tab and Shift+Tab go to the next / previous cell, as in PowerPoint.
+            event.preventDefault();
+            event.stopPropagation();
+            moveToCell(event.shiftKey ? -1 : 1);
+            return;
+        }
         if (!command) {
             const action = editing.element.contains(event.target) ? App.text.keyAction(editing.element, event) : null;
             if (action) {
@@ -3172,6 +3236,33 @@
     }
 
     /*
+     * Tab (step 1) / Shift+Tab (-1) in a table cell: edit the next / previous cell
+     * with all its text selected. Tab in the last cell adds a row (one undo step)
+     * and goes to its first cell.
+     */
+    function moveToCell(step) {
+        const cell = editing.element;
+        const next = App.tables.nextCell(cell, step);
+        if (next) {
+            App.text.enterEdit(next, { caret: 'all' });
+            return;
+        }
+        if (step < 0) {
+            return;
+        }
+        const box = boxOf(cell);
+        const slideId = editing.slideId;
+        App.text.exitEdit({ select: false });
+        let row = null;
+        App.history.change('Insert row', { slideId: slideId }, () => {
+            row = App.tables.appendRow(box.querySelector(':scope > table'));
+            App.tables.fitTable(box);
+        });
+        App.selection.select(box);
+        App.text.enterEdit(row.cells[0], { caret: 'start' });
+    }
+
+    /*
      * Run a text action (a bullet key, AutoFormat, a toolbar command) as one undo
      * step that remembers the cursor before and after it.
      */
@@ -3186,7 +3277,7 @@
             applying = false;
         }
         meta.caretAfter = App.text.getCaret(element);
-        if (App.text.fitText(element)) {
+        if (App.text.fitBox(element)) {
             App.selection.refresh();
         }
     }
@@ -3265,7 +3356,7 @@
     function runOnBox(element, action) {
         App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, () => {
             App.text.runAction(element, action);
-            App.text.fitText(element);
+            App.text.fitBox(element);
         });
         App.selection.refresh();
     }
@@ -3273,7 +3364,7 @@
     /* Find: edit the match's box (it must be on the slide shown) and select the match in it. */
     App.text.selectMatch = function selectMatch(element, match) {
         if (!editing || editing.element !== element) {
-            App.selection.select(element);
+            App.selection.select(boxOf(element));
             App.text.enterEdit(element);
         }
         App.text.setCaret(element, { anchor: { p: match.p, o: match.start }, focus: { p: match.p, o: match.end } });
@@ -3439,9 +3530,19 @@
         return target ? App.text.listState(target.element, target.caret) : { bullet: false, number: false };
     };
 
-    /* A press on the slide outside the text: leave edit mode and select what is there. */
+    /*
+     * A press on the slide outside the text: leave edit mode and select what is
+     * there. A press in a table cell edits that cell instead; the browser then
+     * puts the cursor (or starts a mouse selection) there itself.
+     */
     function onDeckPointerDown(event) {
         if (!editing || editing.element.contains(event.target)) {
+            return;
+        }
+        const cell = !painter && event.target.closest ? event.target.closest(App.tables.CELL_SELECTOR) : null;
+        if (cell) {
+            App.selection.select(boxOf(cell));
+            App.text.enterEdit(cell, { point: { x: event.clientX, y: event.clientY } });
             return;
         }
         event.preventDefault();
@@ -3490,8 +3591,7 @@
         if (editing.element.isConnected) {
             return;
         }
-        const found = doc && doc.querySelector('[data-slide-id="' + CSS.escape(editing.slideId) + '"] [data-id="' +
-            CSS.escape(editing.id) + '"]');
+        const found = doc && App.text.findContainer(doc, editing.slideId, editing.id);
         if (!found) {
             App.text.exitEdit({ select: false });
             return;
@@ -3502,7 +3602,7 @@
         const meta = info.meta && info.meta.textId === editing.id ? info.meta : null;
         const caret = meta && (info.action === 'undo' ? meta.caretBefore : meta.caretAfter);
         App.text.setCaret(found, caret || END_OF_TEXT);
-        App.selection.select(found);
+        App.selection.select(boxOf(found));
     }
 
     /* Wiring, called once from App.start(). */

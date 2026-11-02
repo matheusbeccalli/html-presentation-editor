@@ -15,7 +15,8 @@
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
- * Double-click on a text box starts editing it (text.js). Insert mode
+ * Double-click on a text box starts editing it (text.js); a click into a
+ * table (no drag) types in the cell under the mouse. Insert mode
  * (armInsert): the next click or drag on the slide gives a spot to a callback,
  * e.g. Insert > Text box.
  *
@@ -161,9 +162,22 @@
             App.text.enterEdit(element, { point: point });
             return;
         }
+        if (element && element.getAttribute('data-type') === 'table') {
+            editCellAt(element, point);
+            return;
+        }
         const slide = App.deck.getCurrentSlide();
         if (!element && slide && point.x >= 0 && point.y >= 0 && point.x < slide.offsetWidth && point.y < slide.offsetHeight) {
             App.elements.insertTextBox({ left: Math.round(point.x), top: Math.round(point.y), width: null });
+        }
+    }
+
+    /* A click into a table types in the cell under it, as in PowerPoint (a drag still moves the table). */
+    function editCellAt(element, point) {
+        const cell = App.tables.cellAt(element, point.x, point.y);
+        if (cell) {
+            App.selection.select(element);
+            App.text.enterEdit(cell, { point: point });
         }
     }
 
@@ -308,7 +322,7 @@
             App.transform.writeRect(element, rect);
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
-                App.tables.fitTable(element);   // a table's columns and rows follow the box
+                App.tables.fitTable(element, { resized: true });   // a table's columns and rows follow the box
             }
             App.selection.refresh();
             App.events.emit('selection-dragged');   // the Format pane shows the values live
@@ -320,6 +334,9 @@
             overlay.removeEventListener('pointercancel', onCancel);
             window.removeEventListener('keydown', onKey, true);
             if (!started) {
+                if (kind === 'move' && !cancelled && element.getAttribute('data-type') === 'table') {
+                    editCellAt(element, start);
+                }
                 return;
             }
             dragging = false;

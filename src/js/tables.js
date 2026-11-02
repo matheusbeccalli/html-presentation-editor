@@ -212,14 +212,15 @@
     // ---------------------------------------------------------------
 
     /*
-     * Make the table fill its element's box after a resize: the columns scale to
-     * the new width and the rows to the new height, keeping their proportions.
-     * A row never gets shorter than its text (the browser draws it taller), so
-     * the drawn row heights are written back and the box takes the table's real
-     * height, as in PowerPoint. Needs the slide to be shown (it measures).
-     * Returns true when something changed.
+     * Make the table fit its element's box after an edit, or after a resize
+     * (options.resized): the columns scale to the box's width; after a resize
+     * the rows scale to its new height too, keeping their proportions. A row's
+     * height is its minimum: the browser draws it taller when its text needs
+     * it, and it goes back when the text is gone, as in PowerPoint. Either way
+     * the box then takes the rows' real height. Needs the slide to be shown
+     * (it measures). Returns true when something changed.
      */
-    App.tables.fitTable = function fitTable(element) {
+    App.tables.fitTable = function fitTable(element, options) {
         const table = element && element.getAttribute('data-type') === 'table' ? element.querySelector(':scope > table') : null;
         if (!table) {
             return false;
@@ -234,15 +235,14 @@
                 .forEach((value, index) => cols[index].style.setProperty('width', value + 'px'));
         }
         const height = parseFloat(element.style.height);
-        if (rows.length > 0 && height > 0) {
+        if (options && options.resized && rows.length > 0 && height > 0) {
             scaleTo(rows.map((row) => parseFloat(row.style.height) || 0), height)
                 .forEach((value, index) => rows[index].style.setProperty('height', value + 'px'));
         }
-        if (table.getBoundingClientRect().height > 0) {   // laid out: write down what the browser drew
-            const drawn = rows.map((row) => round2(row.getBoundingClientRect().height));
-            drawn.forEach((value, index) => rows[index].style.setProperty('height', value + 'px'));
+        if (table.getBoundingClientRect().height > 0) {   // laid out: the box is as tall as the rows drawn
             // The rows, not the table: half of the last row's bottom line hangs below it (collapsed borders).
-            element.style.setProperty('height', round2(drawn.reduce((a, b) => a + b, 0)) + 'px');
+            const drawn = rows.reduce((sum, row) => sum + row.getBoundingClientRect().height, 0);
+            element.style.setProperty('height', round2(drawn) + 'px');
         }
         return sizesOf(element, cols, rows) !== before;
     };
@@ -250,6 +250,55 @@
     function sizesOf(element, cols, rows) {
         return [element.style.height].concat(cols.map((col) => col.style.width), rows.map((row) => row.style.height)).join();
     }
+
+    // ---------------------------------------------------------------
+    // Rows and cells
+    // ---------------------------------------------------------------
+
+    /*
+     * Add a row at the end, like the last one: its height and, per column, the
+     * look of the cell above (fill, borders, merged across), with empty text.
+     * A cell merged down into the last row ends there; the new row gets a cell
+     * of its own in that column. Returns the new <tr>.
+     */
+    App.tables.appendRow = function appendRow(table) {
+        const grid = App.tables.gridOf(table);
+        const last = table.rows[table.rows.length - 1];
+        const row = table.ownerDocument.createElement('tr');
+        if (last.style.height) {
+            row.style.setProperty('height', last.style.height);
+        }
+        const above = grid.cells[grid.rows - 1];
+        above.forEach((cell, c) => {
+            if (cell && c > 0 && above[c - 1] === cell) {
+                return;   // the rest of a cell merged across: already covered
+            }
+            const copy = cell ? cell.cloneNode(false) : table.ownerDocument.createElement('td');
+            copy.removeAttribute('rowspan');
+            App.text.normalizeCell(copy);
+            row.appendChild(copy);
+        });
+        last.parentElement.appendChild(row);
+        return row;
+    };
+
+    /* The cell of a table element under slide point (x, y), or null (the slide must be shown). */
+    App.tables.cellAt = function cellAt(element, x, y) {
+        const hit = element.ownerDocument.elementFromPoint(x, y);
+        const cell = hit && hit.closest('td');
+        return cell && element.contains(cell) ? cell : null;
+    };
+
+    /* The cell `step` places after `cell` (-1: before it) in reading order, or null at either end. */
+    App.tables.nextCell = function nextCell(cell, step) {
+        const cells = Array.from(cell.closest('tbody').querySelectorAll(':scope > tr > td'));
+        return cells[cells.indexOf(cell) + step] || null;
+    };
+
+    /* The first cell of a table element, in reading order. */
+    App.tables.firstCell = function firstCell(element) {
+        return element.querySelector(':scope > table > tbody > tr > td');
+    };
 
     // ---------------------------------------------------------------
     // Converting a rendered table into the model (import, older decks)

@@ -2549,6 +2549,56 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     };
 
+    // ---------------------------------------------------------------
+    // Where text lives: text boxes and table cells ("containers")
+    // ---------------------------------------------------------------
+
+    function isCell(container) {
+        return tagOf(container) === 'td';
+    }
+
+    /* The slide element around a container: the text box itself, or the table of a cell. */
+    function boxOf(container) {
+        return isCell(container) ? container.closest('.el') : container;
+    }
+
+    /* Every text box and table cell inside `root`, in reading order (find & replace walks them). */
+    App.text.containersIn = function containersIn(root) {
+        return Array.from(root.querySelectorAll('.el[data-type="text"], ' + App.tables.CELL_SELECTOR));
+    };
+
+    /*
+     * A name for a container that survives the slide being rebuilt (undo):
+     * a text box's data-id, or "tableId/row/cell" for a table cell.
+     */
+    App.text.containerKey = function containerKey(container) {
+        if (!isCell(container)) {
+            return container.getAttribute('data-id');
+        }
+        const row = container.parentElement;
+        return boxOf(container).getAttribute('data-id') + '/' + row.rowIndex + '/' + container.cellIndex;
+    };
+
+    /* The container named `key` on slide `slideId` of `doc`, or null. */
+    App.text.findContainer = function findContainer(doc, slideId, key) {
+        const [id, row, cell] = key.split('/');
+        const element = doc.querySelector('[data-slide-id="' + CSS.escape(slideId) + '"] [data-id="' + CSS.escape(id) + '"]');
+        if (!element || row === undefined) {
+            return element;
+        }
+        const table = element.querySelector(':scope > table');
+        const tableRow = table && table.rows[Number(row)];
+        return (tableRow && tableRow.cells[Number(cell)]) || null;
+    };
+
+    /*
+     * After the text changed: a text box fits its text (autofit), a table its
+     * rows (a row grows with its text). Returns true when the box changed size.
+     */
+    App.text.fitBox = function fitBox(container) {
+        return isCell(container) ? App.tables.fitTable(boxOf(container)) : App.text.fitText(container);
+    };
+
     /*
      * The text as data: [{ list, level, start, text }] per paragraph; a <br>
      * inside a line is '\n' (a <br> that only keeps an empty line open is not).
@@ -4513,9 +4563,11 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     /*
-     * Start editing `element`. options.point { x, y } (slide px) puts the cursor
-     * where the user double-clicked; options.caret 'start' or (default) the end.
-     * options.isNew: a box just inserted, removed again if left empty.
+     * Start editing `element`: a text box, or a table cell (the table stays the
+     * selected element). options.point { x, y } (slide px) puts the cursor where
+     * the user clicked; options.caret 'start', 'all' (all its text selected, as
+     * Tab into a cell does) or (default) the end. options.isNew: a box just
+     * inserted, removed again if left empty.
      */
     App.text.enterEdit = function enterEdit(element, options) {
         const settings = options || {};
@@ -4531,7 +4583,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             emptyNewBox = null;   // typing in it again: it is the editing box's "new" again
         }
         editing = {
-            element: element, id: element.getAttribute('data-id'), doc: doc, isNew: !!settings.isNew || stillNew,
+            element: element, id: App.text.containerKey(element), doc: doc, isNew: !!settings.isNew || stillNew,
             slideId: element.closest('section.slide').getAttribute('data-slide-id'),
         };
         if (!doc.documentElement.getAttribute('lang')) {
@@ -4579,8 +4631,9 @@ App.template.newDeckHtml = function newDeckHtml() {
                 return;
             }
         }
-        App.text.setCaret(element, settings.caret === 'start'
-            ? { anchor: { p: 0, o: 0 }, focus: { p: 0, o: 0 } } : END_OF_TEXT);
+        const start = { p: 0, o: 0 };
+        const caret = { start: caretAt(start), all: { anchor: start, focus: END_OF_TEXT.focus } }[settings.caret];
+        App.text.setCaret(element, caret || END_OF_TEXT);
     }
 
     /*
@@ -4604,8 +4657,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         const element = state.element;
         if (element.isConnected) {
             detachFromElement(element);
-            App.text.normalize(element);
-            App.text.fitText(element);
+            if (isCell(element)) {
+                App.text.normalizeCell(element);
+            } else {
+                App.text.normalize(element);
+            }
+            App.text.fitBox(element);
             element.blur();
             state.doc.getSelection().removeAllRanges();
             const keepSelected = !options || options.select !== false;
@@ -4618,7 +4675,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 }
             }
             if (keepSelected && element.isConnected) {
-                App.selection.select(element);
+                App.selection.select(boxOf(element));
             }
         }
         window.focus();
@@ -4703,7 +4760,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 event.preventDefault();   // typed here by insertStyled instead, with the chosen formatting
                 insertStyled(editing.element, caret.focus, event.data, pending.styles);
                 pending = null;
-                if (App.text.fitText(editing.element)) {
+                if (App.text.fitBox(editing.element)) {
                     App.selection.refresh();
                 }
             }
@@ -4763,7 +4820,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 runInEditor(format);   // its own undo step, after the typed "- "
             }
         }
-        if (App.text.fitText(element)) {
+        if (App.text.fitBox(element)) {
             App.selection.refresh();
         }
     }
@@ -4876,6 +4933,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         } else if (ctrl && !event.altKey && !event.shiftKey && key === 'y') {
             command = 'redo';
         }
+        if (!command && event.key === 'Tab' && !ctrl && !event.altKey && isCell(editing.element)) {
+            // In a table, Tab and Shift+Tab go to the next / previous cell, as in PowerPoint.
+            event.preventDefault();
+            event.stopPropagation();
+            moveToCell(event.shiftKey ? -1 : 1);
+            return;
+        }
         if (!command) {
             const action = editing.element.contains(event.target) ? App.text.keyAction(editing.element, event) : null;
             if (action) {
@@ -4900,6 +4964,33 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     /*
+     * Tab (step 1) / Shift+Tab (-1) in a table cell: edit the next / previous cell
+     * with all its text selected. Tab in the last cell adds a row (one undo step)
+     * and goes to its first cell.
+     */
+    function moveToCell(step) {
+        const cell = editing.element;
+        const next = App.tables.nextCell(cell, step);
+        if (next) {
+            App.text.enterEdit(next, { caret: 'all' });
+            return;
+        }
+        if (step < 0) {
+            return;
+        }
+        const box = boxOf(cell);
+        const slideId = editing.slideId;
+        App.text.exitEdit({ select: false });
+        let row = null;
+        App.history.change('Insert row', { slideId: slideId }, () => {
+            row = App.tables.appendRow(box.querySelector(':scope > table'));
+            App.tables.fitTable(box);
+        });
+        App.selection.select(box);
+        App.text.enterEdit(row.cells[0], { caret: 'start' });
+    }
+
+    /*
      * Run a text action (a bullet key, AutoFormat, a toolbar command) as one undo
      * step that remembers the cursor before and after it.
      */
@@ -4914,7 +5005,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             applying = false;
         }
         meta.caretAfter = App.text.getCaret(element);
-        if (App.text.fitText(element)) {
+        if (App.text.fitBox(element)) {
             App.selection.refresh();
         }
     }
@@ -4993,7 +5084,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     function runOnBox(element, action) {
         App.history.change(action.label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') }, () => {
             App.text.runAction(element, action);
-            App.text.fitText(element);
+            App.text.fitBox(element);
         });
         App.selection.refresh();
     }
@@ -5001,7 +5092,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* Find: edit the match's box (it must be on the slide shown) and select the match in it. */
     App.text.selectMatch = function selectMatch(element, match) {
         if (!editing || editing.element !== element) {
-            App.selection.select(element);
+            App.selection.select(boxOf(element));
             App.text.enterEdit(element);
         }
         App.text.setCaret(element, { anchor: { p: match.p, o: match.start }, focus: { p: match.p, o: match.end } });
@@ -5167,9 +5258,19 @@ App.template.newDeckHtml = function newDeckHtml() {
         return target ? App.text.listState(target.element, target.caret) : { bullet: false, number: false };
     };
 
-    /* A press on the slide outside the text: leave edit mode and select what is there. */
+    /*
+     * A press on the slide outside the text: leave edit mode and select what is
+     * there. A press in a table cell edits that cell instead; the browser then
+     * puts the cursor (or starts a mouse selection) there itself.
+     */
     function onDeckPointerDown(event) {
         if (!editing || editing.element.contains(event.target)) {
+            return;
+        }
+        const cell = !painter && event.target.closest ? event.target.closest(App.tables.CELL_SELECTOR) : null;
+        if (cell) {
+            App.selection.select(boxOf(cell));
+            App.text.enterEdit(cell, { point: { x: event.clientX, y: event.clientY } });
             return;
         }
         event.preventDefault();
@@ -5218,8 +5319,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (editing.element.isConnected) {
             return;
         }
-        const found = doc && doc.querySelector('[data-slide-id="' + CSS.escape(editing.slideId) + '"] [data-id="' +
-            CSS.escape(editing.id) + '"]');
+        const found = doc && App.text.findContainer(doc, editing.slideId, editing.id);
         if (!found) {
             App.text.exitEdit({ select: false });
             return;
@@ -5230,7 +5330,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const meta = info.meta && info.meta.textId === editing.id ? info.meta : null;
         const caret = meta && (info.action === 'undo' ? meta.caretBefore : meta.caretAfter);
         App.text.setCaret(found, caret || END_OF_TEXT);
-        App.selection.select(found);
+        App.selection.select(boxOf(found));
     }
 
     /* Wiring, called once from App.start(). */
@@ -5722,14 +5822,15 @@ App.template.newDeckHtml = function newDeckHtml() {
     // ---------------------------------------------------------------
 
     /*
-     * Make the table fill its element's box after a resize: the columns scale to
-     * the new width and the rows to the new height, keeping their proportions.
-     * A row never gets shorter than its text (the browser draws it taller), so
-     * the drawn row heights are written back and the box takes the table's real
-     * height, as in PowerPoint. Needs the slide to be shown (it measures).
-     * Returns true when something changed.
+     * Make the table fit its element's box after an edit, or after a resize
+     * (options.resized): the columns scale to the box's width; after a resize
+     * the rows scale to its new height too, keeping their proportions. A row's
+     * height is its minimum: the browser draws it taller when its text needs
+     * it, and it goes back when the text is gone, as in PowerPoint. Either way
+     * the box then takes the rows' real height. Needs the slide to be shown
+     * (it measures). Returns true when something changed.
      */
-    App.tables.fitTable = function fitTable(element) {
+    App.tables.fitTable = function fitTable(element, options) {
         const table = element && element.getAttribute('data-type') === 'table' ? element.querySelector(':scope > table') : null;
         if (!table) {
             return false;
@@ -5744,15 +5845,14 @@ App.template.newDeckHtml = function newDeckHtml() {
                 .forEach((value, index) => cols[index].style.setProperty('width', value + 'px'));
         }
         const height = parseFloat(element.style.height);
-        if (rows.length > 0 && height > 0) {
+        if (options && options.resized && rows.length > 0 && height > 0) {
             scaleTo(rows.map((row) => parseFloat(row.style.height) || 0), height)
                 .forEach((value, index) => rows[index].style.setProperty('height', value + 'px'));
         }
-        if (table.getBoundingClientRect().height > 0) {   // laid out: write down what the browser drew
-            const drawn = rows.map((row) => round2(row.getBoundingClientRect().height));
-            drawn.forEach((value, index) => rows[index].style.setProperty('height', value + 'px'));
+        if (table.getBoundingClientRect().height > 0) {   // laid out: the box is as tall as the rows drawn
             // The rows, not the table: half of the last row's bottom line hangs below it (collapsed borders).
-            element.style.setProperty('height', round2(drawn.reduce((a, b) => a + b, 0)) + 'px');
+            const drawn = rows.reduce((sum, row) => sum + row.getBoundingClientRect().height, 0);
+            element.style.setProperty('height', round2(drawn) + 'px');
         }
         return sizesOf(element, cols, rows) !== before;
     };
@@ -5760,6 +5860,55 @@ App.template.newDeckHtml = function newDeckHtml() {
     function sizesOf(element, cols, rows) {
         return [element.style.height].concat(cols.map((col) => col.style.width), rows.map((row) => row.style.height)).join();
     }
+
+    // ---------------------------------------------------------------
+    // Rows and cells
+    // ---------------------------------------------------------------
+
+    /*
+     * Add a row at the end, like the last one: its height and, per column, the
+     * look of the cell above (fill, borders, merged across), with empty text.
+     * A cell merged down into the last row ends there; the new row gets a cell
+     * of its own in that column. Returns the new <tr>.
+     */
+    App.tables.appendRow = function appendRow(table) {
+        const grid = App.tables.gridOf(table);
+        const last = table.rows[table.rows.length - 1];
+        const row = table.ownerDocument.createElement('tr');
+        if (last.style.height) {
+            row.style.setProperty('height', last.style.height);
+        }
+        const above = grid.cells[grid.rows - 1];
+        above.forEach((cell, c) => {
+            if (cell && c > 0 && above[c - 1] === cell) {
+                return;   // the rest of a cell merged across: already covered
+            }
+            const copy = cell ? cell.cloneNode(false) : table.ownerDocument.createElement('td');
+            copy.removeAttribute('rowspan');
+            App.text.normalizeCell(copy);
+            row.appendChild(copy);
+        });
+        last.parentElement.appendChild(row);
+        return row;
+    };
+
+    /* The cell of a table element under slide point (x, y), or null (the slide must be shown). */
+    App.tables.cellAt = function cellAt(element, x, y) {
+        const hit = element.ownerDocument.elementFromPoint(x, y);
+        const cell = hit && hit.closest('td');
+        return cell && element.contains(cell) ? cell : null;
+    };
+
+    /* The cell `step` places after `cell` (-1: before it) in reading order, or null at either end. */
+    App.tables.nextCell = function nextCell(cell, step) {
+        const cells = Array.from(cell.closest('tbody').querySelectorAll(':scope > tr > td'));
+        return cells[cells.indexOf(cell) + step] || null;
+    };
+
+    /* The first cell of a table element, in reading order. */
+    App.tables.firstCell = function firstCell(element) {
+        return element.querySelector(':scope > table > tbody > tr > td');
+    };
 
     // ---------------------------------------------------------------
     // Converting a rendered table into the model (import, older decks)
@@ -8482,7 +8631,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
- * Double-click on a text box starts editing it (text.js). Insert mode
+ * Double-click on a text box starts editing it (text.js); a click into a
+ * table (no drag) types in the cell under the mouse. Insert mode
  * (armInsert): the next click or drag on the slide gives a spot to a callback,
  * e.g. Insert > Text box.
  *
@@ -8628,9 +8778,22 @@ App.template.newDeckHtml = function newDeckHtml() {
             App.text.enterEdit(element, { point: point });
             return;
         }
+        if (element && element.getAttribute('data-type') === 'table') {
+            editCellAt(element, point);
+            return;
+        }
         const slide = App.deck.getCurrentSlide();
         if (!element && slide && point.x >= 0 && point.y >= 0 && point.x < slide.offsetWidth && point.y < slide.offsetHeight) {
             App.elements.insertTextBox({ left: Math.round(point.x), top: Math.round(point.y), width: null });
+        }
+    }
+
+    /* A click into a table types in the cell under it, as in PowerPoint (a drag still moves the table). */
+    function editCellAt(element, point) {
+        const cell = App.tables.cellAt(element, point.x, point.y);
+        if (cell) {
+            App.selection.select(element);
+            App.text.enterEdit(cell, { point: point });
         }
     }
 
@@ -8775,7 +8938,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             App.transform.writeRect(element, rect);
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
-                App.tables.fitTable(element);   // a table's columns and rows follow the box
+                App.tables.fitTable(element, { resized: true });   // a table's columns and rows follow the box
             }
             App.selection.refresh();
             App.events.emit('selection-dragged');   // the Format pane shows the values live
@@ -8787,6 +8950,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             overlay.removeEventListener('pointercancel', onCancel);
             window.removeEventListener('keydown', onKey, true);
             if (!started) {
+                if (kind === 'move' && !cancelled && element.getAttribute('data-type') === 'table') {
+                    editCellAt(element, start);
+                }
                 return;
             }
             dragging = false;
@@ -9222,7 +9388,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.history.change(label, scope, () => {
             App.transform.writeRect(element, next);
             App.text.fitText(element);   // autofit follows a new size
-            App.tables.fitTable(element);   // so do a table's columns and rows
+            App.tables.fitTable(element, { resized: true });   // so do a table's columns and rows
         });
         // history-changed redraws the selection box and this pane.
     }
@@ -11663,13 +11829,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
 
         // ---- Text (text.js) ----
-        const selectedText = () => {
+        // Enter / F2: type in the selected text box, or in the first cell of the selected table.
+        const textToEdit = () => {
             const element = App.selection.getElement();
-            return element && element.getAttribute('data-type') === 'text' ? element : null;
+            const type = element && element.getAttribute('data-type');
+            return type === 'text' ? element : type === 'table' ? App.tables.firstCell(element) : null;
         };
         App.commands.define('editText', {
-            label: 'Edit text', isEnabled: () => !!selectedText() && !App.text.isEditing(),
-            run: () => App.text.enterEdit(selectedText(), { caret: 'end' }),
+            label: 'Edit text', isEnabled: () => !!textToEdit() && !App.text.isEditing(),
+            run: () => App.text.enterEdit(textToEdit(), { caret: 'end' }),
         });
         // Character formatting (Home > Font): the selected text, or all the text of a selected box.
         [['bold', 'Bold'], ['italic', 'Italic'], ['underline', 'Underline'], ['strikethrough', 'Strikethrough'],
@@ -12457,8 +12625,9 @@ App.template.newDeckHtml = function newDeckHtml() {
  * The "current" match is simply the one selected in the box being edited, so
  * moving the cursor away from it needs no bookkeeping.
  *
- * Only text boxes are searched for now (tables join in Phase 4, speaker notes
- * once they can be edited in Phase 7). All text work goes through text.js.
+ * Text boxes and table cells are searched, in reading order (text.containersIn;
+ * speaker notes join once they can be edited in Phase 7). All text work goes
+ * through text.js.
  *
  * Talks to: text.js (findMatches, matchRange, selectMatch, replaceText, replaceAll),
  *           deck.js, history.js, selection.js, commands.js (the find / replace commands).
@@ -12630,7 +12799,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             return out;
         }
         App.deck.getSlides().forEach((slide, slideIndex) => {
-            slide.querySelectorAll('.el[data-type="text"]').forEach((element, boxIndex) => {
+            App.text.containersIn(slide).forEach((element, boxIndex) => {
                 App.text.findMatches(element, nodes.find.value, options()).forEach((match) => {
                     out.push({ slideIndex: slideIndex, boxIndex: boxIndex, slide: slide, element: element, match: match });
                 });
@@ -12661,7 +12830,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     function boxIndexOf(element) {
-        return Array.prototype.indexOf.call(element.closest('section.slide').querySelectorAll('.el[data-type="text"]'), element);
+        return App.text.containersIn(element.closest('section.slide')).indexOf(element);
     }
 
     /*
@@ -12677,8 +12846,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             const point = forward ? last : first;
             return [slideIndex, boxIndexOf(editing), point.p, point.o];
         }
-        const selected = App.selection.getElement();
-        if (selected && selected.getAttribute('data-type') === 'text') {
+        const element = App.selection.getElement();
+        const type = element && element.getAttribute('data-type');
+        // A selected table: from its first cell (forward) or its last one (back).
+        const cells = type === 'table' ? App.text.containersIn(element) : [];
+        const selected = type === 'text' ? element : cells[forward ? 0 : cells.length - 1];
+        if (selected) {
             return forward ? [slideIndex, boxIndexOf(selected), 0, 0] : [slideIndex, boxIndexOf(selected), Infinity, 0];
         }
         return forward ? [slideIndex, -1, 0, 0] : [slideIndex + 1, -1, 0, 0];
@@ -12736,7 +12909,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             matches.forEach((m) => byBox.get(m.element).list.push(m.match));
             App.history.change('Replace All', 'deck', () => byBox.forEach((box, element) => {
                 App.text.replaceAll(element, box.list, nodes.replace.value);
-                App.deck.withSlideShown(box.slide, () => App.text.fitText(element));   // autofit measures the box
+                App.deck.withSlideShown(box.slide, () => App.text.fitBox(element));   // autofit / table rows measure the box
             }));
             App.selection.refresh();
         }

@@ -1174,7 +1174,7 @@ FIND_STATE = """() => {
              focus: document.activeElement ? document.activeElement.id : null };
 }"""
 
-COUNT_IN_DECK = """(word) => Array.from(App.deck.getDocument().querySelectorAll('.el[data-type="text"]'))
+COUNT_IN_DECK = """(word) => Array.from(App.deck.getDocument().querySelectorAll('.el[data-type="text"], .el[data-type="table"]'))
     .reduce((sum, el) => sum + (el.textContent.match(new RegExp(word, 'gi')) || []).length, 0)"""
 
 
@@ -1404,6 +1404,10 @@ TABLE_SHAPE = """id => {
 }"""
 
 
+DRAWN_ROWS = """id => Array.from(App.deck.getDocument().querySelector('[data-id="' + id + '"] > table').rows,
+    (row) => row.getBoundingClientRect().height)"""
+
+
 def test_insert_and_resize_table(browser):
     """Insert > Table: the 10 x 10 grid picker (mouse and keys); resizing scales the columns and rows."""
     editor = Editor(browser)
@@ -1438,7 +1442,8 @@ def test_insert_and_resize_table(browser):
 
     # Narrower by the right handle: the four columns stay equal; shorter than its text: the rows stop at the text.
     page.mouse.click(*slide_to_screen(page, 400, 320))
-    check(page.evaluate("App.selection.selectedId()") == table_id, "a click selects the table")
+    check(page.evaluate("App.selection.selectedId()") == table_id, "a click selects the table (and types in a cell)")
+    page.keyboard.press("Escape")
     drag(page, slide_to_screen(page, 1120, 360), slide_to_screen(page, 880, 360))
     shape = page.evaluate(TABLE_SHAPE, table_id)
     width = element_rect(page, table_id)["width"]
@@ -1449,8 +1454,9 @@ def test_insert_and_resize_table(browser):
     drag(page, slide_to_screen(page, 520, 420), slide_to_screen(page, 520, 310))
     shape = page.evaluate(TABLE_SHAPE, table_id)
     rect = element_rect(page, table_id)
-    check(all(height > 20 for height in shape["heights"]), f"rows keep a line of text: {shape['heights']}")
-    check(abs(rect["height"] - sum(shape["heights"])) < 0.05, f"the box is as tall as the rows: {rect}")
+    drawn = page.evaluate(DRAWN_ROWS, table_id)
+    check(all(height > 20 for height in drawn), f"rows keep a line of text: {drawn}")
+    check(abs(rect["height"] - sum(drawn)) < 0.05, f"the box is as tall as the rows: {rect}")
     box = page.evaluate("App.transform.readRect(document.querySelector('#overlay .selection-box'))")
     check(abs(box["height"] - rect["height"]) <= 1, f"the selection box follows: {box}")
 
@@ -1474,6 +1480,111 @@ def test_insert_and_resize_table(browser):
     check(editor.report_dialog_text() is None, "the saved deck reopens without a report")
     page.evaluate("App.deck.goTo(5)")
     check(page.evaluate(TABLE_SHAPE, table_id) == shape, "the table is saved as it was")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+CELL_TEXT = """([r, c]) => App.text.getModel(App.deck.getDocument().querySelector('[data-id="e9"] > table').rows[r].cells[c])
+    .map((line) => line.text).join('/')"""
+EDITING_KEY = "App.text.isEditing() ? App.text.containerKey(App.text.editingElement()) : null"
+
+
+def test_table_cell_editing(browser):
+    """Typing in table cells: click into a cell, Tab / Shift+Tab, Tab in the last cell adds a row, rows grow with text."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(2)")   # slide 3: the comps table e9 (rows about 37 px, the header from y = 140)
+    text = lambda r, c: page.evaluate(CELL_TEXT, [r, c])  # noqa: E731
+    key = lambda: page.evaluate(EDITING_KEY)  # noqa: E731
+    rows = lambda: page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e9\"] > table').rows.length")  # noqa: E731
+    # The rows as drawn (the sample's box is taller than its table; the first edit fits the box to the rows).
+    height = lambda: sum(page.evaluate(DRAWN_ROWS, "e9"))  # noqa: E731
+    start_height = height()
+
+    # A click puts the cursor in the cell under the mouse; the table is the selected element.
+    page.mouse.click(*slide_to_screen(page, 300, 196))
+    check(key() == "e9/1/0" and page.evaluate("App.selection.selectedId()") == "e9", f"editing Beta Foods: {key()}")
+    page.keyboard.press("End")
+    page.keyboard.type(" S.A.")
+    check(text(1, 0) == "Beta Foods S.A.", f"typed: {text(1, 0)}")
+    page.keyboard.press("Tab")
+    check(key() == "e9/1/1" and page.evaluate("App.deck.getDocument().getSelection().toString()") == "2.450",
+          f"Tab: the next cell, its text selected: {key()}")
+    page.keyboard.type("2.500")
+    check(text(1, 1) == "2.500", f"typing replaces it: {text(1, 1)}")
+    page.keyboard.press("Shift+Tab")
+    check(key() == "e9/1/0" and page.evaluate("App.deck.getDocument().getSelection().toString()") == "Beta Foods S.A.",
+          f"Shift+Tab goes back: {key()}")
+    page.keyboard.press("Control+Z")
+    check(text(1, 1) == "2.450" and key() == "e9/1/0", f"undo takes back the other cell's typing, typing goes on here: {key()}")
+    page.keyboard.press("Control+Z")
+    check(text(1, 0) == "Beta Foods", f"and then this cell's: {text(1, 0)}")
+
+    # A second line makes the row (and the table) taller; undo shrinks it back.
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Segunda linha")
+    check(text(1, 0) == "Beta Foods/Segunda linha", f"two lines: {text(1, 0)}")
+    check(height() > start_height + 15, f"the table grew: {height()} vs {start_height}")
+    box = page.evaluate("App.transform.readRect(document.querySelector('#overlay .selection-box'))")
+    check(abs(box["height"] - height()) <= 1 and abs(element_rect(page, "e9")["height"] - height()) < 0.05,
+          f"the box and the selection box follow the rows: {box}")
+    page.keyboard.press("Control+Z")   # the typing
+    page.keyboard.press("Control+Z")   # the Enter (its own step, as in a text box)
+    check(text(1, 0) == "Beta Foods" and abs(height() - start_height) < 0.5, f"undo: one line, old height: {text(1, 0)!r} {height()}")
+
+    # Formatting works in a cell as in a text box.
+    page.keyboard.press("Control+A")
+    page.keyboard.press("Control+B")
+    weight = page.evaluate("getComputedStyle(App.text.editingElement().querySelector('p')).fontWeight")
+    check(weight == "700", f"Ctrl+B in a cell: {weight}")
+    page.keyboard.press("Control+Z")
+
+    # Clicking another cell while typing moves there; a double-click does too.
+    page.mouse.click(*slide_to_screen(page, 450, 232))
+    check(key() == "e9/2/1", f"click on 1.120: {key()}")
+    page.mouse.dblclick(*slide_to_screen(page, 700, 270))
+    check(key() == "e9/3/2", f"double-click on 10,4x: {key()}")
+
+    # Esc: the table stays selected; Enter types in its first cell.
+    page.keyboard.press("Escape")
+    check(key() is None and page.evaluate("App.selection.selectedId()") == "e9", "Esc: table selected")
+    page.keyboard.press("Enter")
+    check(key() == "e9/0/0", f"Enter: the first cell: {key()}")
+    page.keyboard.press("Escape")
+
+    # Tab in the last cell adds a row like the last one and goes to its first cell.
+    page.mouse.click(*slide_to_screen(page, 1100, 345))
+    check(key() == "e9/5/3", f"the last cell: {key()}")
+    page.keyboard.press("Tab")
+    check(rows() == 7 and key() == "e9/6/0", f"a new row: {rows()} rows, {key()}")
+    check(page.evaluate("App.history.undoLabel()") == "Insert row", "one undo step")
+    check(height() > start_height + 30, f"the table grew by a row: {height()}")
+    page.keyboard.type("Nova")
+    check(text(6, 0) == "Nova", f"typing in it: {text(6, 0)}")
+    page.screenshot(path=str(OUTPUT / "42-table-new-row.png"))
+    page.keyboard.press("Escape")
+    page.keyboard.press("Control+Z")
+    page.keyboard.press("Control+Z")
+    check(rows() == 6 and abs(height() - start_height) < 0.5, f"undo removes the typing, then the row: {rows()}")
+
+    # Find & replace searches cells too.
+    page.keyboard.press("Control+f")
+    page.keyboard.type("Gama")
+    page.keyboard.press("Enter")
+    check(key() == "e9/2/0" and page.evaluate("App.deck.getDocument().getSelection().toString()") == "Gama",
+          f"Find goes into the cell: {key()}")
+    page.keyboard.press("Control+h")
+    page.fill("#find-replacement", "Zeta")
+    page.click("#find-replace-all")
+    check(text(2, 0) == "Zeta Nutrição", f"Replace All in a cell: {text(2, 0)}")
+    page.keyboard.press("Escape")
+
+    saved = editor.save_as_download("table-cells.html")
+    editor.open(saved)
+    page.evaluate("App.deck.goTo(2)")
+    check(text(2, 0) == "Zeta Nutrição" and rows() == 6, "saved with the edits")
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
 
@@ -2439,6 +2550,7 @@ TESTS = [
     test_find_and_replace,
     test_phase3_done_when,
     test_insert_and_resize_table,
+    test_table_cell_editing,
 ]
 
 

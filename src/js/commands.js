@@ -144,13 +144,15 @@
         App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
 
         // ---- Text (text.js) ----
-        const selectedText = () => {
+        // Enter / F2: type in the selected text box, or in the first cell of the selected table.
+        const textToEdit = () => {
             const element = App.selection.getElement();
-            return element && element.getAttribute('data-type') === 'text' ? element : null;
+            const type = element && element.getAttribute('data-type');
+            return type === 'text' ? element : type === 'table' ? App.tables.firstCell(element) : null;
         };
         App.commands.define('editText', {
-            label: 'Edit text', isEnabled: () => !!selectedText() && !App.text.isEditing(),
-            run: () => App.text.enterEdit(selectedText(), { caret: 'end' }),
+            label: 'Edit text', isEnabled: () => !!textToEdit() && !App.text.isEditing(),
+            run: () => App.text.enterEdit(textToEdit(), { caret: 'end' }),
         });
         // Character formatting (Home > Font): the selected text, or all the text of a selected box.
         [['bold', 'Bold'], ['italic', 'Italic'], ['underline', 'Underline'], ['strikethrough', 'Strikethrough'],

@@ -275,9 +275,10 @@ test('tables: fitTable scales the columns to a new width and the rows to a new h
         assert(!App.tables.fitTable(element), 'a new table already fits its box');
         element.style.width = '480px';
         element.style.height = '300px';
-        assert(App.tables.fitTable(element), 'changed');
+        assert(App.tables.fitTable(element, { resized: true }), 'changed');
         assertEqual(Array.from(table.querySelectorAll('col')).map((col) => col.style.width).join(), '120px,120px,120px,120px');
         assertEqual(Array.from(table.rows).map((row) => row.style.height).join(), '100px,100px,100px');
+        assertEqual(element.style.height, '300px');
         assertEqual(table.getBoundingClientRect().width, 480);
         assertEqual(Array.from(table.rows).reduce((sum, row) => sum + row.getBoundingClientRect().height, 0), 300);
     } finally {
@@ -285,21 +286,82 @@ test('tables: fitTable scales the columns to a new width and the rows to a new h
     }
 });
 
-test('tables: fitTable never makes a row shorter than its text; the box takes the table\'s real height', () => {
+function drawnHeights(table) {
+    return Array.from(table.rows).map((row) => Math.round(row.getBoundingClientRect().height * 100) / 100);
+}
+
+test('tables: fitTable never makes a row shorter than its text; the box takes the rows\' real height', () => {
     const { frame, element, table } = tableFrame((doc) =>
         App.tables.createTable(doc, 3, 2, { left: 0, top: 0, width: 400, height: 120 }, 'e1'));
     try {
         element.style.height = '15px';
-        App.tables.fitTable(element);
-        const rows = Array.from(table.rows).map((row) => parseFloat(row.style.height));
-        rows.forEach((height) => assert(height > 20, 'a row keeps room for a line of 14pt text: ' + height));
-        const drawn = Array.from(table.rows).map((row) => Math.round(row.getBoundingClientRect().height * 100) / 100);
-        assertEqual(rows.join(), drawn.join(), 'the stored heights are the drawn ones');
-        assertEqual(parseFloat(element.style.height), Math.round(drawn.reduce((a, b) => a + b, 0) * 100) / 100,
-            'the box is as tall as its rows');
+        App.tables.fitTable(element, { resized: true });
+        drawnHeights(table).forEach((height) => assert(height > 20, 'a row keeps room for a line of 14pt text: ' + height));
+        const drawn = Array.from(table.rows).reduce((sum, row) => sum + row.getBoundingClientRect().height, 0);
+        assertEqual(parseFloat(element.style.height), Math.round(drawn * 100) / 100, 'the box is as tall as its rows');
     } finally {
         frame.remove();
     }
+});
+
+test('tables: a row grows with its text and goes back to its own height when the text is gone', () => {
+    const { frame, element, table } = tableFrame((doc) =>
+        App.tables.createTable(doc, 2, 2, { left: 0, top: 0, width: 400, height: 80 }, 'e1'));
+    try {
+        const cell = table.rows[0].cells[0];
+        const before = cell.innerHTML;
+        cell.innerHTML = '<p data-list="none" data-level="1">Um</p><p data-list="none" data-level="1">Dois</p>' +
+            '<p data-list="none" data-level="1">Três</p>';
+        assert(App.tables.fitTable(element), 'changed');
+        assert(parseFloat(element.style.height) > 100, 'the box grew: ' + element.style.height);
+        assertEqual(table.rows[0].style.height, '40px', 'the row keeps its own height (a minimum)');
+        cell.innerHTML = before;
+        App.tables.fitTable(element);
+        assertEqual(element.style.height, '80px', 'back to two 40 px rows');
+    } finally {
+        frame.remove();
+    }
+});
+
+test('tables: appendRow adds a row like the last one: same height, fills and borders, empty cells', () => {
+    const table = tableFrom('<tbody><tr style="height: 30px"><td style="background-color: red">A</td><td>B</td></tr>' +
+        '<tr style="height: 50px"><td colspan="2" style="border-top: 2px solid black">Total</td></tr></tbody>');
+    const row = App.tables.appendRow(table);
+    assertEqual(table.rows.length, 3);
+    assertEqual(row, table.rows[2]);
+    assertEqual(row.style.height, '50px');
+    assertEqual(row.cells.length, 1);
+    assertEqual(row.cells[0].getAttribute('colspan'), '2');
+    assertEqual(row.cells[0].style.borderTop, '2px solid black');
+    assertEqual(row.cells[0].innerHTML, '<p data-list="none" data-level="1"><br></p>');
+});
+
+test('tables: appendRow under a cell merged down gives that column a cell of its own', () => {
+    const table = tableFrom('<tbody><tr><td rowspan="2">A</td><td>B</td></tr><tr><td>C</td></tr></tbody>');
+    const row = App.tables.appendRow(table);
+    assertEqual(row.cells.length, 2);
+    assert(!row.cells[0].hasAttribute('rowspan'), 'the new cell is not merged');
+});
+
+test('text: a cell is found again from its key after the slide was rebuilt (undo)', () => {
+    const doc = parseDoc('<html><body><section class="slide" data-slide-id="s1"><div class="el" data-type="table" data-id="e9">' +
+        '<table><tbody><tr><td>A</td><td>B</td></tr><tr><td colspan="2">C</td></tr></tbody></table></div>' +
+        '<div class="el" data-type="text" data-id="e2"><p data-list="none" data-level="1">T</p></div></section></body></html>');
+    const cell = doc.querySelectorAll('td')[1];
+    assertEqual(App.text.containerKey(cell), 'e9/0/1');
+    assertEqual(App.text.containerKey(doc.querySelector('[data-id="e2"]')), 'e2');
+    const copy = parseDoc(doc.documentElement.outerHTML);
+    assertEqual(App.text.findContainer(copy, 's1', 'e9/0/1').textContent, 'B');
+    assertEqual(App.text.findContainer(copy, 's1', 'e9/1/0').textContent, 'C');
+    assertEqual(App.text.findContainer(copy, 's1', 'e2').getAttribute('data-id'), 'e2');
+    assertEqual(App.text.findContainer(copy, 's1', 'e9/5/0'), null);
+});
+
+test('text: containersIn lists text boxes and table cells in reading order', () => {
+    const doc = parseDoc('<html><body><section class="slide"><div class="el" data-type="text" data-id="e1">1</div>' +
+        '<div class="el" data-type="table" data-id="e2"><table><tbody><tr><td>2</td><td>3</td></tr></tbody></table></div>' +
+        '<div class="el" data-type="text" data-id="e3">4</div></section></body></html>');
+    assertEqual(App.text.containersIn(doc.querySelector('section')).map((node) => node.textContent).join(), '1,2,3,4');
 });
 
 test('table controls: the grid picker moves with the arrow keys inside 10 x 10', () => {

@@ -12,8 +12,9 @@
  * The "current" match is simply the one selected in the box being edited, so
  * moving the cursor away from it needs no bookkeeping.
  *
- * Only text boxes are searched for now (tables join in Phase 4, speaker notes
- * once they can be edited in Phase 7). All text work goes through text.js.
+ * Text boxes and table cells are searched, in reading order (text.containersIn;
+ * speaker notes join once they can be edited in Phase 7). All text work goes
+ * through text.js.
  *
  * Talks to: text.js (findMatches, matchRange, selectMatch, replaceText, replaceAll),
  *           deck.js, history.js, selection.js, commands.js (the find / replace commands).
@@ -185,7 +186,7 @@
             return out;
         }
         App.deck.getSlides().forEach((slide, slideIndex) => {
-            slide.querySelectorAll('.el[data-type="text"]').forEach((element, boxIndex) => {
+            App.text.containersIn(slide).forEach((element, boxIndex) => {
                 App.text.findMatches(element, nodes.find.value, options()).forEach((match) => {
                     out.push({ slideIndex: slideIndex, boxIndex: boxIndex, slide: slide, element: element, match: match });
                 });
@@ -216,7 +217,7 @@
     }
 
     function boxIndexOf(element) {
-        return Array.prototype.indexOf.call(element.closest('section.slide').querySelectorAll('.el[data-type="text"]'), element);
+        return App.text.containersIn(element.closest('section.slide')).indexOf(element);
     }
 
     /*
@@ -232,8 +233,12 @@
             const point = forward ? last : first;
             return [slideIndex, boxIndexOf(editing), point.p, point.o];
         }
-        const selected = App.selection.getElement();
-        if (selected && selected.getAttribute('data-type') === 'text') {
+        const element = App.selection.getElement();
+        const type = element && element.getAttribute('data-type');
+        // A selected table: from its first cell (forward) or its last one (back).
+        const cells = type === 'table' ? App.text.containersIn(element) : [];
+        const selected = type === 'text' ? element : cells[forward ? 0 : cells.length - 1];
+        if (selected) {
             return forward ? [slideIndex, boxIndexOf(selected), 0, 0] : [slideIndex, boxIndexOf(selected), Infinity, 0];
         }
         return forward ? [slideIndex, -1, 0, 0] : [slideIndex + 1, -1, 0, 0];
@@ -291,7 +296,7 @@
             matches.forEach((m) => byBox.get(m.element).list.push(m.match));
             App.history.change('Replace All', 'deck', () => byBox.forEach((box, element) => {
                 App.text.replaceAll(element, box.list, nodes.replace.value);
-                App.deck.withSlideShown(box.slide, () => App.text.fitText(element));   // autofit measures the box
+                App.deck.withSlideShown(box.slide, () => App.text.fitBox(element));   // autofit / table rows measure the box
             }));
             App.selection.refresh();
         }

@@ -1395,6 +1395,89 @@ def test_phase3_done_when(browser):
     editor.close()
 
 
+TABLE_SHAPE = """id => {
+    const table = App.deck.getDocument().querySelector('[data-id="' + id + '"] > table');
+    return { rows: table.rows.length, cols: table.querySelectorAll('col').length,
+             widths: Array.from(table.querySelectorAll('col'), (col) => parseFloat(col.style.width)),
+             heights: Array.from(table.rows, (row) => parseFloat(row.style.height)),
+             header: table.hasAttribute('data-header-row'), banded: table.hasAttribute('data-banded-rows') };
+}"""
+
+
+def test_insert_and_resize_table(browser):
+    """Insert > Table: the 10 x 10 grid picker (mouse and keys); resizing scales the columns and rows."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(5)")   # slide 6: a title and bullets
+    ribbon_height = page.evaluate("document.getElementById('ribbon').offsetHeight")
+    page.click(".ribbon-tab[data-tab='insert']")
+    check(page.evaluate("document.getElementById('ribbon').offsetHeight") == ribbon_height, "the Insert tab keeps the ribbon height")
+    page.click(".table-button")
+    check(page.is_visible(".table-grid-menu"), "the grid opens")
+    check(page.locator(".table-grid-cell").count() == 100, "10 x 10")
+    page.hover(".table-grid-cell[data-row='3'][data-col='4']")
+    check(page.inner_text(".table-grid-label") == "4 × 3 table", f"label: {page.inner_text('.table-grid-label')}")
+    check(page.locator(".table-grid-cell.picked").count() == 12, "12 cells picked")
+    page.screenshot(path=str(OUTPUT / "40-table-grid.png"))
+    page.click(".table-grid-cell[data-row='3'][data-col='4']")
+    check(page.is_hidden(".table-grid-menu"), "the grid closes")
+
+    table_id = page.evaluate("App.selection.selectedId()")
+    check(page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').getAttribute('data-type')",
+                        table_id) == "table", f"the new table is selected: {table_id}")
+    shape = page.evaluate(TABLE_SHAPE, table_id)
+    check(shape["rows"] == 3 and shape["cols"] == 4 and shape["header"] and shape["banded"], f"3 rows, 4 columns: {shape}")
+    check(element_rect(page, table_id) == {"left": 160, "top": 300, "width": 960, "height": 120}, "centred, 960 x 120")
+    check(page.evaluate("App.history.undoLabel()") == "Insert table", "one undo step")
+    page.screenshot(path=str(OUTPUT / "41-table-inserted.png"))
+    page.keyboard.press("Control+Z")
+    check(page.evaluate("id => !App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]')", table_id), "undo removes it")
+    page.keyboard.press("Control+Y")
+    check(page.evaluate(TABLE_SHAPE, table_id)["rows"] == 3, "redo brings it back")
+
+    # Narrower by the right handle: the four columns stay equal; shorter than its text: the rows stop at the text.
+    page.mouse.click(*slide_to_screen(page, 400, 320))
+    check(page.evaluate("App.selection.selectedId()") == table_id, "a click selects the table")
+    drag(page, slide_to_screen(page, 1120, 360), slide_to_screen(page, 880, 360))
+    shape = page.evaluate(TABLE_SHAPE, table_id)
+    width = element_rect(page, table_id)["width"]
+    check(abs(width - 720) <= 2, f"720 px wide: {width}")
+    check(abs(sum(shape["widths"]) - width) < 0.05 and max(shape["widths"]) - min(shape["widths"]) < 0.05,
+          f"equal columns that fill the box: {shape['widths']}")
+    check(page.evaluate("App.history.undoLabel()") == "Resize", "a resize step")
+    drag(page, slide_to_screen(page, 520, 420), slide_to_screen(page, 520, 310))
+    shape = page.evaluate(TABLE_SHAPE, table_id)
+    rect = element_rect(page, table_id)
+    check(all(height > 20 for height in shape["heights"]), f"rows keep a line of text: {shape['heights']}")
+    check(abs(rect["height"] - sum(shape["heights"])) < 0.05, f"the box is as tall as the rows: {rect}")
+    box = page.evaluate("App.transform.readRect(document.querySelector('#overlay .selection-box'))")
+    check(abs(box["height"] - rect["height"]) <= 1, f"the selection box follows: {box}")
+
+    # Keys: the first arrow picks 1 x 1, then each arrow grows or shrinks it; Enter inserts; Esc closes.
+    page.click(".table-button")
+    for key in ["ArrowDown", "ArrowRight", "ArrowDown"]:
+        page.keyboard.press(key)
+    check(page.inner_text(".table-grid-label") == "2 × 2 table", f"label: {page.inner_text('.table-grid-label')}")
+    page.keyboard.press("Enter")
+    small_id = page.evaluate("App.selection.selectedId()")
+    check(small_id != table_id and page.evaluate(TABLE_SHAPE, small_id)["cols"] == 2, "a 2 x 2 table")
+    page.click(".table-button")
+    page.keyboard.press("Escape")
+    check(page.is_hidden(".table-grid-menu"), "Esc closes the grid")
+    page.click(".table-button")
+    page.mouse.click(*slide_to_screen(page, 40, 700))
+    check(page.is_hidden(".table-grid-menu"), "a click elsewhere closes it")
+
+    saved = editor.save_as_download("table-inserted.html")
+    editor.open(saved)
+    check(editor.report_dialog_text() is None, "the saved deck reopens without a report")
+    page.evaluate("App.deck.goTo(5)")
+    check(page.evaluate(TABLE_SHAPE, table_id) == shape, "the table is saved as it was")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -2355,6 +2438,7 @@ TESTS = [
     test_autofit,
     test_find_and_replace,
     test_phase3_done_when,
+    test_insert_and_resize_table,
 ]
 
 

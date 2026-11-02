@@ -220,3 +220,93 @@ test('serialize: table cells are saved in the text model', () => {
     const copy = App.serialize.cleanCopy(doc);
     assertEqual(copy.querySelector('td').innerHTML, '<p data-list="none" data-level="1">Beta</p>');
 });
+
+// ---------- new tables (Insert > Table) and fitting a table to its box ----------
+
+test('tables: a new table is centred on the slide, 960 px wide, 40 px per row', () => {
+    assertEqual(JSON.stringify(App.tables.newTableRect(3, 4)), JSON.stringify({ left: 160, top: 300, width: 960, height: 120 }));
+    assertEqual(JSON.stringify(App.tables.newTableRect(10, 10)), JSON.stringify({ left: 160, top: 160, width: 960, height: 400 }));
+});
+
+test('tables: createTable builds an empty model table with a header row and banded rows', () => {
+    const doc = parseDoc('<html><body></body></html>');
+    const element = App.tables.createTable(doc, 3, 4, { left: 160, top: 300, width: 960, height: 120 }, 'e7');
+    assertEqual(element.getAttribute('class'), 'el');
+    assertEqual(element.getAttribute('data-type'), 'table');
+    assertEqual(element.getAttribute('data-id'), 'e7');
+    assertEqual(element.getAttribute('style'), 'left: 160px; top: 300px; width: 960px; height: 120px;');
+    const table = element.firstElementChild;
+    assert(table.hasAttribute('data-header-row') && table.hasAttribute('data-banded-rows'), 'PowerPoint\'s default options');
+    assert(!table.hasAttribute('data-total-row') && !table.hasAttribute('data-first-column'), 'the others are off');
+    assertEqual(Array.from(table.querySelectorAll('col')).map((col) => col.style.width).join(), '240px,240px,240px,240px');
+    assertEqual(Array.from(table.rows).map((row) => row.style.height).join(), '40px,40px,40px');
+    assertEqual(table.querySelectorAll('td').length, 12);
+    table.querySelectorAll('td').forEach((cell) => {
+        assertEqual(JSON.stringify(App.text.getModel(cell)), JSON.stringify([{ list: 'none', level: 1, start: null, text: '' }]));
+    });
+});
+
+test('tables: createTable splits an odd width so the columns add up exactly', () => {
+    const doc = parseDoc('<html><body></body></html>');
+    const element = App.tables.createTable(doc, 1, 3, { left: 0, top: 0, width: 100, height: 40 }, 'e1');
+    const widths = Array.from(element.querySelectorAll('col')).map((col) => parseFloat(col.style.width));
+    assertEqual(widths.join(), '33.33,33.33,33.34');
+});
+
+/* A slide in an off-screen frame with the deck's table and text stylesheets, for measuring. */
+function tableFrame(build) {
+    const frame = document.createElement('iframe');
+    frame.style.cssText = 'position:absolute; left:-3000px; top:0; width:1280px; height:720px';
+    document.body.appendChild(frame);
+    const doc = frame.contentDocument;
+    doc.open();
+    doc.write('<!DOCTYPE html><html><head><style>.slide{position:relative;width:1280px;height:720px}.el{position:absolute}' +
+        App.tables.deckTableCss() + App.text.deckTextCss() + '</style></head><body><section class="slide"></section></body></html>');
+    doc.close();
+    const element = build(doc);
+    doc.querySelector('.slide').appendChild(element);
+    return { frame: frame, element: element, table: element.firstElementChild };
+}
+
+test('tables: fitTable scales the columns to a new width and the rows to a new height', () => {
+    const { frame, element, table } = tableFrame((doc) =>
+        App.tables.createTable(doc, 3, 4, { left: 160, top: 300, width: 960, height: 120 }, 'e1'));
+    try {
+        assert(!App.tables.fitTable(element), 'a new table already fits its box');
+        element.style.width = '480px';
+        element.style.height = '300px';
+        assert(App.tables.fitTable(element), 'changed');
+        assertEqual(Array.from(table.querySelectorAll('col')).map((col) => col.style.width).join(), '120px,120px,120px,120px');
+        assertEqual(Array.from(table.rows).map((row) => row.style.height).join(), '100px,100px,100px');
+        assertEqual(table.getBoundingClientRect().width, 480);
+        assertEqual(Array.from(table.rows).reduce((sum, row) => sum + row.getBoundingClientRect().height, 0), 300);
+    } finally {
+        frame.remove();
+    }
+});
+
+test('tables: fitTable never makes a row shorter than its text; the box takes the table\'s real height', () => {
+    const { frame, element, table } = tableFrame((doc) =>
+        App.tables.createTable(doc, 3, 2, { left: 0, top: 0, width: 400, height: 120 }, 'e1'));
+    try {
+        element.style.height = '15px';
+        App.tables.fitTable(element);
+        const rows = Array.from(table.rows).map((row) => parseFloat(row.style.height));
+        rows.forEach((height) => assert(height > 20, 'a row keeps room for a line of 14pt text: ' + height));
+        const drawn = Array.from(table.rows).map((row) => Math.round(row.getBoundingClientRect().height * 100) / 100);
+        assertEqual(rows.join(), drawn.join(), 'the stored heights are the drawn ones');
+        assertEqual(parseFloat(element.style.height), Math.round(drawn.reduce((a, b) => a + b, 0) * 100) / 100,
+            'the box is as tall as its rows');
+    } finally {
+        frame.remove();
+    }
+});
+
+test('table controls: the grid picker moves with the arrow keys inside 10 x 10', () => {
+    const move = (pick, key) => JSON.stringify(App.tableControls.movePick(pick, key));
+    assertEqual(move({ rows: 1, cols: 1 }, 'ArrowRight'), JSON.stringify({ rows: 1, cols: 2 }));
+    assertEqual(move({ rows: 1, cols: 1 }, 'ArrowLeft'), JSON.stringify({ rows: 1, cols: 1 }));
+    assertEqual(move({ rows: 10, cols: 4 }, 'ArrowDown'), JSON.stringify({ rows: 10, cols: 4 }));
+    assertEqual(move({ rows: 3, cols: 4 }, 'ArrowUp'), JSON.stringify({ rows: 2, cols: 4 }));
+    assertEqual(App.tableControls.pickLabel({ rows: 3, cols: 4 }), '4 × 3 table', 'columns first, as PowerPoint');
+});

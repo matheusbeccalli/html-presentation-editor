@@ -137,6 +137,7 @@
         App.history.change(label, scope, () => {
             App.transform.writeRect(element, next);
             App.text.fitText(element);   // autofit follows a new size
+            App.tables.fitTable(element);   // so do a table's columns and rows
         });
         // history-changed redraws the selection box and this pane.
     }

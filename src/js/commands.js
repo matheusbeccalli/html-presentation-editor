@@ -239,6 +239,17 @@
                 App.ui.setStatus('Click on the slide to place the text box, or drag to set its width (Esc cancels)');
             },
         });
+        // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
+        App.commands.define('insertTable', {
+            label: 'Table', isEnabled: hasDeck,
+            run: (size) => {
+                if (!size) {
+                    return;
+                }
+                App.text.exitEdit({ select: false });
+                App.elements.insertTable(size.rows, size.cols);
+            },
+        });
         // Format painter: a click picks up a look for one use; a double-click (formatPainterLocked) keeps it on.
         App.commands.define('formatPainter', {
             label: 'Format painter', keepsEdit: true,

@@ -5,7 +5,8 @@
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
  *
- * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips).
+ * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips),
+ *           textcontrols.js and tablecontrols.js (controls that show a value or open a picker).
  */
 
 (function () {
@@ -49,8 +50,12 @@
         },
         {
             id: 'insert', label: 'Insert',
-            groups: [{ label: 'Text', commands: [['insertTextBox', 'textBox']] }],
-            note: 'Click Text box, then click on the slide (or drag to set its width). Tables, images, shapes and charts arrive in Phases 4 to 6.',
+            groups: [
+                { label: 'Tables', commands: [{ control: 'insertTable' }] },
+                { label: 'Text', commands: [['insertTextBox', 'textBox']] },
+            ],
+            note: 'Table: move over the grid to pick a size, click to insert. Text box: click it, then click on the ' +
+                'slide (or drag to set its width). Images, shapes and charts arrive in Phases 5 and 6.',
         },
         {
             id: 'arrange', label: 'Arrange',
@@ -111,6 +116,11 @@
         return button;
     }
 
+    /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
+    function createControl(name) {
+        return App.tableControls.create(name) || App.textControls.create(name);
+    }
+
     function renderTab(tab) {
         panel.innerHTML = '';
         // Forget the buttons of the tab shown before (the File menu's stay).
@@ -126,14 +136,14 @@
                 buttonsNode = el('div', { class: 'ribbon-rows' }, group.rows.map((row) =>
                     el('div', { class: 'ribbon-row' }, row.map((item) => {
                         if (item.control) {
-                            return App.textControls.create(item.control);
+                            return createControl(item.control);
                         }
                         return item.command ? commandButton(item.command, item.icon, true, null, true) : commandButton(item[0], item[1], true);
                     }))));
             } else {
                 buttonsNode = el('div', { class: 'ribbon-group-buttons' });
-                group.commands.forEach(([command, icon, onDouble]) =>
-                    buttonsNode.appendChild(commandButton(command, icon, false, onDouble)));
+                group.commands.forEach((item) => buttonsNode.appendChild(item.control
+                    ? createControl(item.control) : commandButton(item[0], item[1], false, item[2])));
             }
             groupNode.append(buttonsNode, el('div', { class: 'ribbon-group-label' }, [group.label]));
             panel.appendChild(groupNode);
@@ -243,5 +253,6 @@
             }
         });
         App.textControls.refresh();
+        App.tableControls.refresh();
     };
 })();

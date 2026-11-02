@@ -238,6 +238,13 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .color-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 4px; padding: 0 6px 6px; }
 .color-swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 2px; cursor: pointer; }
 .color-swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Insert > Table: the 10 x 10 grid picker (tablecontrols.js). */
+.table-grid-menu { min-width: 0; padding: 6px; }
+.table-grid-menu:focus { outline: none; }
+.table-grid-label { padding: 0 2px 6px; font-size: 12px; }
+.table-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 3px; }
+.table-grid-cell { width: 18px; height: 18px; box-sizing: border-box; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+.table-grid-cell.picked { border-color: var(--accent); background: var(--accent-soft); }
 .line-spacing-button { flex-direction: row; gap: 1px; }
 .line-spacing-menu { width: 200px; }
 .line-spacing-menu .menu-item[aria-checked="true"] { font-weight: 600; background: var(--accent-soft); }
@@ -5632,13 +5639,131 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { rows: rows.length, cols: cols, cells: cells };
     };
 
-    // ---------------------------------------------------------------
-    // Converting a rendered table into the model (import, older decks)
-    // ---------------------------------------------------------------
-
     function round2(value) {
         return Math.round(value * 100) / 100;
     }
+
+    /* `total` split into `count` parts of two decimals that add up exactly (the last one takes the rest). */
+    function splitEvenly(total, count) {
+        const part = Math.floor(total / count * 100) / 100;
+        const parts = new Array(count).fill(part);
+        parts[count - 1] = round2(total - part * (count - 1));
+        return parts;
+    }
+
+    /* Scale `values` to add up to `total`, keeping their proportions; again the last one takes the rest. */
+    function scaleTo(values, total) {
+        const sum = values.reduce((a, b) => a + b, 0);
+        if (sum <= 0) {
+            return splitEvenly(total, values.length);
+        }
+        const scaled = values.map((value) => round2(value * total / sum));
+        scaled[scaled.length - 1] = round2(total - scaled.slice(0, -1).reduce((a, b) => a + b, 0));
+        return scaled;
+    }
+
+    // ---------------------------------------------------------------
+    // New tables (Insert > Table)
+    // ---------------------------------------------------------------
+
+    const NEW_TABLE_WIDTH = 960;   // px: three quarters of the slide, as PowerPoint's inserted tables
+    const NEW_ROW_HEIGHT = 40;     // px: room for a line of the 14pt default text
+
+    /* Where a new table of `rows` x `cols` goes: centred on the 1280x720 slide. */
+    App.tables.newTableRect = function newTableRect(rows, cols) {
+        const height = rows * NEW_ROW_HEIGHT;
+        return {
+            left: (1280 - NEW_TABLE_WIDTH) / 2,
+            top: Math.max(0, Math.round((720 - height) / 2)),
+            width: NEW_TABLE_WIDTH,
+            height: height,
+        };
+    };
+
+    /*
+     * A new, empty table element of `rows` x `cols` at rect { left, top, width, height }
+     * (slide px), equal columns and rows, with PowerPoint's default style options:
+     * a header row and banded rows. Every cell has one empty line to type in.
+     */
+    App.tables.createTable = function createTable(doc, rows, cols, rect, id) {
+        const element = doc.createElement('div');
+        element.setAttribute('class', 'el');
+        element.setAttribute('data-type', 'table');
+        if (id) {
+            element.setAttribute('data-id', id);
+        }
+        ['left', 'top', 'width', 'height'].forEach((side) => element.style.setProperty(side, rect[side] + 'px'));
+
+        const table = doc.createElement('table');
+        table.setAttribute('data-header-row', '');
+        table.setAttribute('data-banded-rows', '');
+        const columns = doc.createElement('colgroup');
+        splitEvenly(rect.width, cols).forEach((width) => {
+            const col = doc.createElement('col');
+            col.style.setProperty('width', width + 'px');
+            columns.appendChild(col);
+        });
+        const body = doc.createElement('tbody');
+        splitEvenly(rect.height, rows).forEach((height) => {
+            const row = doc.createElement('tr');
+            row.style.setProperty('height', height + 'px');
+            for (let c = 0; c < cols; c++) {
+                row.appendChild(emptyCell(doc));
+            }
+            body.appendChild(row);
+        });
+        table.append(columns, body);
+        element.appendChild(table);
+        return element;
+    };
+
+    // ---------------------------------------------------------------
+    // Fitting a table to its box (resize)
+    // ---------------------------------------------------------------
+
+    /*
+     * Make the table fill its element's box after a resize: the columns scale to
+     * the new width and the rows to the new height, keeping their proportions.
+     * A row never gets shorter than its text (the browser draws it taller), so
+     * the drawn row heights are written back and the box takes the table's real
+     * height, as in PowerPoint. Needs the slide to be shown (it measures).
+     * Returns true when something changed.
+     */
+    App.tables.fitTable = function fitTable(element) {
+        const table = element && element.getAttribute('data-type') === 'table' ? element.querySelector(':scope > table') : null;
+        if (!table) {
+            return false;
+        }
+        const cols = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+        const rows = Array.from(table.rows);
+        const before = sizesOf(element, cols, rows);
+
+        const width = parseFloat(element.style.width);
+        if (cols.length > 0 && width > 0) {
+            scaleTo(cols.map((col) => parseFloat(col.style.width) || 0), width)
+                .forEach((value, index) => cols[index].style.setProperty('width', value + 'px'));
+        }
+        const height = parseFloat(element.style.height);
+        if (rows.length > 0 && height > 0) {
+            scaleTo(rows.map((row) => parseFloat(row.style.height) || 0), height)
+                .forEach((value, index) => rows[index].style.setProperty('height', value + 'px'));
+        }
+        if (table.getBoundingClientRect().height > 0) {   // laid out: write down what the browser drew
+            const drawn = rows.map((row) => round2(row.getBoundingClientRect().height));
+            drawn.forEach((value, index) => rows[index].style.setProperty('height', value + 'px'));
+            // The rows, not the table: half of the last row's bottom line hangs below it (collapsed borders).
+            element.style.setProperty('height', round2(drawn.reduce((a, b) => a + b, 0)) + 'px');
+        }
+        return sizesOf(element, cols, rows) !== before;
+    };
+
+    function sizesOf(element, cols, rows) {
+        return [element.style.height].concat(cols.map((col) => col.style.width), rows.map((row) => row.style.height)).join();
+    }
+
+    // ---------------------------------------------------------------
+    // Converting a rendered table into the model (import, older decks)
+    // ---------------------------------------------------------------
 
     function isTransparent(color) {
         return !color || color === 'transparent' || /rgba\(.*,\s*0\)$/.test(color);
@@ -7566,6 +7691,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
         check: '<path d="M4 10.5l4 4 8-9"/>',
         formatPainter: '<rect x="3" y="2.5" width="12" height="5" rx="1"/><path d="M15 5h2v4.5h-7.5V12"/><rect x="8" y="12" width="3" height="5.5" rx="0.5"/>',
+        table: '<rect x="2.5" y="3.5" width="15" height="13"/><path d="M2.5 7.5h15M2.5 12h15M7.5 3.5v13M12.5 3.5v13"/>',
         textBox: '<rect x="2.5" y="4" width="15" height="12" stroke-dasharray="2 1.5"/><path d="M6.5 7.5h7M10 7.5v6"/>',
         close: '<path d="M5 5l10 10M15 5L5 15"/>',
         bold: '<path stroke-width="2" d="M6 3.5h4.8a3 3 0 0 1 0 6H6zM6 9.5h5.5a3.5 3.5 0 0 1 0 7H6z"/>',
@@ -8649,6 +8775,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             App.transform.writeRect(element, rect);
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
+                App.tables.fitTable(element);   // a table's columns and rows follow the box
             }
             App.selection.refresh();
             App.events.emit('selection-dragged');   // the Format pane shows the values live
@@ -8704,8 +8831,10 @@ App.template.newDeckHtml = function newDeckHtml() {
  * paste work between slides and decks in this tab. Pasting from other programs
  * (tables from Excel, screenshots) arrives in Phases 4 and 5.
  *
+ * Insert > Text box and Insert > Table add new elements on top of the slide.
+ *
  * Talks to: selection.js (what is selected), transform.js (positions, order),
- *           history.js, deck.js.
+ *           history.js, deck.js, text.js and tables.js (new elements).
  */
 
 (function () {
@@ -8755,20 +8884,48 @@ App.template.newDeckHtml = function newDeckHtml() {
         const doc = slide.ownerDocument;
         const left = Math.max(0, Math.min(1240, spot.left));
         const width = Math.max(40, Math.min(1280 - left, spot.width && spot.width >= 20 ? spot.width : NEW_TEXT_WIDTH));
-        const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
         let element = null;
         App.history.change('Insert text box', { slideId: slide.getAttribute('data-slide-id') }, () => {
             element = App.text.createTextElement(doc, { left: left, top: Math.max(0, Math.min(700, spot.top)), width: width },
-                App.util.uniqueId('e', used));
-            const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
-            element.style.zIndex = String(top + 1);
-            slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+                freshId(doc));
+            addOnTop(slide, element);
         });
         App.selection.select(element);
         App.text.enterEdit(element, { caret: 'start', isNew: true });
         App.text.fitText(element);
         App.selection.refresh();
     };
+
+    /*
+     * Insert > Table: a rows x cols table centred on the slide (one undo step),
+     * then selected. Its rows are measured once it is on the slide (fitTable).
+     */
+    App.elements.insertTable = function insertTable(rows, cols) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        let element = null;
+        App.history.change('Insert table', { slideId: slide.getAttribute('data-slide-id') }, () => {
+            element = App.tables.createTable(slide.ownerDocument, rows, cols, App.tables.newTableRect(rows, cols),
+                freshId(slide.ownerDocument));
+            addOnTop(slide, element);
+            App.tables.fitTable(element);
+        });
+        App.selection.select(element);
+    };
+
+    function freshId(doc) {
+        const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+        return App.util.uniqueId('e', used);
+    }
+
+    /* A new element goes in front of everything on the slide (before the speaker notes in the HTML). */
+    function addOnTop(slide, element) {
+        const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
+        element.style.zIndex = String(top + 1);
+        slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+    }
 
     /* Give `element` and every element inside it that has a data-id a new, unused id. */
     App.elements.giveFreshIds = function giveFreshIds(element, usedIds) {
@@ -9065,6 +9222,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.history.change(label, scope, () => {
             App.transform.writeRect(element, next);
             App.text.fitText(element);   // autofit follows a new size
+            App.tables.fitTable(element);   // so do a table's columns and rows
         });
         // history-changed redraws the selection box and this pane.
     }
@@ -11600,6 +11758,17 @@ App.template.newDeckHtml = function newDeckHtml() {
                 App.ui.setStatus('Click on the slide to place the text box, or drag to set its width (Esc cancels)');
             },
         });
+        // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
+        App.commands.define('insertTable', {
+            label: 'Table', isEnabled: hasDeck,
+            run: (size) => {
+                if (!size) {
+                    return;
+                }
+                App.text.exitEdit({ select: false });
+                App.elements.insertTable(size.rows, size.cols);
+            },
+        });
         // Format painter: a click picks up a look for one use; a double-click (formatPainterLocked) keeps it on.
         App.commands.define('formatPainter', {
             label: 'Format painter', keepsEdit: true,
@@ -12138,6 +12307,141 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/tablecontrols.js ----
+/*
+ * tablecontrols.js - the ribbon's table controls (SPEC Phase 4).
+ *
+ * Insert > Table opens a 10 x 10 grid, as in PowerPoint: moving the mouse over
+ * it picks a size ("4 × 3 table": columns first), a click inserts it. The arrow
+ * keys move the pick and Enter inserts it; Esc or a click elsewhere closes it.
+ *
+ * Talks to: commands.js (insertTable), ribbon.js (places the control).
+ */
+
+(function () {
+    'use strict';
+
+    App.tableControls = {};
+
+    const GRID_SIZE = 10;
+    const el = (...args) => App.util.el(...args);
+
+    let tableButton = null;
+    let menu = null;    // the open grid, or null
+    let pick = null;    // { rows, cols } under the mouse or the arrow keys, or null
+
+    /* The pick after an arrow key, inside 1 … 10 both ways; other keys leave it. */
+    App.tableControls.movePick = function movePick(current, key) {
+        const step = { ArrowRight: [0, 1], ArrowLeft: [0, -1], ArrowDown: [1, 0], ArrowUp: [-1, 0] }[key];
+        if (!step) {
+            return current;
+        }
+        const clamp = (value) => Math.max(1, Math.min(GRID_SIZE, value));
+        return { rows: clamp(current.rows + step[0]), cols: clamp(current.cols + step[1]) };
+    };
+
+    App.tableControls.pickLabel = function pickLabel(size) {
+        return size.cols + ' × ' + size.rows + ' table';
+    };
+
+    function showPick(next) {
+        pick = next;
+        menu.querySelector('.table-grid-label').textContent = pick ? App.tableControls.pickLabel(pick) : 'Insert table';
+        menu.querySelectorAll('.table-grid-cell').forEach((cell) => {
+            const inside = pick && Number(cell.getAttribute('data-row')) <= pick.rows &&
+                Number(cell.getAttribute('data-col')) <= pick.cols;
+            cell.classList.toggle('picked', !!inside);
+        });
+    }
+
+    function insertPicked() {
+        const size = pick;
+        closeGrid();
+        if (size) {
+            App.commands.run('insertTable', size);
+        }
+    }
+
+    function closeGrid() {
+        if (menu) {
+            menu.remove();
+            menu = null;
+            pick = null;
+            window.removeEventListener('pointerdown', onOutsidePointerDown, true);
+            tableButton.setAttribute('aria-expanded', 'false');
+        }
+    }
+
+    function onOutsidePointerDown(event) {
+        if (menu && !menu.contains(event.target) && !tableButton.contains(event.target)) {
+            closeGrid();
+        }
+    }
+
+    function onGridKey(event) {
+        if (event.key === 'Escape') {
+            event.stopPropagation();
+            closeGrid();
+            tableButton.focus();
+        } else if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            insertPicked();
+        } else if (/^Arrow/.test(event.key)) {
+            event.preventDefault();
+            showPick(pick ? App.tableControls.movePick(pick, event.key) : { rows: 1, cols: 1 });
+        }
+    }
+
+    function openGrid() {
+        closeGrid();
+        const grid = el('div', { class: 'table-grid', onmouseleave: () => showPick(null) });
+        for (let row = 1; row <= GRID_SIZE; row++) {
+            for (let col = 1; col <= GRID_SIZE; col++) {
+                grid.appendChild(el('div', {
+                    class: 'table-grid-cell', 'data-row': String(row), 'data-col': String(col),
+                    onmouseenter: () => showPick({ rows: row, cols: col }),
+                    onclick: insertPicked,
+                }));
+            }
+        }
+        menu = el('div', {
+            class: 'menu table-grid-menu', role: 'dialog', 'aria-label': 'Insert table', tabindex: '-1',
+            onkeydown: onGridKey,
+        }, [el('div', { class: 'table-grid-label' }, ['Insert table']), grid]);
+        const rect = tableButton.getBoundingClientRect();
+        menu.style.left = rect.left + 'px';
+        menu.style.top = rect.bottom + 'px';
+        document.body.appendChild(menu);
+        tableButton.setAttribute('aria-expanded', 'true');
+        window.addEventListener('pointerdown', onOutsidePointerDown, true);
+        menu.focus();
+    }
+
+    function createInsertTable() {
+        tableButton = el('button', {
+            type: 'button', class: 'ribbon-button table-button', title: 'Insert a table', 'aria-label': 'Table',
+            'aria-haspopup': 'dialog', 'aria-expanded': 'false',
+            onclick: () => (menu ? closeGrid() : openGrid()),
+        });
+        tableButton.innerHTML = App.icons.get('table');
+        tableButton.appendChild(el('span', { class: 'ribbon-button-label' }, ['Table ▾']));
+        return tableButton;
+    }
+
+    /* The control named in the ribbon's layout, or null when it is not a table control. */
+    App.tableControls.create = function create(name) {
+        return name === 'insertTable' ? createInsertTable() : null;
+    };
+
+    App.tableControls.refresh = function refresh() {
+        if (tableButton && tableButton.isConnected) {
+            tableButton.disabled = !App.commands.isEnabled('insertTable');
+        }
+    };
+})();
+
+</script>
+<script>
 // ---- js/findreplace.js ----
 /*
  * findreplace.js - Home > Editing: Find (Ctrl+F) and Replace (Ctrl+H) across all slides (SPEC Phase 3).
@@ -12501,7 +12805,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
  *
- * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips).
+ * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips),
+ *           textcontrols.js and tablecontrols.js (controls that show a value or open a picker).
  */
 
 (function () {
@@ -12545,8 +12850,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         },
         {
             id: 'insert', label: 'Insert',
-            groups: [{ label: 'Text', commands: [['insertTextBox', 'textBox']] }],
-            note: 'Click Text box, then click on the slide (or drag to set its width). Tables, images, shapes and charts arrive in Phases 4 to 6.',
+            groups: [
+                { label: 'Tables', commands: [{ control: 'insertTable' }] },
+                { label: 'Text', commands: [['insertTextBox', 'textBox']] },
+            ],
+            note: 'Table: move over the grid to pick a size, click to insert. Text box: click it, then click on the ' +
+                'slide (or drag to set its width). Images, shapes and charts arrive in Phases 5 and 6.',
         },
         {
             id: 'arrange', label: 'Arrange',
@@ -12607,6 +12916,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         return button;
     }
 
+    /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
+    function createControl(name) {
+        return App.tableControls.create(name) || App.textControls.create(name);
+    }
+
     function renderTab(tab) {
         panel.innerHTML = '';
         // Forget the buttons of the tab shown before (the File menu's stay).
@@ -12622,14 +12936,14 @@ App.template.newDeckHtml = function newDeckHtml() {
                 buttonsNode = el('div', { class: 'ribbon-rows' }, group.rows.map((row) =>
                     el('div', { class: 'ribbon-row' }, row.map((item) => {
                         if (item.control) {
-                            return App.textControls.create(item.control);
+                            return createControl(item.control);
                         }
                         return item.command ? commandButton(item.command, item.icon, true, null, true) : commandButton(item[0], item[1], true);
                     }))));
             } else {
                 buttonsNode = el('div', { class: 'ribbon-group-buttons' });
-                group.commands.forEach(([command, icon, onDouble]) =>
-                    buttonsNode.appendChild(commandButton(command, icon, false, onDouble)));
+                group.commands.forEach((item) => buttonsNode.appendChild(item.control
+                    ? createControl(item.control) : commandButton(item[0], item[1], false, item[2])));
             }
             groupNode.append(buttonsNode, el('div', { class: 'ribbon-group-label' }, [group.label]));
             panel.appendChild(groupNode);
@@ -12739,6 +13053,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
         });
         App.textControls.refresh();
+        App.tableControls.refresh();
     };
 })();
 

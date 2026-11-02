@@ -177,7 +177,7 @@ Nested bullets are the top priority of this phase.
 ## Phase 4: Tables
 
 - [x] Table model, deck format 3: real `<table>`s whose cells hold text as the same paragraphs as text boxes (typing in cells comes with "Click into cells to edit"); the table style options and cell defaults come from a deck stylesheet built on the theme. Tables in older decks are converted on open, keeping their look (the import report says so) *(font sizes rounded to the half point, as for text boxes)*
-- [ ] Insert table from a grid picker (up to 10×10)
+- [x] Insert table from a grid picker (up to 10×10) *(Insert > Table: move over the grid, click; or arrow keys + Enter. The table comes centred, 960 px wide, with a header row and banded rows, selected; one undo step. Resizing it scales its columns and rows; a row never gets shorter than its text)*
 - [ ] Click into cells to edit; Tab / Shift+Tab move between cells; Tab in the last cell adds a row
 - [ ] Add / delete rows and columns
 - [ ] Merge and split cells (`colspan` / `rowspan`)
@@ -190,6 +190,7 @@ Nested bullets are the top priority of this phase.
 - [ ] Pasting into an existing table fills cells from the cursor
 - [ ] **Done when:** a comps table copied from Excel becomes an editable, formatted table on the slide in under a minute.
   - [ ] In Edge: open a deck saved before Phase 4 (or `samples/contract-deck-format1.html`): the import report says "1 table was converted to the editor's table format"; slide 3's comps table looks as before (header colour, right-aligned numbers, the bold Mediana row with its line above; text may be a hair wider); Save, close, reopen: no report
+  - [ ] Insert > Table: move the mouse over the grid (the label says "4 × 3 table"), click: a table with a dark header row and grey bands appears in the middle of the slide, selected; Ctrl+Z removes it. Drag its right handle left: the columns get narrower together; drag its bottom handle far up: the rows stop at one line of text. Insert > Table again, press ↓ → ↓ then Enter: a 2 × 2 table. Save, reopen: the tables are there
   - [ ] Capture Excel fixtures (needed for "Paste from Excel"): in a new Excel workbook type this FAKE sheet: A1 "Comparáveis de mercado" merged across A1:E1; row 2 header with a dark fill and white bold text: Empresa · EV (R$ mn) · EV/EBITDA 2025E · Margem EBITDA · Var. a/a; rows 3–5: Alfa S.A. · 2450 (format `#,##0`) · 9,8 (custom `0,0"x";(0,0"x")`) · 19,5% (`0,0%`) · -3,5% (custom `0,0%;(0,0%)`), Beta Ltda · 1120,5 (`#,##0,0`) · 8,9 · 17,2% · 12,0%, Gama · 780 · -1,2 · 21,0% · 8,0%; row 6 "Mediana" bold with a thick line above it · 1120 · 8,9 · 19,5% · 8,0%. Open `tests/clipboard-capture.html` in Edge, keep "fake letters" on and tick "Keep digits"; copy A1:E6 in Excel, paste, name it `excel-comps`, "Copied from" = your Excel version + language (e.g. "Excel 365 pt-BR"), Save. If you can, also paste that range into PowerPoint, copy the PowerPoint table and save it as `powerpoint-table-comps` (and the same from Word as `word-table-comps`). Put the files in `tests/fixtures/clipboard/`
 
 ## Phase 5: Images and shapes

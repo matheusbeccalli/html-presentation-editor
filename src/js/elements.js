@@ -10,8 +10,10 @@
  * paste work between slides and decks in this tab. Pasting from other programs
  * (tables from Excel, screenshots) arrives in Phases 4 and 5.
  *
+ * Insert > Text box and Insert > Table add new elements on top of the slide.
+ *
  * Talks to: selection.js (what is selected), transform.js (positions, order),
- *           history.js, deck.js.
+ *           history.js, deck.js, text.js and tables.js (new elements).
  */
 
 (function () {
@@ -61,20 +63,48 @@
         const doc = slide.ownerDocument;
         const left = Math.max(0, Math.min(1240, spot.left));
         const width = Math.max(40, Math.min(1280 - left, spot.width && spot.width >= 20 ? spot.width : NEW_TEXT_WIDTH));
-        const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
         let element = null;
         App.history.change('Insert text box', { slideId: slide.getAttribute('data-slide-id') }, () => {
             element = App.text.createTextElement(doc, { left: left, top: Math.max(0, Math.min(700, spot.top)), width: width },
-                App.util.uniqueId('e', used));
-            const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
-            element.style.zIndex = String(top + 1);
-            slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+                freshId(doc));
+            addOnTop(slide, element);
         });
         App.selection.select(element);
         App.text.enterEdit(element, { caret: 'start', isNew: true });
         App.text.fitText(element);
         App.selection.refresh();
     };
+
+    /*
+     * Insert > Table: a rows x cols table centred on the slide (one undo step),
+     * then selected. Its rows are measured once it is on the slide (fitTable).
+     */
+    App.elements.insertTable = function insertTable(rows, cols) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        let element = null;
+        App.history.change('Insert table', { slideId: slide.getAttribute('data-slide-id') }, () => {
+            element = App.tables.createTable(slide.ownerDocument, rows, cols, App.tables.newTableRect(rows, cols),
+                freshId(slide.ownerDocument));
+            addOnTop(slide, element);
+            App.tables.fitTable(element);
+        });
+        App.selection.select(element);
+    };
+
+    function freshId(doc) {
+        const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+        return App.util.uniqueId('e', used);
+    }
+
+    /* A new element goes in front of everything on the slide (before the speaker notes in the HTML). */
+    function addOnTop(slide, element) {
+        const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
+        element.style.zIndex = String(top + 1);
+        slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+    }
 
     /* Give `element` and every element inside it that has a data-id a new, unused id. */
     App.elements.giveFreshIds = function giveFreshIds(element, usedIds) {

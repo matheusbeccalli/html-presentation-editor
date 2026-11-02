@@ -129,13 +129,131 @@
         return { rows: rows.length, cols: cols, cells: cells };
     };
 
-    // ---------------------------------------------------------------
-    // Converting a rendered table into the model (import, older decks)
-    // ---------------------------------------------------------------
-
     function round2(value) {
         return Math.round(value * 100) / 100;
     }
+
+    /* `total` split into `count` parts of two decimals that add up exactly (the last one takes the rest). */
+    function splitEvenly(total, count) {
+        const part = Math.floor(total / count * 100) / 100;
+        const parts = new Array(count).fill(part);
+        parts[count - 1] = round2(total - part * (count - 1));
+        return parts;
+    }
+
+    /* Scale `values` to add up to `total`, keeping their proportions; again the last one takes the rest. */
+    function scaleTo(values, total) {
+        const sum = values.reduce((a, b) => a + b, 0);
+        if (sum <= 0) {
+            return splitEvenly(total, values.length);
+        }
+        const scaled = values.map((value) => round2(value * total / sum));
+        scaled[scaled.length - 1] = round2(total - scaled.slice(0, -1).reduce((a, b) => a + b, 0));
+        return scaled;
+    }
+
+    // ---------------------------------------------------------------
+    // New tables (Insert > Table)
+    // ---------------------------------------------------------------
+
+    const NEW_TABLE_WIDTH = 960;   // px: three quarters of the slide, as PowerPoint's inserted tables
+    const NEW_ROW_HEIGHT = 40;     // px: room for a line of the 14pt default text
+
+    /* Where a new table of `rows` x `cols` goes: centred on the 1280x720 slide. */
+    App.tables.newTableRect = function newTableRect(rows, cols) {
+        const height = rows * NEW_ROW_HEIGHT;
+        return {
+            left: (1280 - NEW_TABLE_WIDTH) / 2,
+            top: Math.max(0, Math.round((720 - height) / 2)),
+            width: NEW_TABLE_WIDTH,
+            height: height,
+        };
+    };
+
+    /*
+     * A new, empty table element of `rows` x `cols` at rect { left, top, width, height }
+     * (slide px), equal columns and rows, with PowerPoint's default style options:
+     * a header row and banded rows. Every cell has one empty line to type in.
+     */
+    App.tables.createTable = function createTable(doc, rows, cols, rect, id) {
+        const element = doc.createElement('div');
+        element.setAttribute('class', 'el');
+        element.setAttribute('data-type', 'table');
+        if (id) {
+            element.setAttribute('data-id', id);
+        }
+        ['left', 'top', 'width', 'height'].forEach((side) => element.style.setProperty(side, rect[side] + 'px'));
+
+        const table = doc.createElement('table');
+        table.setAttribute('data-header-row', '');
+        table.setAttribute('data-banded-rows', '');
+        const columns = doc.createElement('colgroup');
+        splitEvenly(rect.width, cols).forEach((width) => {
+            const col = doc.createElement('col');
+            col.style.setProperty('width', width + 'px');
+            columns.appendChild(col);
+        });
+        const body = doc.createElement('tbody');
+        splitEvenly(rect.height, rows).forEach((height) => {
+            const row = doc.createElement('tr');
+            row.style.setProperty('height', height + 'px');
+            for (let c = 0; c < cols; c++) {
+                row.appendChild(emptyCell(doc));
+            }
+            body.appendChild(row);
+        });
+        table.append(columns, body);
+        element.appendChild(table);
+        return element;
+    };
+
+    // ---------------------------------------------------------------
+    // Fitting a table to its box (resize)
+    // ---------------------------------------------------------------
+
+    /*
+     * Make the table fill its element's box after a resize: the columns scale to
+     * the new width and the rows to the new height, keeping their proportions.
+     * A row never gets shorter than its text (the browser draws it taller), so
+     * the drawn row heights are written back and the box takes the table's real
+     * height, as in PowerPoint. Needs the slide to be shown (it measures).
+     * Returns true when something changed.
+     */
+    App.tables.fitTable = function fitTable(element) {
+        const table = element && element.getAttribute('data-type') === 'table' ? element.querySelector(':scope > table') : null;
+        if (!table) {
+            return false;
+        }
+        const cols = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+        const rows = Array.from(table.rows);
+        const before = sizesOf(element, cols, rows);
+
+        const width = parseFloat(element.style.width);
+        if (cols.length > 0 && width > 0) {
+            scaleTo(cols.map((col) => parseFloat(col.style.width) || 0), width)
+                .forEach((value, index) => cols[index].style.setProperty('width', value + 'px'));
+        }
+        const height = parseFloat(element.style.height);
+        if (rows.length > 0 && height > 0) {
+            scaleTo(rows.map((row) => parseFloat(row.style.height) || 0), height)
+                .forEach((value, index) => rows[index].style.setProperty('height', value + 'px'));
+        }
+        if (table.getBoundingClientRect().height > 0) {   // laid out: write down what the browser drew
+            const drawn = rows.map((row) => round2(row.getBoundingClientRect().height));
+            drawn.forEach((value, index) => rows[index].style.setProperty('height', value + 'px'));
+            // The rows, not the table: half of the last row's bottom line hangs below it (collapsed borders).
+            element.style.setProperty('height', round2(drawn.reduce((a, b) => a + b, 0)) + 'px');
+        }
+        return sizesOf(element, cols, rows) !== before;
+    };
+
+    function sizesOf(element, cols, rows) {
+        return [element.style.height].concat(cols.map((col) => col.style.width), rows.map((row) => row.style.height)).join();
+    }
+
+    // ---------------------------------------------------------------
+    // Converting a rendered table into the model (import, older decks)
+    // ---------------------------------------------------------------
 
     function isTransparent(color) {
         return !color || color === 'transparent' || /rgba\(.*,\s*0\)$/.test(color);

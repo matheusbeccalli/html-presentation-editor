@@ -308,6 +308,7 @@
             App.transform.writeRect(element, rect);
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
+                App.tables.fitTable(element);   // a table's columns and rows follow the box
             }
             App.selection.refresh();
             App.events.emit('selection-dragged');   // the Format pane shows the values live

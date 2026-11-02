@@ -27,6 +27,9 @@
  * undo step each; setLevel changes levels. Still to come in Phase 3:
  * applyStyle, toggleList.
  *
+ * Table cells (Phase 4) hold the same model: normalizeCell; tables.js owns the
+ * rows and columns around them, never the text inside.
+ *
  * Talks to: normalize.js and importer.js (import), history.js (typing steps),
  *           selection.js (selected box), commands.js (undo/redo while typing).
  */
@@ -99,6 +102,8 @@
         const rules = [
             '/* Bullets, numbers and indents of the text model (written by the editor). */',
             '.el { counter-reset: list-1 list-2 list-3 list-4 list-5; }',
+            // A table cell is a text of its own (Phase 4): its numbering starts at 1.
+            '.el td { counter-reset: list-1 list-2 list-3 list-4 list-5; }',
             // A line's look comes only from its text box and its inline formatting, so a
             // deck's own rules for <p> (".el p { font-size: 14px }") cannot restyle it.
             '.el p[data-list][data-level] { font: inherit; color: inherit; letter-spacing: inherit;' +
@@ -802,6 +807,21 @@
     };
 
     /*
+     * A table cell holds text in the same model as a text box (Phase 4), plus
+     * one rule: it always keeps a line, so there is somewhere to type.
+     */
+    App.text.normalizeCell = function normalizeCell(cell) {
+        App.text.normalize(cell);
+        if (!cell.firstElementChild) {
+            const p = cell.ownerDocument.createElement('p');
+            p.setAttribute('data-list', 'none');
+            p.setAttribute('data-level', '1');
+            p.appendChild(cell.ownerDocument.createElement('br'));
+            cell.appendChild(p);
+        }
+    };
+
+    /*
      * The text as data: [{ list, level, start, text }] per paragraph; a <br>
      * inside a line is '\n' (a <br> that only keeps an empty line open is not).
      */
@@ -905,6 +925,11 @@
         const match = theme.colors.find((color) => color.value === value);
         return match ? 'var(' + match.name + ')' : value;
     }
+
+    /* A computed colour of `sourceDoc` as var(--color-…) when it is a theme colour (tables.js: cell fills). */
+    App.text.themeColorOf = function themeColorOf(value, sourceDoc) {
+        return themeColor(value, themeValues(sourceDoc));
+    };
 
     /* Computed style -> look, with px sizes scaled to the 1280x720 slide and turned into pt. */
     function lookOf(computed, scale, element) {

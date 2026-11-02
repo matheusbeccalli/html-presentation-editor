@@ -81,6 +81,7 @@
         root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
         // Text is saved in the text model, even if the user is still typing (SPEC: normalize before save).
         root.querySelectorAll('.el[data-type="text"]').forEach((element) => App.text.normalize(element));
+        root.querySelectorAll(App.tables.CELL_SELECTOR).forEach((cell) => App.text.normalizeCell(cell));
         return root;
     };
 

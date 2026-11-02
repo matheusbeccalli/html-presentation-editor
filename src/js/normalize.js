@@ -13,7 +13,8 @@
  *                                             converted to the text model (text.js fromRendered)
  *   icon (<svg>/<img>) inside a heading     -> its own element; the text box starts after it
  *   <img>                                  -> <img class="el" data-type="image">
- *   <table>                                -> <div class="el" data-type="table">
+ *   <table>                                -> <div class="el" data-type="table"> holding a table
+ *                                             in the table model (tables.js fromRendered)
  *   <svg> or empty coloured box            -> data-type="shape"
  *   box with background/border (a "card")  -> a shape behind its contents,
  *                                             and the contents become their own elements
@@ -22,10 +23,11 @@
  *
  * Decks that already follow the contract are only checked and lightly repaired
  * (missing ids, missing z-index) - never rebuilt. If they are older than deck
- * format 2, their text is converted to the text model in place, while the
- * measuring iframe can still tell how it looks.
+ * format 2, their text is converted to the text model in place; older than
+ * format 3, their tables to the table model; both while the measuring iframe
+ * can still tell how they look.
  *
- * Talks to: importer.js (calls run), text.js (fromRendered), util.js.
+ * Talks to: importer.js (calls run), text.js and tables.js (fromRendered), util.js.
  */
 
 (function () {
@@ -461,12 +463,6 @@
         }
     }
 
-    // An inline root must become a block so width/height 100% apply to it.
-    function blockDisplay(display) {
-        const map = { inline: 'block', 'inline-block': 'block', 'inline-flex': 'flex', 'inline-grid': 'grid' };
-        return map[display] || display;
-    }
-
     function displayIsNoteworthy(element, display) {
         if (['flex', 'grid', 'inline-flex', 'inline-grid', 'inline-block', 'none'].indexOf(display) !== -1) {
             return true;
@@ -593,21 +589,6 @@
         node.style.setProperty('height', box.height + 'px');
     }
 
-    // Root of a copied block: no margin or own positioning, and it fills its wrapper exactly.
-    function resetRoot(clone, computed, opacity) {
-        clone.style.setProperty('position', 'static');
-        clone.style.setProperty('margin', '0');
-        clone.style.setProperty('width', '100%');
-        clone.style.setProperty('height', '100%');
-        clone.style.setProperty('box-sizing', 'border-box');
-        clone.style.setProperty('transform', 'none');
-        clone.style.setProperty('float', 'none');
-        clone.style.setProperty('max-width', 'none');
-        clone.style.setProperty('max-height', 'none');
-        clone.style.setProperty('display', blockDisplay(computed.display));
-        clone.style.setProperty('opacity', String(opacity));
-    }
-
     function wrapperElement(out, type, box) {
         const wrapper = out.createElement('div');
         wrapper.setAttribute('class', 'el');
@@ -643,15 +624,24 @@
         }
     }
 
-    /* table: an .el wrapper holding a styled copy of the block. */
-    function buildWrapped(out, element, type, box, ctx) {
-        const computed = element.ownerDocument.defaultView.getComputedStyle(element);
-        const wrapper = wrapperElement(out, type, box);
-        const clone = out.importNode(element, true);
-        copyStyles(clone, element, ctx.fit.scale, null);
-        resetRoot(clone, computed, effectiveOpacity(element, ctx.slide));
-        wrapper.appendChild(clone);
+    /* table: an .el wrapper holding the table converted to the table model, keeping its look. */
+    function buildTable(out, element, box, ctx) {
+        const wrapper = wrapperElement(out, 'table', box);
+        const opacity = effectiveOpacity(element, ctx.slide);
+        if (opacity < 1) {
+            wrapper.style.setProperty('opacity', String(opacity));
+        }
+        convertTable(element, wrapper, ctx);
         return wrapper;
+    }
+
+    function convertTable(source, target, ctx) {
+        const result = App.tables.fromRendered(source, target, { scale: ctx.fit.scale });
+        ctx.report.tablesConverted += 1;
+        if (result.caption) {
+            ctx.report.warnings.push('Slide ' + ctx.slideNumber + ': the table title "' + result.caption +
+                '" was left out (a table has no place for it); add it as a text box if you need it.');
+        }
     }
 
     /* image, svg, chart and existing elements: the element itself becomes the .el. */
@@ -808,7 +798,7 @@
         const out = ctx.out;
         switch (kind) {
             case 'text': return buildText(out, element, box, ctx, false);
-            case 'table': return buildWrapped(out, element, 'table', box, ctx);
+            case 'table': return buildTable(out, element, box, ctx);
             case 'image': return buildSelf(out, element, 'image', box, ctx);
             case 'svg': return buildSelf(out, element, 'shape', box, ctx);
             case 'chart': return buildSelf(out, element, 'chart', box, ctx);
@@ -956,17 +946,31 @@
     }
 
     /*
-     * Format-1 contract decks: convert the text of every text element in place,
-     * slide by slide (a slide must be shown to measure its layout).
+     * Older contract decks: convert the text of every text element (format 1) and
+     * the tables (formats 1-2) in place, slide by slide (a slide must be shown to
+     * measure its layout).
      */
-    function convertContractText(frameDoc, doc, slides, report) {
+    function convertContract(frameDoc, doc, slides, report) {
         const textChecks = [];
+        const shouldConvertText = needsConversion(doc, TEXT_MODEL_FORMAT);
+        const convertTables = needsConversion(doc, TABLE_MODEL_FORMAT);
         const convertIn = (scope, slideNumber) => {
-            scope.querySelectorAll('.el[data-type="text"][data-import-text]').forEach((source) => {
-                const target = doc.querySelector('[data-import-text="' + source.getAttribute('data-import-text') + '"]');
-                const ctx = { fit: { scale: 1 }, report: report, textChecks: textChecks, slideNumber: slideNumber };
-                convertText(source, target, ctx, false);
-            });
+            const ctx = { fit: { scale: 1 }, report: report, textChecks: textChecks, slideNumber: slideNumber };
+            if (shouldConvertText) {
+                scope.querySelectorAll('.el[data-type="text"][data-import-text]').forEach((source) => {
+                    const target = doc.querySelector('[data-import-text="' + source.getAttribute('data-import-text') + '"]');
+                    convertText(source, target, ctx, false);
+                });
+            }
+            if (convertTables) {
+                scope.querySelectorAll('.el[data-type="table"][data-import-table]').forEach((source) => {
+                    const table = source.querySelector('table');
+                    if (table) {
+                        convertTable(table, doc.querySelector('[data-import-table="' +
+                            source.getAttribute('data-import-table') + '"]'), ctx);
+                    }
+                });
+            }
         };
         slides.forEach((slide, index) => {
             showOnly(slides, index);
@@ -979,10 +983,14 @@
         reportTextChecks(textChecks, report);
     }
 
-    /* Decks saved before deck format 2 hold their text as <h1>, <ul> … */
-    function needsTextConversion(doc) {
+    // Decks saved before format 2 hold their text as <h1>, <ul> …; before format 3,
+    // their tables as the deck's own HTML and CSS.
+    const TEXT_MODEL_FORMAT = 2;
+    const TABLE_MODEL_FORMAT = 3;
+
+    function needsConversion(doc, modelFormat) {
         const meta = doc.head && doc.head.querySelector('meta[name="deck-format"]');
-        return !meta || (parseInt(meta.getAttribute('content'), 10) || 1) < App.DECK_FORMAT;
+        return !meta || (parseInt(meta.getAttribute('content'), 10) || 1) < modelFormat;
     }
 
     function describeTag(element) {
@@ -1061,6 +1069,8 @@
         detected.slides.forEach((slide, index) => slide.setAttribute('data-import-slide', String(index)));
         const textElements = Array.from(doc.querySelectorAll('.el[data-type="text"]'));
         textElements.forEach((element, index) => element.setAttribute('data-import-text', String(index)));
+        const tableElements = Array.from(doc.querySelectorAll('.el[data-type="table"]'));
+        tableElements.forEach((element, index) => element.setAttribute('data-import-table', String(index)));
         const frame = await loadMeasureFrame(buildMeasureHtml(doc));
 
         try {
@@ -1085,8 +1095,8 @@
             if (method === 'section.slide' && allSlidesFollowContract(slides)) {
                 report.isContract = true;
                 applyContractFixes(detected.slides, report);
-                if (needsTextConversion(doc)) {
-                    convertContractText(frameDoc, doc, slides, report);
+                if (needsConversion(doc, TABLE_MODEL_FORMAT)) {
+                    convertContract(frameDoc, doc, slides, report);
                 }
                 return doc;
             }
@@ -1094,6 +1104,7 @@
         } finally {
             detected.slides.forEach((slide) => slide.removeAttribute('data-import-slide'));
             textElements.forEach((element) => element.removeAttribute('data-import-text'));
+            tableElements.forEach((element) => element.removeAttribute('data-import-table'));
             frame.remove();
         }
     };

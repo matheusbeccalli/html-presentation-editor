@@ -819,8 +819,9 @@ aside.notes { display: none !important; }
 
 window.App = {
     // The deck format this editor writes (<meta name="deck-format">, SPEC 3.3).
-    // 2 = text in the flat-paragraph model (Phase 3); older decks are migrated on open.
-    DECK_FORMAT: 2,
+    // 2 = text in the flat-paragraph model (Phase 3); 3 = tables in the table model (Phase 4).
+    // Older decks are migrated on open (normalize.js).
+    DECK_FORMAT: 3,
 
     // Shared state that several modules read. Kept small on purpose.
     state: {
@@ -1686,7 +1687,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="deck-format" content="2">
+<meta name="deck-format" content="3">
 <title>Nova apresentação</title>
 <style>
   :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
@@ -1746,6 +1747,9 @@ App.template.newDeckHtml = function newDeckHtml() {
  * Backspace … and "- " AutoFormat) are decided by keyAction and run as one
  * undo step each; setLevel changes levels. Still to come in Phase 3:
  * applyStyle, toggleList.
+ *
+ * Table cells (Phase 4) hold the same model: normalizeCell; tables.js owns the
+ * rows and columns around them, never the text inside.
  *
  * Talks to: normalize.js and importer.js (import), history.js (typing steps),
  *           selection.js (selected box), commands.js (undo/redo while typing).
@@ -1819,6 +1823,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         const rules = [
             '/* Bullets, numbers and indents of the text model (written by the editor). */',
             '.el { counter-reset: list-1 list-2 list-3 list-4 list-5; }',
+            // A table cell is a text of its own (Phase 4): its numbering starts at 1.
+            '.el td { counter-reset: list-1 list-2 list-3 list-4 list-5; }',
             // A line's look comes only from its text box and its inline formatting, so a
             // deck's own rules for <p> (".el p { font-size: 14px }") cannot restyle it.
             '.el p[data-list][data-level] { font: inherit; color: inherit; letter-spacing: inherit;' +
@@ -2522,6 +2528,21 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     /*
+     * A table cell holds text in the same model as a text box (Phase 4), plus
+     * one rule: it always keeps a line, so there is somewhere to type.
+     */
+    App.text.normalizeCell = function normalizeCell(cell) {
+        App.text.normalize(cell);
+        if (!cell.firstElementChild) {
+            const p = cell.ownerDocument.createElement('p');
+            p.setAttribute('data-list', 'none');
+            p.setAttribute('data-level', '1');
+            p.appendChild(cell.ownerDocument.createElement('br'));
+            cell.appendChild(p);
+        }
+    };
+
+    /*
      * The text as data: [{ list, level, start, text }] per paragraph; a <br>
      * inside a line is '\n' (a <br> that only keeps an empty line open is not).
      */
@@ -2625,6 +2646,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         const match = theme.colors.find((color) => color.value === value);
         return match ? 'var(' + match.name + ')' : value;
     }
+
+    /* A computed colour of `sourceDoc` as var(--color-…) when it is a theme colour (tables.js: cell fills). */
+    App.text.themeColorOf = function themeColorOf(value, sourceDoc) {
+        return themeColor(value, themeValues(sourceDoc));
+    };
 
     /* Computed style -> look, with px sizes scaled to the 1280x720 slide and turned into pt. */
     function lookOf(computed, scale, element) {
@@ -5474,6 +5500,329 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/tables.js ----
+/*
+ * tables.js - tables on slides (SPEC Phase 4).
+ *
+ * The table model (deck format 3):
+ *
+ *   <div class="el" data-type="table" data-id="e3" style="left; top; width; height; z-index">
+ *     <table [data-header-row] [data-banded-rows] [data-total-row] [data-first-column]>
+ *       <colgroup><col style="width: 240px"> …</colgroup>
+ *       <tbody>
+ *         <tr style="height: 40px">
+ *           <td [colspan] [rowspan] [style="fill, borders, padding, vertical-align, text look"]>
+ *             …lines of the text model (text.js)…
+ *           </td> …
+ *         </tr> …
+ *       </tbody>
+ *     </table>
+ *   </div>
+ *
+ * - Only <td>, in one <tbody>: like PowerPoint, a header row is a table style
+ *   option, not another kind of cell, so switching it on and off changes no cells.
+ * - The style options are drawn by the deck's <style data-deck-table> (deckTableCss)
+ *   from the theme variables. What is set on one cell is inline on its <td> and wins.
+ * - The text in a cell is the same flat-paragraph model as in a text box, and only
+ *   text.js touches it (SPEC 3.7). This file handles the grid around it: rows,
+ *   columns, merged cells and widths.
+ *
+ * fromRendered converts a table the browser has laid out (the importer's measuring
+ * iframe) into the model, keeping its look: older decks are migrated on open.
+ *
+ * Talks to: text.js (cell text, theme colours), normalize.js and importer.js
+ *           (import, the stylesheet), serialize.js (cells normalized on save).
+ */
+
+(function () {
+    'use strict';
+
+    App.tables = {};
+
+    // Every cell of every model table in a document or element.
+    App.tables.CELL_SELECTOR = '.el[data-type="table"] > table > tbody > tr > td';
+
+    // A cell's box when neither its table (a --cell-… variable) nor the cell itself says otherwise:
+    // a thin line under each row, like a simple finance table.
+    const CELL_DEFAULTS = {
+        '--cell-padding': '4px 8px',
+        '--cell-vertical-align': 'top',
+        '--cell-border-top': 'none',
+        '--cell-border-right': 'none',
+        '--cell-border-bottom': '1px solid var(--table-line-color, #D9D9D9)',
+        '--cell-border-left': 'none',
+    };
+
+    // ---------------------------------------------------------------
+    // The deck's table stylesheet
+    // ---------------------------------------------------------------
+
+    /*
+     * The <style data-deck-table> stylesheet. The deck's own CSS comes before it,
+     * and these selectors are more specific than a deck's "td { … }", so a deck
+     * cannot restyle model tables by accident. A theme may set the --table-…
+     * variables; unset, they fall back to the theme colours.
+     */
+    App.tables.deckTableCss = function deckTableCss() {
+        const table = '.el[data-type="table"] > table';
+        const cell = table + ' > tbody > tr > td';
+        const rows = (options) => table + options + ' > tbody > tr';
+        const fill = 'var(--table-band-fill, #F2F2F2)';
+        return [
+            '/* Tables (written by the editor): the grid, and the table style options on <table>. */',
+            table + ' { width: 100%; table-layout: fixed; border-collapse: collapse; border-spacing: 0; border: 0;' +
+            ' margin: 0; background: none; font-family: var(--font-body); font-size: 14pt; color: var(--color-text);' +
+            ' line-height: 1.2; text-align: left; }',
+            table + ' > tbody > tr { border: 0; background: none; }',
+            // A cell inherits its text look from the table; its box comes from the --cell-… variables a
+            // table may set for all its cells (CELL_DEFAULTS), and a cell's own inline style wins over both.
+            cell + ' { font: inherit; color: inherit; text-align: inherit; background: none; overflow-wrap: break-word;' +
+            ' padding: var(--cell-padding, ' + CELL_DEFAULTS['--cell-padding'] + ');' +
+            ' vertical-align: var(--cell-vertical-align, ' + CELL_DEFAULTS['--cell-vertical-align'] + ');' +
+            ' border-top: var(--cell-border-top, ' + CELL_DEFAULTS['--cell-border-top'] + ');' +
+            ' border-right: var(--cell-border-right, ' + CELL_DEFAULTS['--cell-border-right'] + ');' +
+            ' border-bottom: var(--cell-border-bottom, ' + CELL_DEFAULTS['--cell-border-bottom'] + ');' +
+            ' border-left: var(--cell-border-left, ' + CELL_DEFAULTS['--cell-border-left'] + '); }',
+            // Banded rows: every other body row, starting with the first row under the header.
+            rows('[data-banded-rows]:not([data-header-row])') + ':nth-child(odd) > td { background: ' + fill + '; }',
+            rows('[data-banded-rows][data-header-row]') + ':nth-child(even) > td { background: ' + fill + '; }',
+            rows('[data-header-row]') + ':first-child > td { background: var(--table-header-fill, var(--color-accent, #1F2A44));' +
+            ' color: var(--table-header-color, #FFFFFF); font-weight: bold; }',
+            rows('[data-total-row]') + ':last-child:not(:first-child) > td { font-weight: bold; background: none;' +
+            ' border-top: 2px solid var(--table-total-line-color, var(--color-text, #222222)); }',
+            rows('[data-first-column]') + ' > td:first-child { font-weight: bold; }',
+        ].join('\n') + '\n';
+    };
+
+    // ---------------------------------------------------------------
+    // The grid: which cell covers which slot
+    // ---------------------------------------------------------------
+
+    /*
+     * The table as a full grid of slots: cells[r][c] is the <td>/<th> that covers
+     * row r, column c (a merged cell covers several slots), or null where a short
+     * row leaves a hole. Returns { rows, cols, cells }.
+     */
+    App.tables.gridOf = function gridOf(table) {
+        const rows = Array.from(table.rows);
+        const cells = rows.map(() => []);
+        rows.forEach((row, r) => {
+            let c = 0;
+            Array.from(row.cells).forEach((cell) => {
+                while (cells[r][c]) {
+                    c += 1;   // a slot taken by a rowspan from above
+                }
+                // rowspan="0" means "to the end"; a span never reaches past the table.
+                const rowSpan = Math.min(cell.rowSpan || rows.length, rows.length - r);
+                const colSpan = Math.max(1, cell.colSpan);
+                for (let dr = 0; dr < rowSpan; dr++) {
+                    for (let dc = 0; dc < colSpan; dc++) {
+                        cells[r + dr][c + dc] = cell;
+                    }
+                }
+                c += colSpan;
+            });
+        });
+        const cols = cells.reduce((most, row) => Math.max(most, row.length), 0);
+        cells.forEach((row) => {
+            for (let c = 0; c < cols; c++) {
+                row[c] = row[c] || null;
+            }
+        });
+        return { rows: rows.length, cols: cols, cells: cells };
+    };
+
+    // ---------------------------------------------------------------
+    // Converting a rendered table into the model (import, older decks)
+    // ---------------------------------------------------------------
+
+    function round2(value) {
+        return Math.round(value * 100) / 100;
+    }
+
+    function isTransparent(color) {
+        return !color || color === 'transparent' || /rgba\(.*,\s*0\)$/.test(color);
+    }
+
+    /* Each column's width: a cell that spans only that column says it; failing that, a share of a merged one. */
+    function columnWidths(grid, scale) {
+        const widths = [];
+        for (let c = 0; c < grid.cols; c++) {
+            const column = grid.cells.map((row) => row[c]).filter(Boolean);
+            const single = column.find((cell) => cell.colSpan === 1);
+            const cell = single || column[0];
+            widths.push(cell ? round2(cell.getBoundingClientRect().width / (single ? 1 : cell.colSpan) * scale) : 0);
+        }
+        return widths;
+    }
+
+    /* A cell's fill: its own, else the row's, the row group's or the table's (the cell is drawn on top of them). */
+    function backgroundOf(sourceCell, table) {
+        const view = table.ownerDocument.defaultView;
+        for (let node = sourceCell; node; node = node.parentElement) {
+            const color = view.getComputedStyle(node).backgroundColor;
+            if (!isTransparent(color)) {
+                return color;
+            }
+            if (node === table) {
+                break;
+            }
+        }
+        return null;
+    }
+
+    function borderText(computed, side, scale) {
+        const width = parseFloat(computed.getPropertyValue('border-' + side + '-width')) || 0;
+        const style = computed.getPropertyValue('border-' + side + '-style');
+        if (width === 0 || style === 'none' || style === 'hidden') {
+            return null;
+        }
+        return round2(width * scale) + 'px ' + style + ' ' + computed.getPropertyValue('border-' + side + '-color');
+    }
+
+    /*
+     * Fill, borders, padding and vertical alignment, written inline on the new cell.
+     * Every side is written, "none" too: the stylesheet's default line under each
+     * row must not appear where the deck had none (liftCommonLook then moves what
+     * most cells share onto the table). A border set on the row (allowed when
+     * borders collapse) is moved onto its cells.
+     */
+    function writeCellBox(cell, sourceCell, table, scale) {
+        const view = sourceCell.ownerDocument.defaultView;
+        const computed = view.getComputedStyle(sourceCell);
+        const rowComputed = view.getComputedStyle(sourceCell.parentElement);
+
+        const background = backgroundOf(sourceCell, table);
+        if (background) {
+            cell.style.setProperty('background-color', App.text.themeColorOf(background, sourceCell.ownerDocument));
+        }
+        const sides = ['top', 'right', 'bottom', 'left'].map((side) => {
+            const own = borderText(computed, side, scale);
+            const fromRow = side === 'top' || side === 'bottom' ? borderText(rowComputed, side, scale) : null;
+            return own || fromRow || 'none';
+        });
+        ['top', 'right', 'bottom', 'left'].forEach((side, index) => {
+            cell.style.setProperty('border-' + side, sides[index]);
+        });
+        const padding = ['top', 'right', 'bottom', 'left'].map((side) => {
+            return round2((parseFloat(computed.getPropertyValue('padding-' + side)) || 0) * scale) + 'px';
+        });
+        cell.style.setProperty('padding', padding.join(' '));
+        const align = computed.verticalAlign;
+        cell.style.setProperty('vertical-align', align === 'middle' || align === 'bottom' ? align : 'top');
+    }
+
+    function convertCell(sourceCell, doc, table, scale) {
+        const cell = doc.createElement('td');
+        if (sourceCell.colSpan > 1) {
+            cell.setAttribute('colspan', String(sourceCell.colSpan));
+        }
+        // rowspan="0" means "to the end"; either way a span stops at the last row.
+        const rowsLeft = table.rows.length - sourceCell.parentElement.rowIndex;
+        const rowSpan = Math.min(sourceCell.rowSpan || rowsLeft, rowsLeft);
+        if (rowSpan > 1) {
+            cell.setAttribute('rowspan', String(rowSpan));
+        }
+        App.text.fromRendered(sourceCell, cell, { scale: scale });   // the text look and the lines
+        App.text.normalizeCell(cell);
+        writeCellBox(cell, sourceCell, table, scale);
+        return cell;
+    }
+
+    // What a cell may share with the rest of its table: the property on the cell -> where the table keeps it.
+    const SHARED_LOOK = {
+        'font-family': 'font-family', 'font-size': 'font-size', color: 'color', 'font-weight': 'font-weight',
+        'font-style': 'font-style', 'letter-spacing': 'letter-spacing', 'text-transform': 'text-transform',
+        'text-align': 'text-align', 'line-height': 'line-height',
+        padding: '--cell-padding', 'vertical-align': '--cell-vertical-align',
+        'border-top': '--cell-border-top', 'border-right': '--cell-border-right',
+        'border-bottom': '--cell-border-bottom', 'border-left': '--cell-border-left',
+    };
+
+    /*
+     * Like a text box's look (SPEC 3.4): the value most cells have goes on the
+     * table once, and only cells that differ keep their own. The text look is
+     * inherited from the table; the box values become the table's --cell-…
+     * variables (left out when they equal the stylesheet's default).
+     */
+    function liftCommonLook(table) {
+        const cells = Array.from(table.querySelectorAll('td'));
+        Object.keys(SHARED_LOOK).forEach((property) => {
+            const tally = new Map();
+            cells.forEach((cell) => {
+                const value = cell.style.getPropertyValue(property);
+                tally.set(value, (tally.get(value) || 0) + 1);
+            });
+            let common = '';
+            tally.forEach((count, value) => {
+                if (common === '' || count > tally.get(common)) {
+                    common = value;
+                }
+            });
+            if (common === '') {
+                return;
+            }
+            const target = SHARED_LOOK[property];
+            if (CELL_DEFAULTS[target] !== common) {
+                table.style.setProperty(target, common);
+            }
+            cells.forEach((cell) => {
+                if (cell.style.getPropertyValue(property) === common) {
+                    cell.style.removeProperty(property);
+                }
+            });
+        });
+        cells.filter((cell) => cell.getAttribute('style') === '').forEach((cell) => cell.removeAttribute('style'));
+    }
+
+    function emptyCell(doc) {
+        const cell = doc.createElement('td');
+        App.text.normalizeCell(cell);
+        return cell;
+    }
+
+    /*
+     * Convert `source`, a <table> laid out by the browser, into a model table that
+     * replaces the children of `target` (the table element .el in the deck being
+     * built). Header cells become ordinary cells that keep their look; the deck's
+     * classes are not copied, because everything they did is now inline.
+     *   options.scale  slide scale (e.g. 2/3 for a 1920x1080 deck)
+     * Returns { caption }: the text of a caption, which the model has no place for.
+     */
+    App.tables.fromRendered = function fromRendered(source, target, options) {
+        const scale = (options && options.scale) || 1;
+        const doc = target.ownerDocument;
+        const grid = App.tables.gridOf(source);
+
+        const table = doc.createElement('table');
+        const columns = doc.createElement('colgroup');
+        columnWidths(grid, scale).forEach((width) => {
+            const col = doc.createElement('col');
+            col.style.setProperty('width', width + 'px');
+            columns.appendChild(col);
+        });
+        table.appendChild(columns);
+
+        const body = doc.createElement('tbody');
+        Array.from(source.rows).forEach((sourceRow, r) => {
+            const row = doc.createElement('tr');
+            row.style.setProperty('height', round2(sourceRow.getBoundingClientRect().height * scale) + 'px');
+            Array.from(sourceRow.cells).forEach((sourceCell) => row.appendChild(convertCell(sourceCell, doc, source, scale)));
+            // A short row gets empty cells, so every row covers every column.
+            grid.cells[r].filter((slot) => slot === null).forEach(() => row.appendChild(emptyCell(doc)));
+            body.appendChild(row);
+        });
+        table.appendChild(body);
+        liftCommonLook(table);
+        target.replaceChildren(table);
+
+        const caption = source.caption ? source.caption.textContent.trim() : '';
+        return { caption: caption };
+    };
+})();
+
+</script>
+<script>
 // ---- js/importer.js ----
 /*
  * importer.js - turns any HTML file into a deck the editor can work on (SPEC 3.4).
@@ -5489,13 +5838,14 @@ App.template.newDeckHtml = function newDeckHtml() {
  *                contract: absolute px positions, 1280x720; text of older
  *                decks goes to the text model (text.js), keeping its look
  *   6. render    charts that have JSON but no SVG (charts.js)
- *   7. text      tidy every text element, add the list variables and the
- *                bullet stylesheet, mark the deck as format 2
+ *   7. text      tidy every text element and table cell, add the table
+ *                stylesheet, the list variables and the bullet stylesheet,
+ *                mark the deck with the current format (App.DECK_FORMAT)
  *
  * The result is { html, report }. The report lists everything that was found,
  * converted or removed, and dialogs.js shows it to the user.
  *
- * Talks to: normalize.js, charts.js, text.js, fileio.js (calls importDeck),
+ * Talks to: normalize.js, charts.js, text.js, tables.js, fileio.js (calls importDeck),
  *           dialogs.js (shows the report), deck.js (removeRemoteRefs).
  */
 
@@ -5841,6 +6191,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             localRefs: [],            // [{ kind, url }] files next to the deck we cannot read
             chartsRendered: 0,
             textConverted: 0,         // text elements converted to the text model (Phase 3)
+            tablesConverted: 0,       // tables converted to the table model (Phase 4)
             fixes: [],                // small repairs on contract decks (missing ids ...)
             warnings: [],
         };
@@ -5854,6 +6205,20 @@ App.template.newDeckHtml = function newDeckHtml() {
             doc.head.prepend(meta);
         }
         meta.setAttribute('content', String(App.DECK_FORMAT));
+    }
+
+    /*
+     * Every table cell is text in the text model (tables.js), and the deck carries
+     * the current table stylesheet, after the deck's own CSS (whose generic
+     * "td { … }" rules it must beat) and before the bullet stylesheet.
+     */
+    function finishTables(doc) {
+        doc.querySelectorAll(App.tables.CELL_SELECTOR).forEach((cell) => App.text.normalizeCell(cell));
+        doc.head.querySelectorAll('style[data-deck-table]').forEach((old) => old.remove());
+        const style = doc.createElement('style');
+        style.setAttribute('data-deck-table', '');
+        style.textContent = App.tables.deckTableCss();
+        doc.head.appendChild(style);
     }
 
     /*
@@ -5905,6 +6270,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const deckDoc = await App.normalize.run(doc, detected, report);
 
         report.chartsRendered = App.charts.renderMissing(deckDoc);
+        finishTables(deckDoc);
         finishTextModel(deckDoc);
         ensureDeckFormatMeta(deckDoc);
 
@@ -5918,7 +6284,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.importer.reportHasChanges = function reportHasChanges(report) {
         return !report.isContract || report.fixes.length > 0 || report.scriptsRemoved.length > 0 ||
             report.handlersRemoved > 0 || report.otherRemoved.length > 0 || report.chartsRendered > 0 ||
-            report.textConverted > 0;
+            report.textConverted > 0 || report.tablesConverted > 0;
     };
 
     App.importer.reportHasItems = function reportHasItems(report) {
@@ -5945,7 +6311,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  *                                             converted to the text model (text.js fromRendered)
  *   icon (<svg>/<img>) inside a heading     -> its own element; the text box starts after it
  *   <img>                                  -> <img class="el" data-type="image">
- *   <table>                                -> <div class="el" data-type="table">
+ *   <table>                                -> <div class="el" data-type="table"> holding a table
+ *                                             in the table model (tables.js fromRendered)
  *   <svg> or empty coloured box            -> data-type="shape"
  *   box with background/border (a "card")  -> a shape behind its contents,
  *                                             and the contents become their own elements
@@ -5954,10 +6321,11 @@ App.template.newDeckHtml = function newDeckHtml() {
  *
  * Decks that already follow the contract are only checked and lightly repaired
  * (missing ids, missing z-index) - never rebuilt. If they are older than deck
- * format 2, their text is converted to the text model in place, while the
- * measuring iframe can still tell how it looks.
+ * format 2, their text is converted to the text model in place; older than
+ * format 3, their tables to the table model; both while the measuring iframe
+ * can still tell how they look.
  *
- * Talks to: importer.js (calls run), text.js (fromRendered), util.js.
+ * Talks to: importer.js (calls run), text.js and tables.js (fromRendered), util.js.
  */
 
 (function () {
@@ -6393,12 +6761,6 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     }
 
-    // An inline root must become a block so width/height 100% apply to it.
-    function blockDisplay(display) {
-        const map = { inline: 'block', 'inline-block': 'block', 'inline-flex': 'flex', 'inline-grid': 'grid' };
-        return map[display] || display;
-    }
-
     function displayIsNoteworthy(element, display) {
         if (['flex', 'grid', 'inline-flex', 'inline-grid', 'inline-block', 'none'].indexOf(display) !== -1) {
             return true;
@@ -6525,21 +6887,6 @@ App.template.newDeckHtml = function newDeckHtml() {
         node.style.setProperty('height', box.height + 'px');
     }
 
-    // Root of a copied block: no margin or own positioning, and it fills its wrapper exactly.
-    function resetRoot(clone, computed, opacity) {
-        clone.style.setProperty('position', 'static');
-        clone.style.setProperty('margin', '0');
-        clone.style.setProperty('width', '100%');
-        clone.style.setProperty('height', '100%');
-        clone.style.setProperty('box-sizing', 'border-box');
-        clone.style.setProperty('transform', 'none');
-        clone.style.setProperty('float', 'none');
-        clone.style.setProperty('max-width', 'none');
-        clone.style.setProperty('max-height', 'none');
-        clone.style.setProperty('display', blockDisplay(computed.display));
-        clone.style.setProperty('opacity', String(opacity));
-    }
-
     function wrapperElement(out, type, box) {
         const wrapper = out.createElement('div');
         wrapper.setAttribute('class', 'el');
@@ -6575,15 +6922,24 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     }
 
-    /* table: an .el wrapper holding a styled copy of the block. */
-    function buildWrapped(out, element, type, box, ctx) {
-        const computed = element.ownerDocument.defaultView.getComputedStyle(element);
-        const wrapper = wrapperElement(out, type, box);
-        const clone = out.importNode(element, true);
-        copyStyles(clone, element, ctx.fit.scale, null);
-        resetRoot(clone, computed, effectiveOpacity(element, ctx.slide));
-        wrapper.appendChild(clone);
+    /* table: an .el wrapper holding the table converted to the table model, keeping its look. */
+    function buildTable(out, element, box, ctx) {
+        const wrapper = wrapperElement(out, 'table', box);
+        const opacity = effectiveOpacity(element, ctx.slide);
+        if (opacity < 1) {
+            wrapper.style.setProperty('opacity', String(opacity));
+        }
+        convertTable(element, wrapper, ctx);
         return wrapper;
+    }
+
+    function convertTable(source, target, ctx) {
+        const result = App.tables.fromRendered(source, target, { scale: ctx.fit.scale });
+        ctx.report.tablesConverted += 1;
+        if (result.caption) {
+            ctx.report.warnings.push('Slide ' + ctx.slideNumber + ': the table title "' + result.caption +
+                '" was left out (a table has no place for it); add it as a text box if you need it.');
+        }
     }
 
     /* image, svg, chart and existing elements: the element itself becomes the .el. */
@@ -6740,7 +7096,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const out = ctx.out;
         switch (kind) {
             case 'text': return buildText(out, element, box, ctx, false);
-            case 'table': return buildWrapped(out, element, 'table', box, ctx);
+            case 'table': return buildTable(out, element, box, ctx);
             case 'image': return buildSelf(out, element, 'image', box, ctx);
             case 'svg': return buildSelf(out, element, 'shape', box, ctx);
             case 'chart': return buildSelf(out, element, 'chart', box, ctx);
@@ -6888,17 +7244,31 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     /*
-     * Format-1 contract decks: convert the text of every text element in place,
-     * slide by slide (a slide must be shown to measure its layout).
+     * Older contract decks: convert the text of every text element (format 1) and
+     * the tables (formats 1-2) in place, slide by slide (a slide must be shown to
+     * measure its layout).
      */
-    function convertContractText(frameDoc, doc, slides, report) {
+    function convertContract(frameDoc, doc, slides, report) {
         const textChecks = [];
+        const shouldConvertText = needsConversion(doc, TEXT_MODEL_FORMAT);
+        const convertTables = needsConversion(doc, TABLE_MODEL_FORMAT);
         const convertIn = (scope, slideNumber) => {
-            scope.querySelectorAll('.el[data-type="text"][data-import-text]').forEach((source) => {
-                const target = doc.querySelector('[data-import-text="' + source.getAttribute('data-import-text') + '"]');
-                const ctx = { fit: { scale: 1 }, report: report, textChecks: textChecks, slideNumber: slideNumber };
-                convertText(source, target, ctx, false);
-            });
+            const ctx = { fit: { scale: 1 }, report: report, textChecks: textChecks, slideNumber: slideNumber };
+            if (shouldConvertText) {
+                scope.querySelectorAll('.el[data-type="text"][data-import-text]').forEach((source) => {
+                    const target = doc.querySelector('[data-import-text="' + source.getAttribute('data-import-text') + '"]');
+                    convertText(source, target, ctx, false);
+                });
+            }
+            if (convertTables) {
+                scope.querySelectorAll('.el[data-type="table"][data-import-table]').forEach((source) => {
+                    const table = source.querySelector('table');
+                    if (table) {
+                        convertTable(table, doc.querySelector('[data-import-table="' +
+                            source.getAttribute('data-import-table') + '"]'), ctx);
+                    }
+                });
+            }
         };
         slides.forEach((slide, index) => {
             showOnly(slides, index);
@@ -6911,10 +7281,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         reportTextChecks(textChecks, report);
     }
 
-    /* Decks saved before deck format 2 hold their text as <h1>, <ul> … */
-    function needsTextConversion(doc) {
+    // Decks saved before format 2 hold their text as <h1>, <ul> …; before format 3,
+    // their tables as the deck's own HTML and CSS.
+    const TEXT_MODEL_FORMAT = 2;
+    const TABLE_MODEL_FORMAT = 3;
+
+    function needsConversion(doc, modelFormat) {
         const meta = doc.head && doc.head.querySelector('meta[name="deck-format"]');
-        return !meta || (parseInt(meta.getAttribute('content'), 10) || 1) < App.DECK_FORMAT;
+        return !meta || (parseInt(meta.getAttribute('content'), 10) || 1) < modelFormat;
     }
 
     function describeTag(element) {
@@ -6993,6 +7367,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         detected.slides.forEach((slide, index) => slide.setAttribute('data-import-slide', String(index)));
         const textElements = Array.from(doc.querySelectorAll('.el[data-type="text"]'));
         textElements.forEach((element, index) => element.setAttribute('data-import-text', String(index)));
+        const tableElements = Array.from(doc.querySelectorAll('.el[data-type="table"]'));
+        tableElements.forEach((element, index) => element.setAttribute('data-import-table', String(index)));
         const frame = await loadMeasureFrame(buildMeasureHtml(doc));
 
         try {
@@ -7017,8 +7393,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (method === 'section.slide' && allSlidesFollowContract(slides)) {
                 report.isContract = true;
                 applyContractFixes(detected.slides, report);
-                if (needsTextConversion(doc)) {
-                    convertContractText(frameDoc, doc, slides, report);
+                if (needsConversion(doc, TABLE_MODEL_FORMAT)) {
+                    convertContract(frameDoc, doc, slides, report);
                 }
                 return doc;
             }
@@ -7026,6 +7402,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         } finally {
             detected.slides.forEach((slide) => slide.removeAttribute('data-import-slide'));
             textElements.forEach((element) => element.removeAttribute('data-import-text'));
+            tableElements.forEach((element) => element.removeAttribute('data-import-table'));
             frame.remove();
         }
     };
@@ -7125,6 +7502,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
         // Text is saved in the text model, even if the user is still typing (SPEC: normalize before save).
         root.querySelectorAll('.el[data-type="text"]').forEach((element) => App.text.normalize(element));
+        root.querySelectorAll(App.tables.CELL_SELECTOR).forEach((cell) => App.text.normalizeCell(cell));
         return root;
     };
 
@@ -7359,6 +7737,10 @@ App.template.newDeckHtml = function newDeckHtml() {
             lines.push('Text in ' + report.textConverted + (report.textConverted === 1 ? ' box was' : ' boxes were') +
                 ' converted to the editor\'s text format: every line is a paragraph with its bullet or number ' +
                 'and its level, and the look was kept.');
+        }
+        if (report.tablesConverted) {
+            lines.push(report.tablesConverted + (report.tablesConverted === 1 ? ' table was' : ' tables were') +
+                ' converted to the editor\'s table format: every cell is editable text, and the look was kept.');
         }
         if (report.scaledFrom) {
             lines.push('Slides were scaled from ' + report.scaledFrom + ' to 1280×720.');

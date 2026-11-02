@@ -29,8 +29,9 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `charts.js` | Chart JSON → SVG. **Phase 1: placeholder only** | importer |
 | `template.js` | The blank deck for File > New | fileio |
 | `text.js` | The only door to text (SPEC 3.7): the flat-paragraph model (`<p data-list data-level>`), `normalize` (messy HTML → allowed set, idempotent), `getModel`, the bullet/number stylesheet (`deckTextCss`) and list theme variables; `fromRendered` converts rendered text (import, format-1 decks) keeping its look; edit mode (`enterEdit`/`exitEdit`), typing as undo steps, the cursor as line + character (`getCaret`/`setCaret`), new text boxes that grow with their text; bullet keys and AutoFormat (`keyAction`, `autoFormatAction`); list buttons (`listAction`, `toggleList`, `setLevel`, `setNumbering`); paragraph formatting (`paragraphAction`, `applyParagraph`: alignment, line spacing, space before/after on each selected `<p>`); find & replace (`findMatches` → `{p, start, end}` per match, `matchRange`, `replaceAction`/`replaceText`/`replaceAll`: a replacement takes the formatting of the first character it replaces; `selectMatch`); autofit (`fitText`: resize → `fitHeight`, shrink → `--autofit-scale` for the CSS `zoom` rule in the deck's text stylesheet; `autofitAction`); format painter (`pickLook`, `lookAction`, `startPainter`/`stopPainter`/`paintBox`); copy/cut (`copyContent`, `cutAction`); paste (`pasteAction`: Ctrl+V in the destination's look, the editor's own copies as they were, Ctrl+Shift+V plain); character formatting (`styleAction`, `applyStyle`: text read as runs, changed, written back; bold/italic shared by all the text moves onto the box) | normalize, importer, history, selection, commands |
-| `importer.js` | Parse, sanitize (scripts, handlers), find blocked/missing refs, detect slides, run the import | normalize, charts |
-| `normalize.js` | Measures the deck in a hidden iframe and rebuilds it in the contract format; converts text to the text model while it can still measure it (text.js); icons inside headings become their own elements | importer, text |
+| `tables.js` | Tables (Phase 4): the table model (deck format 3: `<td>` only in one `<tbody>`, `<colgroup>` px widths, style options as `data-…` attributes on `<table>`), the deck's table stylesheet (`deckTableCss`, theme variables and the `--cell-…` defaults), the grid of merged cells (`gridOf`), and `fromRendered`: a laid-out table → model table keeping its look (shared look lifted onto the `<table>`). The text inside cells belongs to text.js (`normalizeCell`) | text, normalize, importer, serialize |
+| `importer.js` | Parse, sanitize (scripts, handlers), find blocked/missing refs, detect slides, run the import; tidies every text box and table cell and installs the current table and text stylesheets | normalize, charts, text, tables |
+| `normalize.js` | Measures the deck in a hidden iframe and rebuilds it in the contract format; converts text to the text model and tables to the table model while it can still measure them (text.js, tables.js), also in older contract decks (format 1: text, formats 1–2: tables); icons inside headings become their own elements | importer, text, tables |
 | `serialize.js` | Clean copy of the deck + player script/CSS → the saved file's text | fileio |
 | `icons.js` | Inline SVG icons | ribbon, ui, dialogs |
 | `dialogs.js` | `<dialog>`-based alert/confirm and the import report | commands |
@@ -55,7 +56,8 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `ribbon.js` | File menu and tabs; buttons only name commands; toggle buttons show `aria-pressed`; `keepsEdit` buttons do not take the focus out of the text | commands |
 | `ui.js` | Title bar, status bar (save state per SPEC 6.4 + last message), notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events, fileio, autosave, drafts |
 
-**`text.js` is the only door to text (SPEC 3.7).** Every text action (ribbon, shortcuts, paste, import, save) goes
+**`text.js` is the only door to text (SPEC 3.7)**, table cells included: `tables.js` builds rows, columns and merged
+cells, and asks text.js (`normalizeCell`) for the lines inside them. Every text action (ribbon, shortcuts, paste, import, save) goes
 through `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel` (the editing ones arrive
 in later Phase 3 steps). Text is flat paragraphs, `<p data-list data-level>`; bullets and numbers are CSS counters in the
 deck's `<style data-deck-text>`; each line's `--marker-size/-color` lets its bullet follow the first character. Nothing
@@ -73,8 +75,10 @@ so it presents (arrow keys, F = full screen, hidden slides skipped) and prints o
 ```text
 keydown → shortcuts.js → commands.run('open') → fileio.open → showOpenFilePicker (keeps the handle)
   → importer.importDeck(text)
-      sanitize → findExternalRefs → detectSlides → normalize.run (hidden iframe: measure, rebuild; text → text.fromRendered)
-      → charts.renderMissing → text model finished (normalize every text box, list variables + <style data-deck-text>, format 2)
+      sanitize → findExternalRefs → detectSlides → normalize.run (hidden iframe: measure, rebuild; text → text.fromRendered,
+        tables → tables.fromRendered, each cell's text → text.fromRendered)
+      → charts.renderMissing → tables finished (normalizeCell on every cell, <style data-deck-table>)
+      → text model finished (normalize every text box, list variables + <style data-deck-text>, format 3)
   → deck.load(html) → iframe srcdoc → 'deck-loaded' event → thumbnails rebuild, title/status update
   → history.reset (+ markDirty if the import changed anything) → dialogs.showImportReport
 ```

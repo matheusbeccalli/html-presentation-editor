@@ -105,7 +105,7 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="deck-format" content="2">
+  <meta name="deck-format" content="3">
   <style>
     :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
             --color-primary: #CC092F; --color-accent: #1F2A44; --color-text: #222; --color-bg: #fff;
@@ -116,6 +116,7 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
     .slide { position: relative; width: 1280px; height: 720px; overflow: hidden; }
     .el    { position: absolute; }
   </style>
+  <style data-deck-table>/* table stylesheet written by the editor: grid, cell defaults, table style options */</style>
   <style data-deck-text>/* list stylesheet written by the editor: bullets, numbers, hanging indents */</style>
 </head>
 <body>
@@ -129,7 +130,15 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
       <p data-list="number" data-level="1">Próximo passo</p>
     </div>
     <img class="el" data-type="image" data-id="e2" style="left:…" src="data:image/png;base64,…">
-    <div class="el" data-type="table" data-id="e3" style="left:…"><table>…</table></div>
+    <div class="el" data-type="table" data-id="e3" style="left:…">
+      <table data-header-row data-banded-rows>
+        <colgroup><col style="width:400px"><col style="width:200px"></colgroup>
+        <tbody>
+          <tr style="height:40px"><td><p data-list="none" data-level="1">Empresa</p></td>
+                                  <td style="text-align:right"><p data-list="none" data-level="1">EV</p></td></tr>
+        </tbody>
+      </table>
+    </div>
     <figure class="el" data-type="chart" data-id="e4" style="left:…">
       <script type="application/json" class="chart-data">{ … }</script>
       <svg>…static rendering…</svg>
@@ -140,7 +149,9 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
 </html>
 ```
 
-Text inside text elements and shapes follows the **flat-paragraph text model** (Phase 3, "Text model"): one `<p>` per line, list type and indent level as attributes, no `<ul>/<ol>/<li>` and no headings. Format 2 introduced this model; opening a format-1 deck migrates it.
+Text inside text elements, shapes and table cells follows the **flat-paragraph text model** (Phase 3, "Text model"): one `<p>` per line, list type and indent level as attributes, no `<ul>/<ol>/<li>` and no headings. Format 2 introduced this model; opening a format-1 deck migrates it.
+
+Tables follow the **table model** (Phase 4, deck format 3): one `<tbody>` of `<td>` only (no `<thead>`/`<th>`: the header row is a style option), merged cells as `colspan`/`rowspan`, column widths in px in a `<colgroup>` (`table-layout: fixed`), row heights in px on each `<tr>`. The table style options are attributes on `<table>` (`data-header-row`, `data-banded-rows`, `data-total-row`, `data-first-column`), drawn by `<style data-deck-table>` from the theme variables (optional `--table-header-fill`, `--table-band-fill` … in `:root`). Look shared by most cells sits once on the `<table>`: its text look inline (cells inherit it) and its cell box as `--cell-padding`, `--cell-vertical-align`, `--cell-border-top|right|bottom|left`; a cell's own fill, borders, padding or text look is inline on its `<td>` and wins. Opening a format-2 (or older) deck converts its tables, keeping their look, and says so in the import report.
 
 Element types: `text`, `image`, `table`, `shape`, `chart`, `group`. Every element has a unique `data-id`, absolute `left/top/width/height` in px, and a `z-index`. Theme colors and fonts come from the CSS variables in `:root`, so changing a variable restyles the whole deck. Slides may carry `data-hidden="true"` and `data-layout="title|title-content|two-columns|blank"`. A deck-level `<div class="master">` holds elements repeated on every slide (logo, footer, "Confidencial", slide number).
 

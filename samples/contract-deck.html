@@ -2,7 +2,7 @@
 <!-- SAMPLE DECK - FAKE DATA ONLY. Follows the deck contract (SPEC 3.3), deck format 2 (text model). -->
 <html lang="pt-BR"><head>
 <meta charset="utf-8">
-<meta name="deck-format" content="2">
+<meta name="deck-format" content="3">
 <title>Projeto Atlas — Apresentação ao Comitê</title>
 <style data-deck-lists="">:root {
 --list-1-bullet: "•"; --list-1-number: decimal; --list-1-indent: 24px; --list-1-space-before: 6pt;
@@ -30,8 +30,18 @@
   table.comps td.num, table.comps th.num { text-align: right; }
   table.comps tr.total td { font-weight: 700; border-top: 2px solid #222; }
 </style>
-<style data-deck-text="">/* Bullets, numbers and indents of the text model (written by the editor). */
+<style data-deck-table="">/* Tables (written by the editor): the grid, and the table style options on <table>. */
+.el[data-type="table"] > table { width: 100%; table-layout: fixed; border-collapse: collapse; border-spacing: 0; border: 0; margin: 0; background: none; font-family: var(--font-body); font-size: 14pt; color: var(--color-text); line-height: 1.2; text-align: left; }
+.el[data-type="table"] > table > tbody > tr { border: 0; background: none; }
+.el[data-type="table"] > table > tbody > tr > td { font: inherit; color: inherit; text-align: inherit; background: none; overflow-wrap: break-word; padding: var(--cell-padding, 4px 8px); vertical-align: var(--cell-vertical-align, top); border-top: var(--cell-border-top, none); border-right: var(--cell-border-right, none); border-bottom: var(--cell-border-bottom, 1px solid var(--table-line-color, #D9D9D9)); border-left: var(--cell-border-left, none); }
+.el[data-type="table"] > table[data-banded-rows]:not([data-header-row]) > tbody > tr:nth-child(odd) > td { background: var(--table-band-fill, #F2F2F2); }
+.el[data-type="table"] > table[data-banded-rows][data-header-row] > tbody > tr:nth-child(even) > td { background: var(--table-band-fill, #F2F2F2); }
+.el[data-type="table"] > table[data-header-row] > tbody > tr:first-child > td { background: var(--table-header-fill, var(--color-accent, #1F2A44)); color: var(--table-header-color, #FFFFFF); font-weight: bold; }
+.el[data-type="table"] > table[data-total-row] > tbody > tr:last-child:not(:first-child) > td { font-weight: bold; background: none; border-top: 2px solid var(--table-total-line-color, var(--color-text, #222222)); }
+.el[data-type="table"] > table[data-first-column] > tbody > tr > td:first-child { font-weight: bold; }
+</style><style data-deck-text="">/* Bullets, numbers and indents of the text model (written by the editor). */
 .el { counter-reset: list-1 list-2 list-3 list-4 list-5; }
+.el td { counter-reset: list-1 list-2 list-3 list-4 list-5; }
 .el p[data-list][data-level] { font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; text-align: inherit; text-indent: 0; margin: 0; padding: 0; border: 0; background: none; }
 .el p[data-list="bullet"][data-level="1"], .el p[data-list="number"][data-level="1"] { padding-left: var(--list-1-indent, 24px); }
 .el p[data-list="bullet"][data-level="1"], .el p[data-list="number"][data-level="1"] { margin-top: var(--list-1-space-before, 6pt); }
@@ -90,18 +100,7 @@
 
 <section class="slide" data-slide-id="s3" data-layout="title-content">
   <div class="el" data-type="text" data-id="e8" style="left: 64px; top: 48px; width: 1152px; height: 60px; z-index: 1; font-family: var(--font-heading); font-size: 25.5pt; color: var(--color-accent); font-weight: bold; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.2;"><p data-list="none" data-level="1">Comparáveis de mercado</p></div>
-  <div class="el" data-type="table" data-id="e9" style="left:64px; top:140px; width:1152px; height:330px; z-index:2">
-    <table class="comps">
-      <thead><tr><th>Empresa</th><th class="num">EV (R$ mn)</th><th class="num">EV/EBITDA 2025E</th><th class="num">Margem EBITDA</th></tr></thead>
-      <tbody>
-        <tr><td>Beta Foods</td><td class="num">2.450</td><td class="num">9,8x</td><td class="num">19,5%</td></tr>
-        <tr><td>Gama Nutrição</td><td class="num">1.120</td><td class="num">8,9x</td><td class="num">17,2%</td></tr>
-        <tr><td>Delta Snacks</td><td class="num">780</td><td class="num">10,4x</td><td class="num">21,0%</td></tr>
-        <tr><td>Épsilon Orgânicos</td><td class="num">530</td><td class="num">(1,2x)</td><td class="num">-3,5%</td></tr>
-        <tr class="total"><td>Mediana</td><td class="num">950</td><td class="num">9,4x</td><td class="num">18,4%</td></tr>
-      </tbody>
-    </table>
-  </div>
+  <div class="el" data-type="table" data-id="e9" style="left:64px; top:140px; width:1152px; height:330px; z-index:2"><table style="font-family: var(--font-body); font-size: 14.5pt; color: var(--color-text); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: right; line-height: normal; --cell-padding: 7px 10px; --cell-vertical-align: middle; --cell-border-bottom: 1px solid rgb(221, 221, 221);"><colgroup><col style="width: 310.98px;"><col style="width: 216.64px;"><col style="width: 322.89px;"><col style="width: 301.48px;"></colgroup><tbody><tr style="height: 38px;"><td style="color: rgb(255, 255, 255); font-weight: bold; text-align: left; background-color: var(--color-accent); border-bottom: none; padding: 8px 10px;"><p data-list="none" data-level="1">Empresa</p></td><td style="color: rgb(255, 255, 255); font-weight: bold; background-color: var(--color-accent); border-bottom: none; padding: 8px 10px;"><p data-list="none" data-level="1">EV (R$ mn)</p></td><td style="color: rgb(255, 255, 255); font-weight: bold; background-color: var(--color-accent); border-bottom: none; padding: 8px 10px;"><p data-list="none" data-level="1">EV/EBITDA 2025E</p></td><td style="color: rgb(255, 255, 255); font-weight: bold; background-color: var(--color-accent); border-bottom: none; padding: 8px 10px;"><p data-list="none" data-level="1">Margem EBITDA</p></td></tr><tr style="height: 36.5px;"><td style="text-align: left;"><p data-list="none" data-level="1">Beta Foods</p></td><td><p data-list="none" data-level="1">2.450</p></td><td><p data-list="none" data-level="1">9,8x</p></td><td><p data-list="none" data-level="1">19,5%</p></td></tr><tr style="height: 37px;"><td style="text-align: left;"><p data-list="none" data-level="1">Gama Nutrição</p></td><td><p data-list="none" data-level="1">1.120</p></td><td><p data-list="none" data-level="1">8,9x</p></td><td><p data-list="none" data-level="1">17,2%</p></td></tr><tr style="height: 37px;"><td style="text-align: left;"><p data-list="none" data-level="1">Delta Snacks</p></td><td><p data-list="none" data-level="1">780</p></td><td><p data-list="none" data-level="1">10,4x</p></td><td><p data-list="none" data-level="1">21,0%</p></td></tr><tr style="height: 37.5px;"><td style="text-align: left;"><p data-list="none" data-level="1">Épsilon Orgânicos</p></td><td><p data-list="none" data-level="1">530</p></td><td><p data-list="none" data-level="1">(1,2x)</p></td><td><p data-list="none" data-level="1">-3,5%</p></td></tr><tr style="height: 37.5px;"><td style="font-weight: bold; text-align: left; border-top: 2px solid rgb(34, 34, 34);"><p data-list="none" data-level="1">Mediana</p></td><td style="font-weight: bold; border-top: 2px solid rgb(34, 34, 34);"><p data-list="none" data-level="1">950</p></td><td style="font-weight: bold; border-top: 2px solid rgb(34, 34, 34);"><p data-list="none" data-level="1">9,4x</p></td><td style="font-weight: bold; border-top: 2px solid rgb(34, 34, 34);"><p data-list="none" data-level="1">18,4%</p></td></tr></tbody></table></div>
   <div class="el" data-type="text" data-id="e10" style="left: 64px; top: 640px; width: 800px; height: 30px; z-index: 3; font-family: var(--font-body); font-size: 10.5pt; color: rgb(102, 102, 102); font-weight: normal; font-style: normal; letter-spacing: normal; text-transform: none; text-align: left; line-height: 1.45;"><p data-list="none" data-level="1">Fonte: estimativas fictícias para teste.</p></div>
 </section>
 

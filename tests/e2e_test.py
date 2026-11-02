@@ -282,6 +282,7 @@ def test_format1_deck_text_is_converted(browser):
     editor.open(CONTRACT_FORMAT1)
     report = editor.report_dialog_text() or ""
     check("converted to the editor's text format" in report, "the import report says the text was converted")
+    check("1 table was converted to the editor's table format" in report, "and the table")
     editor.close_dialog_if_open()
     check(editor.title().startswith("● "), "the converted deck is marked unsaved")
     page = editor.page
@@ -301,9 +302,13 @@ def test_format1_deck_text_is_converted(browser):
         return [box(parse(a)), box(parse(b))];
     }""", [CONTRACT_FORMAT1.read_text(encoding="utf-8"), saved.read_text(encoding="utf-8")])
     check(positions[0] == positions[1], "every element kept its id, position, size and stacking order")
-    check('<meta name="deck-format" content="2">' in saved.read_text(encoding="utf-8"), "saved as format 2")
+    check('<meta name="deck-format" content="3">' in saved.read_text(encoding="utf-8"), "saved as format 3")
+    cells = page.evaluate("""() => Array.from(App.deck.getDocument().querySelectorAll('[data-id="e9"] td'))
+        .map((cell) => App.text.getModel(cell).map((line) => line.text).join('/'))""")
+    check(len(cells) == 24 and cells[:4] == ["Empresa", "EV (R$ mn)", "EV/EBITDA 2025E", "Margem EBITDA"],
+          f"the comps table is in the table model, its text in the text model: {cells[:5]}")
 
-    # Reopened, it is a format-2 deck: nothing to convert, and saving again changes nothing.
+    # Reopened, it is a format-3 deck: nothing to convert, and saving again changes nothing.
     editor.open(saved)
     check(editor.report_dialog_text() is None, "the converted deck reopens without a report")
     resaved = editor.save_as_download("format1-resaved.html")

@@ -15,7 +15,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="deck-format" content="2">
+<meta name="deck-format" content="3">
 <title>Nova apresentação</title>
 <style>
   :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;

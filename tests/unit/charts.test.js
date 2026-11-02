@@ -53,7 +53,7 @@ test('charts: renderMissing adds an SVG only where it is missing', () => {
 
 test('template: the blank deck follows the contract', () => {
     const doc = parseDoc(App.template.newDeckHtml());
-    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '2');
+    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '3');
     assertEqual(doc.documentElement.getAttribute('lang'), 'pt-BR');
     doc.querySelectorAll('.el[data-type="text"]').forEach((el) => {
         assert(el.children.length > 0 && Array.from(el.children).every((c) => c.matches('p[data-list][data-level]')),

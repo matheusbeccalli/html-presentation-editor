@@ -12,13 +12,14 @@
  *                contract: absolute px positions, 1280x720; text of older
  *                decks goes to the text model (text.js), keeping its look
  *   6. render    charts that have JSON but no SVG (charts.js)
- *   7. text      tidy every text element, add the list variables and the
- *                bullet stylesheet, mark the deck as format 2
+ *   7. text      tidy every text element and table cell, add the table
+ *                stylesheet, the list variables and the bullet stylesheet,
+ *                mark the deck with the current format (App.DECK_FORMAT)
  *
  * The result is { html, report }. The report lists everything that was found,
  * converted or removed, and dialogs.js shows it to the user.
  *
- * Talks to: normalize.js, charts.js, text.js, fileio.js (calls importDeck),
+ * Talks to: normalize.js, charts.js, text.js, tables.js, fileio.js (calls importDeck),
  *           dialogs.js (shows the report), deck.js (removeRemoteRefs).
  */
 
@@ -364,6 +365,7 @@
             localRefs: [],            // [{ kind, url }] files next to the deck we cannot read
             chartsRendered: 0,
             textConverted: 0,         // text elements converted to the text model (Phase 3)
+            tablesConverted: 0,       // tables converted to the table model (Phase 4)
             fixes: [],                // small repairs on contract decks (missing ids ...)
             warnings: [],
         };
@@ -377,6 +379,20 @@
             doc.head.prepend(meta);
         }
         meta.setAttribute('content', String(App.DECK_FORMAT));
+    }
+
+    /*
+     * Every table cell is text in the text model (tables.js), and the deck carries
+     * the current table stylesheet, after the deck's own CSS (whose generic
+     * "td { … }" rules it must beat) and before the bullet stylesheet.
+     */
+    function finishTables(doc) {
+        doc.querySelectorAll(App.tables.CELL_SELECTOR).forEach((cell) => App.text.normalizeCell(cell));
+        doc.head.querySelectorAll('style[data-deck-table]').forEach((old) => old.remove());
+        const style = doc.createElement('style');
+        style.setAttribute('data-deck-table', '');
+        style.textContent = App.tables.deckTableCss();
+        doc.head.appendChild(style);
     }
 
     /*
@@ -428,6 +444,7 @@
         const deckDoc = await App.normalize.run(doc, detected, report);
 
         report.chartsRendered = App.charts.renderMissing(deckDoc);
+        finishTables(deckDoc);
         finishTextModel(deckDoc);
         ensureDeckFormatMeta(deckDoc);
 
@@ -441,7 +458,7 @@
     App.importer.reportHasChanges = function reportHasChanges(report) {
         return !report.isContract || report.fixes.length > 0 || report.scriptsRemoved.length > 0 ||
             report.handlersRemoved > 0 || report.otherRemoved.length > 0 || report.chartsRendered > 0 ||
-            report.textConverted > 0;
+            report.textConverted > 0 || report.tablesConverted > 0;
     };
 
     App.importer.reportHasItems = function reportHasItems(report) {

@@ -176,6 +176,7 @@ Nested bullets are the top priority of this phase.
 
 ## Phase 4: Tables
 
+- [x] Table model, deck format 3: real `<table>`s whose cells hold text as the same paragraphs as text boxes (typing in cells comes with "Click into cells to edit"); the table style options and cell defaults come from a deck stylesheet built on the theme. Tables in older decks are converted on open, keeping their look (the import report says so) *(font sizes rounded to the half point, as for text boxes)*
 - [ ] Insert table from a grid picker (up to 10×10)
 - [ ] Click into cells to edit; Tab / Shift+Tab move between cells; Tab in the last cell adds a row
 - [ ] Add / delete rows and columns
@@ -188,6 +189,7 @@ Nested bullets are the top priority of this phase.
 - [ ] Paste from Excel: read clipboard `text/html` into a native editable table; fallback to tab-separated `text/plain`
 - [ ] Pasting into an existing table fills cells from the cursor
 - [ ] **Done when:** a comps table copied from Excel becomes an editable, formatted table on the slide in under a minute.
+  - [ ] In Edge: open a deck saved before Phase 4 (or `samples/contract-deck-format1.html`): the import report says "1 table was converted to the editor's table format"; slide 3's comps table looks as before (header colour, right-aligned numbers, the bold Mediana row with its line above; text may be a hair wider); Save, close, reopen: no report
 
 ## Phase 5: Images and shapes
 

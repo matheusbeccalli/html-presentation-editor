@@ -111,6 +111,10 @@
                 ' converted to the editor\'s text format: every line is a paragraph with its bullet or number ' +
                 'and its level, and the look was kept.');
         }
+        if (report.tablesConverted) {
+            lines.push(report.tablesConverted + (report.tablesConverted === 1 ? ' table was' : ' tables were') +
+                ' converted to the editor\'s table format: every cell is editable text, and the look was kept.');
+        }
         if (report.scaledFrom) {
             lines.push('Slides were scaled from ' + report.scaledFrom + ' to 1280×720.');
         }

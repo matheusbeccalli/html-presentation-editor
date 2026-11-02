@@ -835,6 +835,17 @@ def test_clipboard_capture_page(browser):
           f"only the text and the Windows user name are faked, the markup is untouched: {faked}")
     check(fixture["types"]["text/plain"] == "Aaaaaaa Aaa Aaaaa 0000", f"plain text faked: {fixture['types']['text/plain']}")
     check(fixture["fakeText"] is True, "the fixture says its text is fake")
+    check(fixture["keptDigits"] is False, "digits faked by default")
+
+    # Tables: "Keep digits" leaves the numbers of a fake sheet, letters are still faked.
+    page.check("#keep-digits")
+    check("Aaaaaaa Aaa Aaaaa 2025" in page.inner_text("#formats"), "the preview keeps the digits")
+    with page.expect_download() as download_info:
+        page.click("#save")
+    content = Path(download_info.value.path()).read_text(encoding="utf-8")
+    fixture = json.loads(content[content.index("CLIPBOARD_FIXTURES.push(") + len("CLIPBOARD_FIXTURES.push("):content.rindex(")")])
+    check(fixture["types"]["text/plain"] == "Aaaaaaa Aaa Aaaaa 2025", f"digits kept: {fixture['types']['text/plain']}")
+    check(fixture["keptDigits"] is True, "the fixture says its digits are kept")
     page.close()
 
 

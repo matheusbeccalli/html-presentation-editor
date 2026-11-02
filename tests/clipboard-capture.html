@@ -14,6 +14,10 @@
   stays and the words are gone. It also replaces the Windows user name in the
   temporary file paths Word writes (C:/Users/<name>/…). Check the preview before saving.
 
+  Tables (Phase 4): "Keep digits" leaves the numbers as they are, for tests of
+  number formats. Use it only on a sheet of FAKE numbers: Excel also writes cell
+  values inside its tags (x:num="…"), which the fake letters never touch.
+
   Python comparison: like a small Flask page that dumps request.files, but it
   runs in the browser with no server.
 -->
@@ -39,10 +43,12 @@
 <body>
     <h1>Clipboard capture</h1>
     <p class="warning">Real decks and documents are confidential. Keep "Replace the text with fake letters" on, and read
-        the preview below before saving. Only commit fixtures whose text is fake.</p>
+        the preview below before saving. Only commit fixtures whose text is fake. Excel writes cell values inside
+        its tags too: copy only from a sheet of fake numbers.</p>
     <div id="paste-area" tabindex="0">Click here and press Ctrl+V</div>
     <div class="row">
         <label><input type="checkbox" id="fake" checked> Replace the text with fake letters</label>
+        <label><input type="checkbox" id="keep-digits"> Keep digits (only for a sheet of fake numbers)</label>
         <label>Name <input type="text" id="name" placeholder="word-3-level-bullets"></label>
         <label>Copied from <input type="text" id="source" placeholder="Word 365 on Windows"></label>
         <button id="save" disabled>Save fixture</button>
@@ -56,7 +62,8 @@
 
         /* A fake letter of the same kind: 'a' for lower case, 'A' for upper, '0' for digits (accents too). */
         function fakeText(text) {
-            return text.replace(/[\p{Ll}]/gu, 'a').replace(/[\p{Lu}\p{Lt}]/gu, 'A').replace(/\p{N}/gu, '0');
+            const letters = text.replace(/[\p{Ll}]/gu, 'a').replace(/[\p{Lu}\p{Lt}]/gu, 'A');
+            return document.getElementById('keep-digits').checked ? letters : letters.replace(/\p{N}/gu, '0');
         }
 
         /*
@@ -103,6 +110,7 @@
             render();
         });
         document.getElementById('fake').addEventListener('change', () => captured && render());
+        document.getElementById('keep-digits').addEventListener('change', () => captured && render());
 
         document.getElementById('save').addEventListener('click', () => {
             const name = (document.getElementById('name').value.trim() || 'capture').replace(/[^\w-]+/g, '-');
@@ -114,6 +122,7 @@
                 captured: new Date().toISOString().slice(0, 10),
                 browser: navigator.userAgent,
                 fakeText: document.getElementById('fake').checked,
+                keptDigits: document.getElementById('fake').checked && document.getElementById('keep-digits').checked,
                 types: types,
             };
             const text = '// Clipboard fixture captured with tests/clipboard-capture.html (fake text).\n' +

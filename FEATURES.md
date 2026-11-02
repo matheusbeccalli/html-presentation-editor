@@ -95,7 +95,7 @@ Legend: `- [ ]` not done · `- [x]` done and tested.
 Nested bullets are the top priority of this phase.
 
 *Interface and model*
-- [ ] `text.js` interface (3.7): `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`; no other module touches text internals
+- [x] `text.js` interface (3.7): `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel`; no other module touches text internals *(guarded by a build test: no `execCommand`, `data-list` or `data-level` outside `text.js` / `clipboard.js`)*
 - [x] Text model: one `<p data-list="bullet|number|none" data-level="1..5">` per line, optional `data-start`; no `<ul>/<ol>/<li>` or headings inside text elements
 - [x] Bullets and numbers drawn with CSS (`::before` + counters) from `<style data-deck-text>`, with a hanging indent; numbering per level, reset by a higher level (1, 2, a, b, 3)
 - [x] Per-level list theme variables `--list-N-bullet / -number / -bullet-color / -bullet-size / -indent / -space-before` (defaults • – ▪ · ·, 1. a. i.; bullet color/size unset = follow the text)
@@ -134,17 +134,17 @@ Nested bullets are the top priority of this phase.
 
 *Normalizer*
 - [x] `App.text.normalize(element)` rewrites to the allowed tags/attributes/styles; strong→b, em→i, font→span, div→p, lists→flat paragraphs; unknown tags unwrapped; empty spans removed; identical adjacent spans merged; only http/https/mailto links
-- [ ] Runs on leaving edit mode, after toolbar commands, after paste, after import and before save; never per keystroke; preserves the selection
+- [x] Runs on leaving edit mode, after toolbar commands, after paste, after import and before save; never per keystroke; preserves the selection *(while typing only when the browser left text outside a `<p>`, keeping the cursor)*
 - [x] Idempotent (normalize twice == once), tested
 
 *Paste*
 - [x] Ctrl+V keeps structure and basic formatting (bold, italic, underline, bullets/levels, links), drops fonts, sizes and colors ("Use Destination Theme"); text copied inside the editor keeps all its formatting *(pasted text takes the size and colour where it lands; plain lines pasted into a bullet become bullets)*
 - [x] Ctrl+Shift+V pastes plain text; paste-options button after a paste switches between the two *("Use destination theme" or, for the editor's own copies, "Keep source formatting" / "Keep text only"; it goes away when you type, move the cursor or undo)*
-- [ ] Works for paste from Word, Outlook, PowerPoint, Copilot's chat window and web pages (fixtures captured with `tests/clipboard-capture.html`)
+- [ ] Works for paste from Word, Outlook, PowerPoint, Copilot's chat window and web pages (fixtures captured with `tests/clipboard-capture.html`) *(Word and PowerPoint: real captures, tested; Outlook, Copilot chat and web pages: synthetic fixtures until captured)*
 
 *Undo*
 - [x] Browser text undo intercepted (`beforeinput` historyUndo / historyRedo) and routed to `history.js`: one undo stack
-- [ ] Typing grouped into steps (1-second pause or new paragraph); every formatting/list command is its own step
+- [x] Typing grouped into steps (1-second pause or new paragraph); every formatting/list command is its own step
 - [x] Undo/redo while editing restores the cursor position
 
 *Tests*
@@ -152,6 +152,8 @@ Nested bullets are the top priority of this phase.
 - [x] Automated key-sequence table for the bullet behavior (start paragraphs + keys → expected paragraphs, types, levels)
 
 - [ ] **Done when:** a 3-level bulleted slide imported from a Copilot deck and a 3-level list pasted from Word both become editable flat paragraphs; every behavior in the bullet table works; a slide title and a bulleted paragraph can be fully reformatted without touching code; the saved deck prints to PDF (Ctrl+P on the saved file) with bullets, numbers and indents as on screen.
+  - [x] Automated (`test_phase3_done_when`): the Copilot sample's 3-level list imports as flat paragraphs and is editable; Word's real 3-level capture pastes with its levels; a title and a bulleted line are reformatted with ribbon buttons only; the saved deck's print layout matches the screen line by line (position, size, bullet/number, indent) and gives one PDF page per slide (`tests/output/phase3-done-when.pdf`); the bullet key table runs in the unit tests
+  - [ ] Print in Edge: open a deck you saved (or `tests/output/phase3-done-when.html` after running the tests), Ctrl+P > Save as PDF: one page per slide, no hidden slides, bullets, numbers (1., a., i.) and indents as on screen, colours and backgrounds printed
   - [x] In Edge: open a deck you saved with the Phase 1–2 editor (or `samples/contract-deck-format1.html`): the import report says its text was converted; slides look as before (only the bullet dots may look slightly different); Save, close, reopen: no report
   - [ ] Open a real Copilot deck from `private/`: titles and bullets look as before; any box listed under "Warnings" as side by side is worth a look
   - [x] Double-click a bullet, type, press Esc: the text is there and the box stays selected; Ctrl+Z removes the typing in one step, Ctrl+Y brings it back

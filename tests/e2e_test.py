@@ -372,6 +372,13 @@ def test_text_editing(browser):
     check(caret["focus"] == {"p": 3, "o": len(before[3]) + 4}, f"the cursor is back after ' abc': {caret}")
     page.keyboard.type("!")
     check(page.evaluate(TEXT_OF, "e7")[-1].endswith(" abc!"), "typing continues at the restored cursor")
+    # A new paragraph also ends a typing step: Enter, then type at once; Ctrl+Z takes only the new line's text.
+    page.keyboard.press("Enter")
+    page.keyboard.type("xyz")
+    page.keyboard.press("Control+z")
+    check(page.evaluate(TEXT_OF, "e7")[-2:] == [before[3] + " abc!", ""], f"only 'xyz' undone: {page.evaluate(TEXT_OF, 'e7')}")
+    page.keyboard.press("Control+z")
+    check(page.evaluate(TEXT_OF, "e7")[-1] == before[3] + " abc!", "then the new paragraph, its own step")
 
     # Clicking another element leaves edit mode and selects that element.
     page.mouse.click(*slide_to_screen(page, 100, 70))   # the title
@@ -1237,6 +1244,138 @@ def test_find_and_replace(browser):
     found = state()
     check(not found["open"] and found["highlighted"] == 0, f"Esc closes the panel and its highlights: {found}")
     check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+def clipboard_fixture(name):
+    """A captured clipboard fixture (tests/fixtures/clipboard/<name>.js) as {type: data}."""
+    source = (ROOT / "tests" / "fixtures" / "clipboard" / f"{name}.js").read_text(encoding="utf-8")
+    start = source.index("CLIPBOARD_FIXTURES.push(") + len("CLIPBOARD_FIXTURES.push(")
+    return json.loads(source[start:source.rindex(")")])["types"]
+
+
+# Every visible line of the shown slides, measured relative to its slide in slide pixels, with what its bullet or
+# number looks like (content, size, colour, position). The same on screen and in print = "prints as on screen".
+PRINT_LAYOUT = """() => {
+    const out = {};
+    document.querySelectorAll('section.slide').forEach((slide) => {
+        if (getComputedStyle(slide).display === 'none') return;
+        const box = slide.getBoundingClientRect();
+        const scale = box.width / slide.offsetWidth;
+        out[slide.getAttribute('data-slide-id')] = Array.from(slide.querySelectorAll('.el p')).map((p) => {
+            const r = p.getBoundingClientRect();
+            const style = getComputedStyle(p);
+            const marker = getComputedStyle(p, '::before');
+            const round = (v) => Math.round(v / scale * 10) / 10;
+            return [p.textContent.slice(0, 30), round(r.left - box.left), round(r.top - box.top), round(r.width),
+                    round(r.height), style.paddingLeft, style.fontSize, style.textAlign,
+                    marker.content, marker.fontSize, marker.color, marker.left, marker.marginLeft, marker.width].join('|');
+        });
+    });
+    return out;
+}"""
+
+
+def test_phase3_done_when(browser):
+    """
+    Phase 3 "done when", automated: a 3-level list imported from a Copilot deck and a 3-level list pasted from
+    Word (the real capture) become editable flat paragraphs; a slide title and a bulleted paragraph are reformatted
+    with the ribbon only; the saved deck prints bullets, numbers and indents exactly as on screen.
+    (The bullet key table runs in the unit tests.)
+    """
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    editor.open(MESSY)
+    editor.close_dialog_if_open()
+    page = editor.page
+    ids = page.evaluate("""() => {
+        const boxes = Array.from(App.deck.getDocument().querySelectorAll('.el[data-type="text"]'));
+        const list = boxes.find((el) => el.textContent.includes('Custo de combustível'));
+        const slide = list.closest('section.slide');
+        const title = Array.from(slide.querySelectorAll('.el[data-type="text"]'))
+            .find((el) => el.textContent.trim() === 'Riscos e mitigantes');
+        return { list: list.getAttribute('data-id'), title: title.getAttribute('data-id'),
+                 slide: App.deck.getSlides().indexOf(slide) };
+    }""")
+    page.evaluate("i => App.deck.goTo(i)", ids["slide"])
+    lines = lambda: page.evaluate(LINES_OF, ids["list"])  # noqa: E731
+    check(lines() == ["b1:Concentração em 3 clientes", "b1:Custo de combustível", "b2:Diesel: 38% do custo",
+                      "b3:Sem hedge acima de 12 meses", "b1:Execução da expansão"],
+          f"the Copilot deck's 3-level list is flat paragraphs with levels: {lines()}")
+
+    # Editable, and Word's 3-level list (real capture, fake text) pastes in with its levels.
+    page.evaluate("id => App.selection.select(App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]'))", ids["list"])
+    page.keyboard.press("Enter")   # edit, cursor at the end
+    page.keyboard.type(" (FX)")
+    page.keyboard.press("Enter")
+    word = clipboard_fixture("3-level-bullet-word")
+    put_on_clipboard(page, word["text/html"], word["text/plain"])
+    page.keyboard.press("Control+v")
+    check(lines()[4:] == ["b1:Execução da expansão (FX)", "b1:Aaaaaaaaaaa", "b2:Aaaa", "b3:Aaa"],
+          f"typed into, and Word's list pasted with its 3 levels: {lines()}")
+    page.keyboard.press("Escape")
+
+    # The slide title, reformatted with the ribbon only (the box selected: all its text).
+    page.evaluate("id => App.selection.select(App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]'))", ids["title"])
+    page.locator("#ribbon-panel .font-family-button").click()
+    page.locator(".font-family-menu .menu-item", has_text="Georgia").click()
+    size_box = page.locator("#ribbon-panel .font-size-input")
+    size_box.fill("40")
+    size_box.press("Enter")
+    page.locator('#ribbon-panel [data-command="italic"]').click()
+    page.locator("#ribbon-panel .font-color-menu-button").click()
+    page.locator('.color-menu [title="Dark Red"]').click()
+    page.locator('#ribbon-panel [data-command="alignCenter"]').click()
+    look = """id => { const p = App.deck.getDocument().querySelector('[data-id="' + id + '"] p:nth-of-type(LINE)');
+        const s = getComputedStyle(p); const b = getComputedStyle(p, '::before');
+        return [s.fontFamily.split(',')[0], s.fontSize, s.fontStyle, s.color, s.textAlign, b.content]; }"""
+    title = page.evaluate(look.replace("LINE", "1"), ids["title"])
+    check(title[0] == "Georgia" and abs(float(title[1][:-2]) - 40 * 4 / 3) < 0.1 and   # 40 pt = 53.3 px
+          title[2:5] == ["italic", "rgb(192, 0, 0)", "center"], f"title: Georgia 40 pt, italic, dark red, centred: {title}")
+
+    # A bulleted paragraph ("Custo de combustível", line 2), reformatted with the ribbon only.
+    page.evaluate("id => App.selection.select(App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]'))", ids["list"])
+    page.evaluate("App.commands.run('editText')")   # as Enter / F2 (the keyboard is still in the size box)
+    page.evaluate("id => App.text.setCaret(App.text.editingElement(), { anchor: { p: 1, o: 0 }, focus: { p: 1, o: 20 } })",
+                  ids["list"])
+    page.locator('#ribbon-panel [data-command="numbering"]').click()
+    page.locator('#ribbon-panel [data-command="bold"]').click()
+    size_box.fill("24")
+    size_box.press("Enter")
+    page.locator('#ribbon-panel [data-command="alignRight"]').click()
+    page.keyboard.press("Escape")
+    check(lines()[1] == "n1:Custo de combustível", f"the paragraph is numbered now: {lines()}")
+    line = page.evaluate(look.replace("LINE", "2"), ids["list"])
+    check(line[1] == "32px" and line[4] == "right" and line[5].startswith("counter(list-1)"),
+          f"the paragraph: 24 pt, right-aligned, numbered (the '1.' itself is checked in the print below): {line}")
+    bold = page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"] p:nth-of-type(2) b') !== null",
+                         ids["list"])
+    check(bold, "and bold")
+
+    # Save, open the saved file on its own: what prints is what the screen shows.
+    saved = editor.save_as_download("phase3-done-when.html")
+    player, errors = play_saved_deck(browser, saved)
+    screen = {}
+    slides = player.evaluate("document.querySelectorAll('section.slide:not([data-hidden=\"true\"])').length")
+    for _ in range(slides):
+        screen.update(player.evaluate(PRINT_LAYOUT))
+        player.keyboard.press("ArrowRight")
+    player.emulate_media(media="print")
+    printed = player.evaluate(PRINT_LAYOUT)
+    check(sorted(printed) == sorted(screen) and len(printed) == slides, f"every visible slide prints: {sorted(printed)}")
+    for slide_id, rows in printed.items():
+        check(rows == screen[slide_id], f"slide {slide_id} prints as on screen:\n{rows}\n{screen[slide_id]}")
+    risks = player.evaluate("i => document.querySelectorAll('section.slide')[i].getAttribute('data-slide-id')", ids["slide"])
+    drawn = rendered_text(player, f'section.slide[data-slide-id="{risks}"]')
+    for expected in ["•Concentração", "1.Custo de combustível", "–Diesel", "▪Sem hedge", "•Aaaaaaaaaaa", "–Aaaa", "▪Aaa"]:
+        check(expected in drawn, f"the print draws {expected!r}: {drawn[:300]!r}")
+    pdf = OUTPUT / "phase3-done-when.pdf"
+    player.pdf(path=str(pdf), prefer_css_page_size=True, print_background=True)
+    pages = len(re.findall(rb"/Type\s*/Page[^s]", pdf.read_bytes()))
+    check(pages == slides, f"one PDF page per visible slide: {pages} pages, {slides} slides")
+    check(errors == [] and editor.errors == [], f"no errors: {errors} {editor.errors}")
+    player.context.close()
     editor.close()
 
 
@@ -2199,6 +2338,7 @@ TESTS = [
     test_format_painter,
     test_autofit,
     test_find_and_replace,
+    test_phase3_done_when,
 ]
 
 

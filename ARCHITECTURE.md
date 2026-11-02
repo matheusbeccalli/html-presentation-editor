@@ -59,7 +59,8 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 through `enterEdit`, `exitEdit`, `applyStyle`, `setLevel`, `toggleList`, `normalize`, `getModel` (the editing ones arrive
 in later Phase 3 steps). Text is flat paragraphs, `<p data-list data-level>`; bullets and numbers are CSS counters in the
 deck's `<style data-deck-text>`; each line's `--marker-size/-color` lets its bullet follow the first character. Nothing
-else reads or writes the HTML inside a text element. If the `contenteditable` internals stay buggy, they can be swapped
+else reads or writes the HTML inside a text element (a build test fails if another module uses `execCommand`, `data-list`
+or `data-level`). If the `contenteditable` internals stay buggy, they can be swapped
 for ProseMirror/Tiptap (ask first) without touching other modules.
 
 `src/player/player.js` + `player.css` are **not run by the editor**. They are copied into every saved deck

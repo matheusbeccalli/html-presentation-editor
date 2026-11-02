@@ -28,6 +28,11 @@ function shape(inner) {
 // The model itself
 // ---------------------------------------------------------------
 
+test('text: the SPEC 3.7 interface is there', () => {
+    ['enterEdit', 'exitEdit', 'applyStyle', 'setLevel', 'toggleList', 'normalize', 'getModel'].forEach((name) =>
+        assertEqual(typeof App.text[name], 'function', name));
+});
+
 test('text: a clean model is left exactly as it is', () => {
     const clean = '<p data-list="bullet" data-level="2">Receita de <b>R$ 480 mi</b></p>' +
         '<p data-list="none" data-level="1">Fonte: empresa</p>';

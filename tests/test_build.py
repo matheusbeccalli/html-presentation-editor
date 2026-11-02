@@ -65,6 +65,22 @@ class TestPageMatchesEditor(unittest.TestCase):
         self.assertEqual(test_order, editor_order)
 
 
+class TextIsBehindOneDoor(unittest.TestCase):
+    """SPEC 3.7: text.js is the only door to text. No other module edits a text box's HTML: no execCommand,
+    no paragraphs of the text model built by hand (clipboard.js is text.js's paste helper; template.js is the
+    fixed blank deck)."""
+
+    ALLOWED = {"text.js", "clipboard.js", "template.js"}
+
+    def test_no_other_module_touches_text_internals(self):
+        for path in sorted((Path(__file__).resolve().parent.parent / "src" / "js").glob("*.js")):
+            if path.name in self.ALLOWED:
+                continue
+            source = path.read_text(encoding="utf-8")
+            for needle in ("execCommand", "data-list", "data-level"):
+                self.assertNotIn(needle, source, f"{path.name} uses {needle}: text belongs to text.js")
+
+
 class FullBuild(unittest.TestCase):
     def test_build_succeeds_and_output_is_offline(self):
         size = build.build()

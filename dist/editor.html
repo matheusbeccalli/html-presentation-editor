@@ -243,6 +243,11 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .ribbon-tab[hidden] { display: none; }
 /* Insert > Table: the 10 x 10 grid picker (tablecontrols.js). */
 .table-grid-menu { min-width: 0; padding: 6px; }
+/* Table Design: the style option checkboxes in two columns; buttons with a value and a list. */
+.table-style-options { display: grid; grid-template-columns: auto auto; gap: 4px 14px; align-content: center; height: 100%; }
+.table-style-option { display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: default; }
+.table-style-option input { margin: 0; }
+.list-button { white-space: nowrap; font-size: 12px; }
 .table-grid-menu:focus { outline: none; }
 .table-grid-label { padding: 0 2px 6px; font-size: 12px; }
 .table-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 3px; }
@@ -4574,6 +4579,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         element.removeAttribute('contenteditable');
         element.removeAttribute('spellcheck');
         element.classList.remove('editor-editing');
+        if (!element.getAttribute('class')) {
+            element.removeAttribute('class');   // a cell had none: no class="" left behind
+        }
     }
 
     function overlayElement() {
@@ -6202,6 +6210,108 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         cell.removeAttribute('rowspan');
         cell.removeAttribute('colspan');
+    };
+
+    // ---------------------------------------------------------------
+    // Cell look: fill, borders, padding, vertical alignment (Table Design, Layout)
+    // ---------------------------------------------------------------
+
+    /* The cells of a block of slots, each once, in reading order. */
+    App.tables.cellsIn = function cellsIn(table, block) {
+        return App.tables.cellBoxes(table).filter((box) => overlaps(box, block)).map((box) => box.cell);
+    };
+
+    /* The block of every slot of a table. */
+    App.tables.wholeBlock = function wholeBlock(table) {
+        const grid = App.tables.gridOf(table);
+        return { top: 0, left: 0, bottom: grid.rows - 1, right: grid.cols - 1 };
+    };
+
+    /* A cell's inline style, without leaving an empty style="" behind. */
+    function setCellStyle(cell, property, value) {
+        if (value === null) {
+            cell.style.removeProperty(property);
+        } else {
+            cell.style.setProperty(property, value);
+        }
+        if (!cell.getAttribute('style')) {
+            cell.removeAttribute('style');
+        }
+    }
+
+    /* Fill cells with a colour (theme colours as var(--color-…)); null gives them back to the table style. */
+    App.tables.setFill = function setFill(cells, value) {
+        cells.forEach((cell) => setCellStyle(cell, 'background-color', value));
+    };
+
+    const FACING = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' };
+
+    // Which sides of a cell a kind of border draws: outer = on the block's outline.
+    const BORDER_KINDS = {
+        all: () => true,
+        none: () => true,
+        outside: (side, outer) => outer,
+        inside: (side, outer) => !outer,
+        insideHorizontal: (side, outer) => !outer && (side === 'top' || side === 'bottom'),
+        insideVertical: (side, outer) => !outer && (side === 'left' || side === 'right'),
+        top: (side, outer) => outer && side === 'top',
+        bottom: (side, outer) => outer && side === 'bottom',
+        left: (side, outer) => outer && side === 'left',
+        right: (side, outer) => outer && side === 'right',
+    };
+
+    /*
+     * Draw borders of a block of cells with `value` (a CSS border such as
+     * "1px solid #000000"; "none" removes them). kind: a key of BORDER_KINDS, as
+     * PowerPoint's Borders list. Borders collapse, so a line is written on both
+     * cells it runs between (the cell outside the block too): neither one wins.
+     */
+    App.tables.setBorders = function setBorders(table, block, kind, value) {
+        const grid = App.tables.gridOf(table);
+        const draws = BORDER_KINDS[kind];
+        App.tables.cellBoxes(table).filter((box) => overlaps(box, block)).forEach((box) => {
+            const bottom = box.row + box.rowSpan - 1;
+            const right = box.col + box.colSpan - 1;
+            const sides = {
+                top: { outer: box.row === block.top, slots: range(box.col, right).map((c) => [box.row - 1, c]) },
+                bottom: { outer: bottom === block.bottom, slots: range(box.col, right).map((c) => [bottom + 1, c]) },
+                left: { outer: box.col === block.left, slots: range(box.row, bottom).map((r) => [r, box.col - 1]) },
+                right: { outer: right === block.right, slots: range(box.row, bottom).map((r) => [r, right + 1]) },
+            };
+            Object.keys(sides).filter((side) => draws(side, sides[side].outer)).forEach((side) => {
+                setCellStyle(box.cell, 'border-' + side, value);
+                const facing = new Set(sides[side].slots.map(([r, c]) => (grid.cells[r] || [])[c]).filter(Boolean));
+                facing.forEach((cell) => setCellStyle(cell, 'border-' + FACING[side], value));
+            });
+        });
+    };
+
+    function range(from, to) {
+        const values = [];
+        for (let value = from; value <= to; value++) {
+            values.push(value);
+        }
+        return values;
+    }
+
+    /*
+     * Padding or vertical alignment ('padding' | 'vertical-align') for some
+     * cells, or for all of them (cells = null): then once on the table, as its
+     * --cell-… variable (not written when it is the default), and the cells'
+     * own values go.
+     */
+    App.tables.setCellBox = function setCellBox(table, cells, property, value) {
+        if (cells) {
+            cells.forEach((cell) => setCellStyle(cell, property, value));
+            return;
+        }
+        const variable = '--cell-' + property;
+        if (CELL_DEFAULTS[variable] === value) {
+            table.style.removeProperty(variable);
+        } else {
+            table.style.setProperty(variable, value);
+        }
+        table.querySelectorAll(':scope > tbody > tr > td').forEach((cell) => setCellStyle(cell, property, null));
     };
 
     /* The cell of a table element under slide point (x, y), or null (the slide must be shown). */
@@ -8180,6 +8290,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         alignCenter: '<path d="M3 4.5h14M5.5 8.5h9M3 12.5h14M5.5 16.5h9"/>',
         alignRight: '<path d="M3 4.5h14M8 8.5h9M3 12.5h14M8 16.5h9"/>',
         alignJustify: '<path d="M3 4.5h14M3 8.5h14M3 12.5h14M3 16.5h14"/>',
+        // Table Design / Layout > Alignment (tabledesign.js).
+        shading: '<path d="M4 9.5l5.5-5.5 5.5 5.5-5.5 5.5z"/><path d="M15 9.5c1 1.5 1.5 2.5 1.5 3.2a1.5 1.5 0 0 1-3 0c0-.7.5-1.7 1.5-3.2z"/><path d="M7 3l2.5 1"/>',
+        penColor: '<path d="M5 13l8.5-8.5 2 2L7 15H5z"/><path d="M12 6l2 2"/>',
+        cellAlignTop: '<rect x="2.5" y="2.5" width="15" height="15"/><path d="M6 6h8M6 9h8"/>',
+        cellAlignMiddle: '<rect x="2.5" y="2.5" width="15" height="15"/><path d="M6 8.5h8M6 11.5h8"/>',
+        cellAlignBottom: '<rect x="2.5" y="2.5" width="15" height="15"/><path d="M6 11h8M6 14h8"/>',
+        cellMargins: '<rect x="2.5" y="2.5" width="15" height="15"/><rect x="6" y="6" width="8" height="8" stroke-dasharray="1.5 1.5"/>',
         lineSpacing: '<path d="M9 4.5h8.5M9 8.5h8.5M9 12.5h8.5M9 16.5h8.5"/><path d="M2.5 6L4.5 3.5 6.5 6M2.5 14l2 2.5 2-2.5M4.5 3.5v13"/>',
         bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
             '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
@@ -8207,6 +8324,20 @@ App.template.newDeckHtml = function newDeckHtml() {
         replace: '<path d="M3 6.5h9.5M9.5 3.5l3 3-3 3"/><path d="M17 13.5H7.5M10.5 10.5l-3 3 3 3"/>',
         back: '<rect x="8" y="8" width="9" height="9" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
     };
+
+    // Table borders: a faint 2 x 2 grid of cells, the lines a kind draws in full (tabledesign.js).
+    const GRID_LINES = { top: 'M3 3h14', bottom: 'M3 17h14', left: 'M3 3v14', right: 'M17 3v14', h: 'M3 10h14', v: 'M10 3v14' };
+    const BORDER_KINDS = {
+        all: ['top', 'bottom', 'left', 'right', 'h', 'v'], none: [], outside: ['top', 'bottom', 'left', 'right'],
+        inside: ['h', 'v'], insideHorizontal: ['h'], insideVertical: ['v'],
+        top: ['top'], bottom: ['bottom'], left: ['left'], right: ['right'],
+    };
+    Object.keys(BORDER_KINDS).forEach((kind) => {
+        const drawn = BORDER_KINDS[kind];
+        PATHS['borders-' + kind] = Object.keys(GRID_LINES).map((line) => (drawn.indexOf(line) === -1
+            ? '<path d="' + GRID_LINES[line] + '" stroke-dasharray="1 2" stroke-width="1"/>'
+            : '<path d="' + GRID_LINES[line] + '" stroke-width="2"/>')).join('');
+    });
 
     App.icons.get = function get(name) {
         const path = PATHS[name];
@@ -12285,6 +12416,9 @@ App.template.newDeckHtml = function newDeckHtml() {
                 run: () => App.tableControls.layout(name),
             });
         });
+        // Table Design and Layout > Alignment (tabledesign.js): the selected cells, the cell typed in, or the whole table.
+        const design = App.tableDesign.commands();
+        Object.keys(design).forEach((name) => App.commands.define(name, design[name]));
         // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
         App.commands.define('insertTable', {
             label: 'Table', isEnabled: hasDeck,
@@ -12607,52 +12741,58 @@ App.template.newDeckHtml = function newDeckHtml() {
         return doc && App.text.themeColorNames(doc).indexOf('--color-primary') !== -1 ? 'var(--color-primary)' : '#c00000';
     };
 
-    /* A colour chosen from the list: it applies, and the button keeps it for next time. */
+    /* A colour chosen from the font colour / highlight list: it applies, and the button keeps it for next time. */
     function chooseColor(property, value) {
-        lastColors[property] = value;
+        if (value !== null) {
+            lastColors[property] = value;
+        }
         App.commands.run(property === 'color' ? 'setFontColor' : 'setHighlight', value);
-        App.textControls.refresh();
     }
 
-    function swatch(title, value, property) {
+    function swatch(title, value, spec) {
         return el('button', {
             type: 'button', class: 'color-swatch', title: title, 'aria-label': title, style: 'background: ' + shownColor(value),
             onmousedown: (event) => event.preventDefault(),
             onclick: () => {
                 closeMenu();
-                chooseColor(property, value);
+                choose(spec, value);
             },
         });
     }
 
-    /* The colours of a split button's arrow. */
-    function openColorMenu(anchor, property) {
-        const list = el('div', { class: 'menu color-menu ' + (property === 'color' ? 'font-color-menu' : 'highlight-menu'), role: 'menu' });
+    function choose(spec, value) {
+        spec.choose(value);
+        App.ribbon.refresh();
+    }
+
+    /* The colours of a split button's arrow: its extra items, the theme's or highlight colours, "More colors…". */
+    function openColorMenu(anchor, spec) {
+        const list = el('div', { class: 'menu color-menu ' + spec.menuClass, role: 'menu' });
         const section = (label, colors) => {
             list.append(el('div', { class: 'color-menu-label' }, [label]),
-                el('div', { class: 'color-grid' }, colors.map(([title, value]) => swatch(title, value, property))));
+                el('div', { class: 'color-grid' }, colors.map(([title, value]) => swatch(title, value, spec))));
         };
-        if (property === 'color') {
+        (spec.extras || []).forEach(([label, value]) => list.appendChild(el('button', {
+            type: 'button', class: 'menu-item', title: label, onmousedown: (event) => event.preventDefault(),
+            onclick: () => {
+                closeMenu();
+                choose(spec, value);
+            },
+        }, [el('span', { class: 'menu-label' }, [label])])));
+        if (spec.palette === 'highlight') {
+            section('Highlight colors', HIGHLIGHT_COLORS);
+        } else {
             const doc = App.deck.getDocument();
             const theme = doc ? App.text.themeColorNames(doc) : [];
             if (theme.length > 0) {
                 section('Theme colors', theme.map((name) => [themeColorTitle(name), 'var(' + name + ')']));
             }
             section('Standard colors', STANDARD_COLORS);
-        } else {
-            list.appendChild(el('button', {
-                type: 'button', class: 'menu-item', title: 'No color', onmousedown: (event) => event.preventDefault(),
-                onclick: () => {
-                    closeMenu();
-                    App.commands.run('setHighlight', null);
-                },
-            }, [el('span', { class: 'menu-label' }, ['No color'])]));
-            section('Highlight colors', HIGHLIGHT_COLORS);
         }
         // Any colour: the browser's colour window (it takes the focus; the text gets it back after).
         const picker = el('input', { type: 'color', class: 'color-picker-input', tabindex: '-1' });
         picker.addEventListener('change', () => {
-            chooseColor(property, picker.value);
+            choose(spec, picker.value);
             App.text.refocus();
             picker.remove();
         });
@@ -12668,30 +12808,63 @@ App.template.newDeckHtml = function newDeckHtml() {
         showMenu(anchor, list);
     }
 
-    const colorButtons = {};   // property -> { main, arrow, bar }
+    const colorButtons = [];   // [{ main, arrow, bar, spec }]
 
-    /* A split button: the main part applies the colour under the icon, the arrow lists colours. */
-    function createColorButton(property) {
-        const command = property === 'color' ? 'fontColor' : 'highlight';
+    /*
+     * A colour split button (tabledesign.js uses it too). spec: { label, icon,
+     * command: what the main part runs, applying the colour on its bar (none:
+     * the main part opens the list too), menuClass, palette: 'theme' (theme and
+     * standard colours) | 'highlight', extras: [[label, value]] listed first
+     * (e.g. "No color"), current(): the colour on the bar, choose(value),
+     * isEnabled() }.
+     */
+    App.textControls.colorSplit = function colorSplit(spec) {
+        const open = () => (menu && menu.classList.contains(spec.menuClass) ? closeMenu() : openColorMenu(main, spec));
         const main = keepEdit(el('button', {
-            type: 'button', class: 'ribbon-button small color-main', 'data-command': command,
-            title: App.commands.label(command), 'aria-label': App.commands.label(command),
+            type: 'button', class: 'ribbon-button small color-main', 'data-command': spec.command || null,
+            title: spec.label, 'aria-label': spec.label, 'aria-haspopup': spec.command ? null : 'menu',
             onmousedown: (event) => event.preventDefault(),
-            onclick: () => App.commands.run(command),
+            onclick: () => (spec.command ? App.commands.run(spec.command) : open()),
         }));
-        main.innerHTML = App.icons.get(command);
+        main.innerHTML = App.icons.get(spec.icon);
         const bar = el('span', { class: 'color-bar' });
         main.appendChild(bar);
         const arrow = keepEdit(el('button', {
-            type: 'button', class: 'color-menu-button ' + (property === 'color' ? 'font-color-menu-button' : 'highlight-menu-button'),
-            title: App.commands.label(command) + ': more colors', 'aria-haspopup': 'menu',
+            type: 'button', class: 'color-menu-button ' + spec.menuClass + '-button',
+            title: spec.label + ': more colors', 'aria-haspopup': 'menu',
             onmousedown: (event) => event.preventDefault(),
-            onclick: () => (menu && menu.classList.contains(property === 'color' ? 'font-color-menu' : 'highlight-menu')
-                ? closeMenu() : openColorMenu(main, property)),
+            onclick: open,
         }, ['▾']));
-        colorButtons[property] = { main: main, arrow: arrow, bar: bar };
+        colorButtons.push({ main: main, arrow: arrow, bar: bar, spec: spec });
         return el('div', { class: 'color-split' }, [main, arrow]);
+    };
+
+    function createColorButton(property) {
+        const command = property === 'color' ? 'fontColor' : 'highlight';
+        return App.textControls.colorSplit({
+            label: App.commands.label(command), icon: command, command: command,
+            menuClass: property === 'color' ? 'font-color-menu' : 'highlight-menu',
+            palette: property === 'color' ? 'theme' : 'highlight',
+            extras: property === 'color' ? [] : [['No color', null]],
+            current: () => App.textControls.currentColor(property),
+            choose: (value) => chooseColor(property, value),
+            isEnabled: () => App.commands.isEnabled('setFontFamily'),
+        });
     }
+
+    /* What a stored colour looks like on screen (for tabledesign.js's buttons too). */
+    App.textControls.shownColor = shownColor;
+
+    /* A list under `anchor` (tabledesign.js uses it too): items [{ label, value, checked?, style? }] -> onChoose(value). */
+    App.textControls.openMenu = function (anchor, className, items, onChoose) {
+        return openMenu(anchor, className, items, onChoose);
+    };
+
+    App.textControls.isMenuOpen = function isMenuOpen(className) {
+        return !!menu && menu.classList.contains(className);
+    };
+
+    App.textControls.closeMenu = closeMenu;
 
     let lineSpacingButton = null;
 
@@ -12807,7 +12980,23 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     /* Show the selection's font and size; grey out when there is no text to format. */
+    /* The colour split buttons on the tab shown: enabled or not, the colour on their bar. */
+    function refreshColorButtons() {
+        for (let i = colorButtons.length - 1; i >= 0; i--) {
+            const parts = colorButtons[i];
+            if (!parts.main.isConnected) {
+                colorButtons.splice(i, 1);   // its tab is no longer shown
+                continue;
+            }
+            const enabled = parts.spec.isEnabled();
+            parts.main.disabled = !enabled;
+            parts.arrow.disabled = !enabled;
+            parts.bar.style.background = shownColor(parts.spec.current());
+        }
+    }
+
     App.textControls.refresh = function refresh() {
+        refreshColorButtons();
         if (!fontButton || !fontButton.isConnected) {
             return;
         }
@@ -12823,12 +13012,6 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (lineSpacingButton) {
             lineSpacingButton.disabled = !enabled;
         }
-        Object.keys(colorButtons).forEach((property) => {
-            const parts = colorButtons[property];
-            parts.main.disabled = !enabled;
-            parts.arrow.disabled = !enabled;
-            parts.bar.style.background = shownColor(App.textControls.currentColor(property));
-        });
     };
 })();
 
@@ -13142,21 +13325,27 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     function selectedCellsOf(element, cells) {
-        return App.tables.cellBoxes(tableOf(element))
-            .filter((box) => box.row >= cells.top && box.row <= cells.bottom && box.col >= cells.left && box.col <= cells.right)
-            .map((box) => box.cell);
+        return App.tables.cellsIn(tableOf(element), cells);
     }
 
-    function clearCells() {
+    /* Run `change` (an undo step on the table) with the selected cells staying selected, as in PowerPoint. */
+    App.tableControls.keepCells = function keepCells(change) {
         const kept = block;
-        const cells = selectedCellsOf(kept.element, currentBlock());
-        App.history.change('Clear cells', slideScope(kept.element), () => {
+        change();
+        if (kept && kept.element.isConnected) {
+            block = kept;
+            drawBlock();
+            App.events.emit('table-cells-changed');
+        }
+    };
+
+    function clearCells() {
+        const element = block.element;
+        const cells = selectedCellsOf(element, currentBlock());
+        App.tableControls.keepCells(() => App.history.change('Clear cells', slideScope(element), () => {
             cells.forEach((cell) => App.text.clearText(cell));
-            App.tables.fitTable(kept.element);
-        });
-        block = kept;   // the cells stay selected, as in PowerPoint (the change let go of them)
-        drawBlock();
-        App.events.emit('table-cells-changed');
+            App.tables.fitTable(element);
+        }));
     }
 
     function slideScope(element) {
@@ -13173,8 +13362,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         return !!element && element.getAttribute('data-type') === 'table';
     };
 
-    /* What the Layout buttons work on: the selected cells, or the cell being typed in. */
-    function layoutTarget() {
+    /* What the Layout buttons work on: the selected cells, or the cell being typed in (tabledesign.js too). */
+    App.tableControls.cellTarget = function cellTarget() {
         const cells = currentBlock();
         if (cells) {
             return { element: block.element, table: tableOf(block.element), cells: cells, cell: null };
@@ -13247,7 +13436,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (action === 'deleteTable') {
             return App.tableControls.isTableSelected();
         }
-        const target = layoutTarget();
+        const target = App.tableControls.cellTarget();
         return !!target && (!LAYOUT[action].canRun || LAYOUT[action].canRun(target));
     };
 
@@ -13268,7 +13457,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             App.elements.remove('Delete table');
             return;
         }
-        const target = layoutTarget();
+        const target = App.tableControls.cellTarget();
         if (!App.tableControls.canLayout(action)) {
             return;
         }
@@ -13445,6 +13634,329 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.tableControls.refresh = function refresh() {
         if (tableButton && tableButton.isConnected) {
             tableButton.disabled = !App.commands.isEnabled('insertTable');
+        }
+    };
+})();
+
+</script>
+<script>
+// ---- js/tabledesign.js ----
+/*
+ * tabledesign.js - the look of tables (SPEC Phase 4): the Table Design tab and
+ * the Layout tab's Alignment group, as in PowerPoint.
+ *
+ * Table Design (shown while a table is selected):
+ *   - Table Style Options: Header Row, Total Row, Banded Rows, First Column
+ *     (attributes on <table>, drawn by the deck's table stylesheet).
+ *   - Shading: fills the cells; "No Fill"; "Table style" gives them back to
+ *     the style's header / band fill.
+ *   - Borders: the Borders list (All, Outside, Inside, Top, …, No Border) draws
+ *     with the pen (weight and colour, chosen beside it).
+ * Layout > Alignment: align the text to the top / middle / bottom of its cells;
+ * Cell Margins (Normal, None, Narrow, Wide).
+ *
+ * They work on the selected cells, the cell being typed in, or, with the table
+ * selected and nothing typed in, all its cells (the margins and the alignment
+ * then go once onto the table). Each is one undo step; typing goes on.
+ *
+ * Talks to: tables.js (the cell look), tablecontrols.js (which cells),
+ * textcontrols.js (colour split buttons, lists), commands.js, ribbon.js, history.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.tableDesign = {};
+
+    const el = (...args) => App.util.el(...args);
+
+    const STYLE_OPTIONS = [
+        ['tableHeaderRow', 'Header Row', 'data-header-row'],
+        ['tableTotalRow', 'Total Row', 'data-total-row'],
+        ['tableBandedRows', 'Banded Rows', 'data-banded-rows'],
+        ['tableFirstColumn', 'First Column', 'data-first-column'],
+    ];
+
+    // PowerPoint's Borders list, in its order.
+    const BORDERS = [
+        ['bottom', 'Bottom Border'], ['top', 'Top Border'], ['left', 'Left Border'], ['right', 'Right Border'],
+        ['none', 'No Border'], ['all', 'All Borders'], ['outside', 'Outside Borders'], ['inside', 'Inside Borders'],
+        ['insideHorizontal', 'Inside Horizontal Border'], ['insideVertical', 'Inside Vertical Border'],
+    ];
+
+    const PEN_WEIGHTS = [0.5, 1, 1.5, 2, 3, 4.5, 6];   // px
+
+    // PowerPoint's cell margin presets (its inches as px).
+    const MARGINS = [['normal', 'Normal', '4px 8px'], ['none', 'None', '0px'], ['narrow', 'Narrow', '4px'], ['wide', 'Wide', '14px']];
+
+    const ALIGNMENTS = [['cellAlignTop', 'Align Top', 'top'], ['cellAlignMiddle', 'Center Vertically', 'middle'],
+        ['cellAlignBottom', 'Align Bottom', 'bottom']];
+
+    let lastFill = null;      // the colour the Shading button applies (null: the theme's accent)
+    let lastBorders = 'all';  // the kind the Borders button draws
+    const pen = { weight: 1, color: null };   // null: the theme's text colour
+
+    let styleBoxes = [];      // the Table Style Options checkboxes shown
+    let penWeightButton = null;
+    let marginsButton = null;
+    let bordersMain = null;
+
+    // ---------------------------------------------------------------
+    // What the buttons work on
+    // ---------------------------------------------------------------
+
+    /* { element, table, block, cells, whole }: the selected cells, the cell being typed in, or all cells of the selected table. */
+    function target() {
+        const picked = App.tableControls.cellTarget();
+        if (picked) {
+            return { element: picked.element, table: picked.table, block: picked.cells,
+                cells: App.tables.cellsIn(picked.table, picked.cells), whole: false };
+        }
+        if (!App.tableControls.isTableSelected()) {
+            return null;
+        }
+        const element = App.selection.getElement();
+        const table = element.querySelector(':scope > table');
+        const block = App.tables.wholeBlock(table);
+        return { element: element, table: table, block: block, cells: App.tables.cellsIn(table, block), whole: true };
+    }
+
+    function selectedTable() {
+        const element = App.tableControls.isTableSelected() ? App.selection.getElement() : null;
+        return element ? element.querySelector(':scope > table') : null;
+    }
+
+    /* One undo step on the target's table; the rows then follow their text; typing and the selected cells stay. */
+    function change(label, run) {
+        const t = target();
+        if (!t) {
+            return;
+        }
+        const scope = { slideId: t.element.closest('section.slide').getAttribute('data-slide-id') };
+        App.tableControls.keepCells(() => App.history.change(label, scope, () => {
+            run(t);
+            App.tables.fitTable(t.element);
+        }));
+        App.selection.refresh();
+    }
+
+    function computed(cell) {
+        return cell.ownerDocument.defaultView.getComputedStyle(cell);
+    }
+
+    function firstCell() {
+        const t = target();
+        return t ? t.cells[0] : null;
+    }
+
+    // ---------------------------------------------------------------
+    // Actions
+    // ---------------------------------------------------------------
+
+    function themeHas(name) {
+        const doc = App.deck.getDocument();
+        return !!doc && App.text.themeColorNames(doc).indexOf(name) !== -1;
+    }
+
+    function currentFill() {
+        return lastFill || (themeHas('--color-accent') ? 'var(--color-accent)' : '#ffc000');
+    }
+
+    function penColor() {
+        return pen.color || (themeHas('--color-text') ? 'var(--color-text)' : '#000000');
+    }
+
+    /* The CSS border the pen draws. */
+    App.tableDesign.penBorder = function penBorder() {
+        return pen.weight + 'px solid ' + penColor();
+    };
+
+    function setFill(value) {
+        change('Shading', (t) => App.tables.setFill(t.cells, value));
+    }
+
+    function setBorders(kind) {
+        lastBorders = kind;
+        change(BORDERS.find(([name]) => name === kind)[1], (t) =>
+            App.tables.setBorders(t.table, t.block, kind, kind === 'none' ? 'none' : App.tableDesign.penBorder()));
+    }
+
+    function setBox(label, property, value) {
+        change(label, (t) => App.tables.setCellBox(t.table, t.whole ? null : t.cells, property, value));
+    }
+
+    /* "4px 8px" -> its four sides, as computed styles give them. */
+    function sides(padding) {
+        const parts = padding.split(/\s+/);
+        return [parts[0], parts[1] || parts[0], parts[2] || parts[0], parts[3] || parts[1] || parts[0]].join(' ');
+    }
+
+    function currentMargins() {
+        const cell = firstCell();
+        if (!cell) {
+            return null;
+        }
+        const style = computed(cell);
+        const shown = [style.paddingTop, style.paddingRight, style.paddingBottom, style.paddingLeft].join(' ');
+        const preset = MARGINS.find(([, , value]) => sides(value) === shown);
+        return preset ? preset[0] : null;
+    }
+
+    /* The commands of this module (commands.js defines them). */
+    App.tableDesign.commands = function commands() {
+        const definitions = {};
+        const canRun = () => target() !== null;
+        STYLE_OPTIONS.forEach(([name, label, attribute]) => {
+            definitions[name] = {
+                label: label, keepsEdit: true, isEnabled: () => selectedTable() !== null,
+                isChecked: () => !!selectedTable() && selectedTable().hasAttribute(attribute),
+                run: () => {
+                    const on = !selectedTable().hasAttribute(attribute);
+                    change(label + (on ? ' on' : ' off'), (t) => t.table.toggleAttribute(attribute, on));
+                },
+            };
+        });
+        definitions.cellFill = { label: 'Shading', keepsEdit: true, isEnabled: canRun, run: () => setFill(currentFill()) };
+        definitions.setCellFill = { label: 'Shading', keepsEdit: true, isEnabled: canRun, run: setFill };
+        definitions.cellBorders = { label: 'Borders', keepsEdit: true, isEnabled: canRun, run: () => setBorders(lastBorders) };
+        definitions.setCellBorders = { label: 'Borders', keepsEdit: true, isEnabled: canRun, run: setBorders };
+        ALIGNMENTS.forEach(([name, label, value]) => {
+            definitions[name] = {
+                label: label, keepsEdit: true, isEnabled: canRun,
+                isChecked: () => !!firstCell() && computed(firstCell()).verticalAlign === value,
+                run: () => setBox(label, 'vertical-align', value),
+            };
+        });
+        definitions.setCellMargins = {
+            label: 'Cell Margins', keepsEdit: true, isEnabled: canRun,
+            run: (name) => setBox('Cell margins', 'padding', MARGINS.find(([key]) => key === name)[2]),
+        };
+        return definitions;
+    };
+
+    // ---------------------------------------------------------------
+    // Ribbon controls
+    // ---------------------------------------------------------------
+
+    function keepEdit(node) {
+        node.setAttribute('data-keep-edit', '');
+        node.addEventListener('mousedown', (event) => event.preventDefault());   // the text keeps its cursor
+        return node;
+    }
+
+    function createStyleOptions() {
+        styleBoxes = STYLE_OPTIONS.map(([command, label]) => {
+            const box = el('input', { type: 'checkbox', 'data-command': command, onchange: () => App.commands.run(command) });
+            return { box: box, label: keepEdit(el('label', { class: 'table-style-option' }, [box, label])), command: command };
+        });
+        return el('div', { class: 'table-style-options' }, styleBoxes.map((item) => item.label));
+    }
+
+    /* A button with a text and a ▾ that opens a list (pen weight, cell margins). */
+    function listButton(className, title, open) {
+        return keepEdit(el('button', {
+            type: 'button', class: 'ribbon-button small named list-button ' + className, title: title,
+            'aria-label': title, 'aria-haspopup': 'menu',
+            onclick: () => (App.textControls.isMenuOpen(className + '-menu') ? App.textControls.closeMenu() : open()),
+        }));
+    }
+
+    function weightLabel(weight) {
+        return weight + ' px';
+    }
+
+    function createPenWeight() {
+        penWeightButton = listButton('pen-weight', 'Pen weight', () => App.textControls.openMenu(penWeightButton,
+            'pen-weight-menu', PEN_WEIGHTS.map((weight) => ({ label: weightLabel(weight), value: weight, checked: weight === pen.weight })),
+            (weight) => {
+                pen.weight = weight;
+                App.ribbon.refresh();
+            }));
+        return penWeightButton;
+    }
+
+    function createMargins() {
+        marginsButton = listButton('cell-margins', 'Cell Margins', () => {
+            const current = currentMargins();
+            App.textControls.openMenu(marginsButton, 'cell-margins-menu', MARGINS.map(([name, label, value]) => ({
+                label: label + ' (' + value.replace(/px/g, ' px').trim() + ')', value: name, checked: name === current,
+            })), (name) => App.commands.run('setCellMargins', name));
+        });
+        marginsButton.innerHTML = App.icons.get('cellMargins');
+        marginsButton.appendChild(el('span', { class: 'ribbon-button-label' }, ['Cell Margins ▾']));
+        return marginsButton;
+    }
+
+    /* Borders: the main part draws the last kind chosen, the arrow lists them all. */
+    function createBorders() {
+        bordersMain = keepEdit(el('button', {
+            type: 'button', class: 'ribbon-button small color-main borders-main', 'data-command': 'cellBorders',
+            onclick: () => App.commands.run('cellBorders'),
+        }));
+        const arrow = keepEdit(el('button', {
+            type: 'button', class: 'color-menu-button borders-menu-button', title: 'Borders: all kinds', 'aria-haspopup': 'menu',
+            onclick: () => (App.textControls.isMenuOpen('borders-menu') ? App.textControls.closeMenu()
+                : App.textControls.openMenu(bordersMain, 'borders-menu', BORDERS.map(([kind, label]) => ({ label: label, value: kind })),
+                    (kind) => App.commands.run('setCellBorders', kind))),
+        }, ['▾']));
+        return el('div', { class: 'color-split' }, [bordersMain, arrow]);
+    }
+
+    /* The control named in the ribbon's layout, or null when it is not one of these. */
+    App.tableDesign.create = function create(name) {
+        if (name === 'tableStyleOptions') {
+            return createStyleOptions();
+        }
+        if (name === 'cellFill') {
+            return App.textControls.colorSplit({
+                label: 'Shading', icon: 'shading', command: 'cellFill', menuClass: 'cell-fill-menu', palette: 'theme',
+                extras: [['No Fill', 'transparent'], ['Table style fill', null]],
+                current: currentFill,
+                choose: (value) => {
+                    if (value !== null && value !== 'transparent') {
+                        lastFill = value;
+                    }
+                    App.commands.run('setCellFill', value);
+                },
+                isEnabled: () => App.commands.isEnabled('cellFill'),
+            });
+        }
+        if (name === 'penColor') {
+            return App.textControls.colorSplit({
+                label: 'Pen color', icon: 'penColor', command: null, menuClass: 'pen-color-menu', palette: 'theme',
+                current: penColor, choose: (value) => { pen.color = value; },
+                isEnabled: () => App.commands.isEnabled('cellBorders'),
+            });
+        }
+        if (name === 'cellBorders') {
+            return createBorders();
+        }
+        if (name === 'penWeight') {
+            return createPenWeight();
+        }
+        return name === 'cellMargins' ? createMargins() : null;
+    };
+
+    /* Checkboxes ticked as the table is; the Borders button names its kind; the pen weight shown. */
+    App.tableDesign.refresh = function refresh() {
+        styleBoxes.filter((item) => item.box.isConnected).forEach((item) => {
+            item.box.disabled = !App.commands.isEnabled(item.command);
+            item.box.checked = !!App.commands.isChecked(item.command);
+        });
+        if (bordersMain && bordersMain.isConnected) {
+            const label = 'Borders: ' + BORDERS.find(([kind]) => kind === lastBorders)[1];
+            bordersMain.title = label;
+            bordersMain.setAttribute('aria-label', label);
+            bordersMain.innerHTML = App.icons.get('borders-' + lastBorders);
+            bordersMain.disabled = !App.commands.isEnabled('cellBorders');
+            bordersMain.nextSibling.disabled = bordersMain.disabled;
+        }
+        if (penWeightButton && penWeightButton.isConnected) {
+            penWeightButton.textContent = weightLabel(pen.weight) + ' ▾';
+            penWeightButton.disabled = !App.commands.isEnabled('cellBorders');
+        }
+        if (marginsButton && marginsButton.isConnected) {
+            marginsButton.disabled = !App.commands.isEnabled('setCellMargins');
         }
     };
 })();
@@ -13820,7 +14332,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * fills them. Buttons only name a command; commands.js does the work.
  *
  * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips),
- *           textcontrols.js and tablecontrols.js (controls that show a value or open a picker).
+ *           textcontrols.js, tablecontrols.js and tabledesign.js (controls that show a value or open a picker).
  */
 
 (function () {
@@ -13872,6 +14384,17 @@ App.template.newDeckHtml = function newDeckHtml() {
                 'slide (or drag to set its width). Images, shapes and charts arrive in Phases 5 and 6.',
         },
         {
+            // Shown only while a table is selected (PowerPoint's Table Design tab).
+            id: 'table-design', label: 'Table Design', contextual: () => App.tableControls.isTableSelected(),
+            groups: [
+                { label: 'Table Style Options', commands: [{ control: 'tableStyleOptions' }] },
+                { label: 'Shading & Borders', rows: [[{ control: 'cellFill' }, { control: 'cellBorders' }],
+                    [{ control: 'penWeight' }, { control: 'penColor' }]] },
+            ],
+            note: 'Shading and Borders change the selected cells, the cell you type in, or (table selected, Esc after typing) ' +
+                'all its cells. Borders draw with the pen weight and colour.',
+        },
+        {
             // Shown only while a table is selected (PowerPoint's Table Layout tab).
             id: 'table-layout', label: 'Layout', contextual: () => App.tableControls.isTableSelected(),
             groups: [
@@ -13880,6 +14403,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 { label: 'Rows & Columns', commands: [['insertRowAbove', 'insertRowAbove'], ['insertRowBelow', 'insertRowBelow'],
                     ['insertColumnLeft', 'insertColumnLeft'], ['insertColumnRight', 'insertColumnRight']] },
                 { label: 'Merge', commands: [['mergeCells', 'mergeCells'], ['splitCells', 'splitCells']] },
+                { label: 'Alignment', rows: [[['cellAlignTop', 'cellAlignTop'], ['cellAlignMiddle', 'cellAlignMiddle'],
+                    ['cellAlignBottom', 'cellAlignBottom']], [{ control: 'cellMargins' }]] },
             ],
             note: 'Click in a cell, or drag across cells to select several (Shift+click too). Delete empties the selected cells. ' +
                 'Drag a table by its edge to move it.',
@@ -13945,7 +14470,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
     function createControl(name) {
-        return App.tableControls.create(name) || App.textControls.create(name);
+        return App.tableControls.create(name) || App.tableDesign.create(name) || App.textControls.create(name);
     }
 
     function renderTab(tab) {
@@ -14095,6 +14620,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
         App.textControls.refresh();
         App.tableControls.refresh();
+        App.tableDesign.refresh();
     };
 })();
 

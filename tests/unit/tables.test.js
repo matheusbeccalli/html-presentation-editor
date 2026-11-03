@@ -516,3 +516,81 @@ test('tables: columnBorderAt finds the inner column border under a point, where 
         frame.remove();
     }
 });
+
+// ---------- step 6: Table Design (borders, fill) and cell alignment / margins ----------
+
+/* Each cell's four inline borders as "T R B L" letters: x = the pen, - = none, . = not set. */
+function borderMap(table) {
+    const letter = (cell, side) => {
+        const value = cell.style.getPropertyValue('border-' + side);
+        return value === '' ? '.' : value === 'none' ? '-' : 'x';
+    };
+    return Array.from(table.rows).map((row) => Array.from(row.cells).map((cell) =>
+        ['top', 'right', 'bottom', 'left'].map((side) => letter(cell, side)).join('')).join(' ')).join(' | ');
+}
+
+const PEN = '2px solid rgb(255, 0, 0)';
+
+test('tables: cellsIn lists the cells of a block once each', () => {
+    const table = tableFrom('<tr><td colspan="2">A</td><td>B</td></tr><tr><td>C</td><td>D</td><td>E</td></tr>');
+    assertEqual(App.tables.cellsIn(table, block(0, 1, 1, 1)).map((cell) => cell.textContent).join(), 'A,D');
+    assertEqual(App.tables.cellsIn(table, App.tables.wholeBlock(table)).length, 5);
+});
+
+test('tables: setBorders draws all borders of a block, and the facing sides of the cells around it', () => {
+    const table = grid3x3();
+    App.tables.setBorders(table, block(1, 1, 1, 1), 'all', PEN);   // E
+    assertEqual(borderMap(table), '.... ..x. .... | .x.. xxxx ...x | .... x... ....');
+    assertEqual(table.rows[1].cells[1].style.borderTop, PEN);
+});
+
+test('tables: setBorders outside / inside / one side of a block', () => {
+    let table = grid3x3();
+    App.tables.setBorders(table, block(0, 0, 1, 1), 'outside', PEN);   // A B / D E
+    assertEqual(borderMap(table), 'x..x xx.. ...x | ..xx .xx. ...x | x... x... ....');
+    table = grid3x3();
+    App.tables.setBorders(table, block(0, 0, 1, 1), 'inside', PEN);
+    assertEqual(borderMap(table), '.xx. ..xx .... | xx.. x..x .... | .... .... ....');
+    table = grid3x3();
+    App.tables.setBorders(table, block(0, 0, 1, 1), 'insideVertical', PEN);
+    assertEqual(borderMap(table), '.x.. ...x .... | .x.. ...x .... | .... .... ....');
+    table = grid3x3();
+    App.tables.setBorders(table, block(0, 0, 2, 2), 'bottom', PEN);
+    assertEqual(borderMap(table), '.... .... .... | .... .... .... | ..x. ..x. ..x.');
+});
+
+test('tables: setBorders "none" removes the lines of a block, also on the cells facing it', () => {
+    const table = grid3x3();
+    App.tables.setBorders(table, App.tables.wholeBlock(table), 'all', PEN);
+    App.tables.setBorders(table, block(0, 0, 0, 0), 'none', 'none');   // A
+    assertEqual(borderMap(table), '---- xxx- xxxx | -xxx xxxx xxxx | xxxx xxxx xxxx');
+});
+
+test('tables: setBorders on a merged cell writes the cells along each of its sides', () => {
+    const table = tableFrom('<tr><td colspan="2">A</td></tr><tr><td>B</td><td>C</td></tr>');
+    App.tables.setBorders(table, block(0, 0, 0, 1), 'bottom', PEN);
+    assertEqual(borderMap(table), '..x. | x... x...');
+});
+
+test('tables: setCellBox sets padding or vertical alignment on some cells, or once on the table for all', () => {
+    const table = grid3x3();
+    App.tables.setCellBox(table, [table.rows[0].cells[0]], 'vertical-align', 'middle');
+    assertEqual(table.rows[0].cells[0].style.verticalAlign, 'middle');
+    App.tables.setCellBox(table, null, 'padding', '14px');
+    assertEqual(table.style.getPropertyValue('--cell-padding'), '14px');
+    App.tables.setCellBox(table, [table.rows[1].cells[1]], 'padding', '0px');
+    App.tables.setCellBox(table, null, 'vertical-align', 'bottom');
+    assert(!table.rows[0].cells[0].hasAttribute('style'), 'the cell\'s own value goes (and its empty style)');
+    App.tables.setCellBox(table, null, 'padding', '4px 8px');
+    assertEqual(table.style.getPropertyValue('--cell-padding'), '', 'the default is not written');
+    assert(!table.rows[1].cells[1].hasAttribute('style'));
+});
+
+test('tables: setFill fills cells or gives them back to the table style', () => {
+    const table = grid3x3();
+    const cells = [table.rows[0].cells[0], table.rows[0].cells[1]];
+    App.tables.setFill(cells, 'var(--color-accent)');
+    assertEqual(cells[1].style.backgroundColor, 'var(--color-accent)');
+    App.tables.setFill(cells, null);
+    assert(!cells[0].hasAttribute('style'), 'the table style again');
+});

@@ -250,6 +250,9 @@
                 run: () => App.tableControls.layout(name),
             });
         });
+        // Table Design and Layout > Alignment (tabledesign.js): the selected cells, the cell typed in, or the whole table.
+        const design = App.tableDesign.commands();
+        Object.keys(design).forEach((name) => App.commands.define(name, design[name]));
         // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
         App.commands.define('insertTable', {
             label: 'Table', isEnabled: hasDeck,

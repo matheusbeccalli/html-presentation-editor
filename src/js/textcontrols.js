@@ -250,52 +250,58 @@
         return doc && App.text.themeColorNames(doc).indexOf('--color-primary') !== -1 ? 'var(--color-primary)' : '#c00000';
     };
 
-    /* A colour chosen from the list: it applies, and the button keeps it for next time. */
+    /* A colour chosen from the font colour / highlight list: it applies, and the button keeps it for next time. */
     function chooseColor(property, value) {
-        lastColors[property] = value;
+        if (value !== null) {
+            lastColors[property] = value;
+        }
         App.commands.run(property === 'color' ? 'setFontColor' : 'setHighlight', value);
-        App.textControls.refresh();
     }
 
-    function swatch(title, value, property) {
+    function swatch(title, value, spec) {
         return el('button', {
             type: 'button', class: 'color-swatch', title: title, 'aria-label': title, style: 'background: ' + shownColor(value),
             onmousedown: (event) => event.preventDefault(),
             onclick: () => {
                 closeMenu();
-                chooseColor(property, value);
+                choose(spec, value);
             },
         });
     }
 
-    /* The colours of a split button's arrow. */
-    function openColorMenu(anchor, property) {
-        const list = el('div', { class: 'menu color-menu ' + (property === 'color' ? 'font-color-menu' : 'highlight-menu'), role: 'menu' });
+    function choose(spec, value) {
+        spec.choose(value);
+        App.ribbon.refresh();
+    }
+
+    /* The colours of a split button's arrow: its extra items, the theme's or highlight colours, "More colors…". */
+    function openColorMenu(anchor, spec) {
+        const list = el('div', { class: 'menu color-menu ' + spec.menuClass, role: 'menu' });
         const section = (label, colors) => {
             list.append(el('div', { class: 'color-menu-label' }, [label]),
-                el('div', { class: 'color-grid' }, colors.map(([title, value]) => swatch(title, value, property))));
+                el('div', { class: 'color-grid' }, colors.map(([title, value]) => swatch(title, value, spec))));
         };
-        if (property === 'color') {
+        (spec.extras || []).forEach(([label, value]) => list.appendChild(el('button', {
+            type: 'button', class: 'menu-item', title: label, onmousedown: (event) => event.preventDefault(),
+            onclick: () => {
+                closeMenu();
+                choose(spec, value);
+            },
+        }, [el('span', { class: 'menu-label' }, [label])])));
+        if (spec.palette === 'highlight') {
+            section('Highlight colors', HIGHLIGHT_COLORS);
+        } else {
             const doc = App.deck.getDocument();
             const theme = doc ? App.text.themeColorNames(doc) : [];
             if (theme.length > 0) {
                 section('Theme colors', theme.map((name) => [themeColorTitle(name), 'var(' + name + ')']));
             }
             section('Standard colors', STANDARD_COLORS);
-        } else {
-            list.appendChild(el('button', {
-                type: 'button', class: 'menu-item', title: 'No color', onmousedown: (event) => event.preventDefault(),
-                onclick: () => {
-                    closeMenu();
-                    App.commands.run('setHighlight', null);
-                },
-            }, [el('span', { class: 'menu-label' }, ['No color'])]));
-            section('Highlight colors', HIGHLIGHT_COLORS);
         }
         // Any colour: the browser's colour window (it takes the focus; the text gets it back after).
         const picker = el('input', { type: 'color', class: 'color-picker-input', tabindex: '-1' });
         picker.addEventListener('change', () => {
-            chooseColor(property, picker.value);
+            choose(spec, picker.value);
             App.text.refocus();
             picker.remove();
         });
@@ -311,30 +317,63 @@
         showMenu(anchor, list);
     }
 
-    const colorButtons = {};   // property -> { main, arrow, bar }
+    const colorButtons = [];   // [{ main, arrow, bar, spec }]
 
-    /* A split button: the main part applies the colour under the icon, the arrow lists colours. */
-    function createColorButton(property) {
-        const command = property === 'color' ? 'fontColor' : 'highlight';
+    /*
+     * A colour split button (tabledesign.js uses it too). spec: { label, icon,
+     * command: what the main part runs, applying the colour on its bar (none:
+     * the main part opens the list too), menuClass, palette: 'theme' (theme and
+     * standard colours) | 'highlight', extras: [[label, value]] listed first
+     * (e.g. "No color"), current(): the colour on the bar, choose(value),
+     * isEnabled() }.
+     */
+    App.textControls.colorSplit = function colorSplit(spec) {
+        const open = () => (menu && menu.classList.contains(spec.menuClass) ? closeMenu() : openColorMenu(main, spec));
         const main = keepEdit(el('button', {
-            type: 'button', class: 'ribbon-button small color-main', 'data-command': command,
-            title: App.commands.label(command), 'aria-label': App.commands.label(command),
+            type: 'button', class: 'ribbon-button small color-main', 'data-command': spec.command || null,
+            title: spec.label, 'aria-label': spec.label, 'aria-haspopup': spec.command ? null : 'menu',
             onmousedown: (event) => event.preventDefault(),
-            onclick: () => App.commands.run(command),
+            onclick: () => (spec.command ? App.commands.run(spec.command) : open()),
         }));
-        main.innerHTML = App.icons.get(command);
+        main.innerHTML = App.icons.get(spec.icon);
         const bar = el('span', { class: 'color-bar' });
         main.appendChild(bar);
         const arrow = keepEdit(el('button', {
-            type: 'button', class: 'color-menu-button ' + (property === 'color' ? 'font-color-menu-button' : 'highlight-menu-button'),
-            title: App.commands.label(command) + ': more colors', 'aria-haspopup': 'menu',
+            type: 'button', class: 'color-menu-button ' + spec.menuClass + '-button',
+            title: spec.label + ': more colors', 'aria-haspopup': 'menu',
             onmousedown: (event) => event.preventDefault(),
-            onclick: () => (menu && menu.classList.contains(property === 'color' ? 'font-color-menu' : 'highlight-menu')
-                ? closeMenu() : openColorMenu(main, property)),
+            onclick: open,
         }, ['▾']));
-        colorButtons[property] = { main: main, arrow: arrow, bar: bar };
+        colorButtons.push({ main: main, arrow: arrow, bar: bar, spec: spec });
         return el('div', { class: 'color-split' }, [main, arrow]);
+    };
+
+    function createColorButton(property) {
+        const command = property === 'color' ? 'fontColor' : 'highlight';
+        return App.textControls.colorSplit({
+            label: App.commands.label(command), icon: command, command: command,
+            menuClass: property === 'color' ? 'font-color-menu' : 'highlight-menu',
+            palette: property === 'color' ? 'theme' : 'highlight',
+            extras: property === 'color' ? [] : [['No color', null]],
+            current: () => App.textControls.currentColor(property),
+            choose: (value) => chooseColor(property, value),
+            isEnabled: () => App.commands.isEnabled('setFontFamily'),
+        });
     }
+
+    /* What a stored colour looks like on screen (for tabledesign.js's buttons too). */
+    App.textControls.shownColor = shownColor;
+
+    /* A list under `anchor` (tabledesign.js uses it too): items [{ label, value, checked?, style? }] -> onChoose(value). */
+    App.textControls.openMenu = function (anchor, className, items, onChoose) {
+        return openMenu(anchor, className, items, onChoose);
+    };
+
+    App.textControls.isMenuOpen = function isMenuOpen(className) {
+        return !!menu && menu.classList.contains(className);
+    };
+
+    App.textControls.closeMenu = closeMenu;
 
     let lineSpacingButton = null;
 
@@ -450,7 +489,23 @@
     };
 
     /* Show the selection's font and size; grey out when there is no text to format. */
+    /* The colour split buttons on the tab shown: enabled or not, the colour on their bar. */
+    function refreshColorButtons() {
+        for (let i = colorButtons.length - 1; i >= 0; i--) {
+            const parts = colorButtons[i];
+            if (!parts.main.isConnected) {
+                colorButtons.splice(i, 1);   // its tab is no longer shown
+                continue;
+            }
+            const enabled = parts.spec.isEnabled();
+            parts.main.disabled = !enabled;
+            parts.arrow.disabled = !enabled;
+            parts.bar.style.background = shownColor(parts.spec.current());
+        }
+    }
+
     App.textControls.refresh = function refresh() {
+        refreshColorButtons();
         if (!fontButton || !fontButton.isConnected) {
             return;
         }
@@ -466,11 +521,5 @@
         if (lineSpacingButton) {
             lineSpacingButton.disabled = !enabled;
         }
-        Object.keys(colorButtons).forEach((property) => {
-            const parts = colorButtons[property];
-            parts.main.disabled = !enabled;
-            parts.arrow.disabled = !enabled;
-            parts.bar.style.background = shownColor(App.textControls.currentColor(property));
-        });
     };
 })();

@@ -305,21 +305,27 @@
     }
 
     function selectedCellsOf(element, cells) {
-        return App.tables.cellBoxes(tableOf(element))
-            .filter((box) => box.row >= cells.top && box.row <= cells.bottom && box.col >= cells.left && box.col <= cells.right)
-            .map((box) => box.cell);
+        return App.tables.cellsIn(tableOf(element), cells);
     }
 
-    function clearCells() {
+    /* Run `change` (an undo step on the table) with the selected cells staying selected, as in PowerPoint. */
+    App.tableControls.keepCells = function keepCells(change) {
         const kept = block;
-        const cells = selectedCellsOf(kept.element, currentBlock());
-        App.history.change('Clear cells', slideScope(kept.element), () => {
+        change();
+        if (kept && kept.element.isConnected) {
+            block = kept;
+            drawBlock();
+            App.events.emit('table-cells-changed');
+        }
+    };
+
+    function clearCells() {
+        const element = block.element;
+        const cells = selectedCellsOf(element, currentBlock());
+        App.tableControls.keepCells(() => App.history.change('Clear cells', slideScope(element), () => {
             cells.forEach((cell) => App.text.clearText(cell));
-            App.tables.fitTable(kept.element);
-        });
-        block = kept;   // the cells stay selected, as in PowerPoint (the change let go of them)
-        drawBlock();
-        App.events.emit('table-cells-changed');
+            App.tables.fitTable(element);
+        }));
     }
 
     function slideScope(element) {
@@ -336,8 +342,8 @@
         return !!element && element.getAttribute('data-type') === 'table';
     };
 
-    /* What the Layout buttons work on: the selected cells, or the cell being typed in. */
-    function layoutTarget() {
+    /* What the Layout buttons work on: the selected cells, or the cell being typed in (tabledesign.js too). */
+    App.tableControls.cellTarget = function cellTarget() {
         const cells = currentBlock();
         if (cells) {
             return { element: block.element, table: tableOf(block.element), cells: cells, cell: null };
@@ -410,7 +416,7 @@
         if (action === 'deleteTable') {
             return App.tableControls.isTableSelected();
         }
-        const target = layoutTarget();
+        const target = App.tableControls.cellTarget();
         return !!target && (!LAYOUT[action].canRun || LAYOUT[action].canRun(target));
     };
 
@@ -431,7 +437,7 @@
             App.elements.remove('Delete table');
             return;
         }
-        const target = layoutTarget();
+        const target = App.tableControls.cellTarget();
         if (!App.tableControls.canLayout(action)) {
             return;
         }

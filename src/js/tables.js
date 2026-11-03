@@ -576,6 +576,108 @@
         cell.removeAttribute('colspan');
     };
 
+    // ---------------------------------------------------------------
+    // Cell look: fill, borders, padding, vertical alignment (Table Design, Layout)
+    // ---------------------------------------------------------------
+
+    /* The cells of a block of slots, each once, in reading order. */
+    App.tables.cellsIn = function cellsIn(table, block) {
+        return App.tables.cellBoxes(table).filter((box) => overlaps(box, block)).map((box) => box.cell);
+    };
+
+    /* The block of every slot of a table. */
+    App.tables.wholeBlock = function wholeBlock(table) {
+        const grid = App.tables.gridOf(table);
+        return { top: 0, left: 0, bottom: grid.rows - 1, right: grid.cols - 1 };
+    };
+
+    /* A cell's inline style, without leaving an empty style="" behind. */
+    function setCellStyle(cell, property, value) {
+        if (value === null) {
+            cell.style.removeProperty(property);
+        } else {
+            cell.style.setProperty(property, value);
+        }
+        if (!cell.getAttribute('style')) {
+            cell.removeAttribute('style');
+        }
+    }
+
+    /* Fill cells with a colour (theme colours as var(--color-…)); null gives them back to the table style. */
+    App.tables.setFill = function setFill(cells, value) {
+        cells.forEach((cell) => setCellStyle(cell, 'background-color', value));
+    };
+
+    const FACING = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' };
+
+    // Which sides of a cell a kind of border draws: outer = on the block's outline.
+    const BORDER_KINDS = {
+        all: () => true,
+        none: () => true,
+        outside: (side, outer) => outer,
+        inside: (side, outer) => !outer,
+        insideHorizontal: (side, outer) => !outer && (side === 'top' || side === 'bottom'),
+        insideVertical: (side, outer) => !outer && (side === 'left' || side === 'right'),
+        top: (side, outer) => outer && side === 'top',
+        bottom: (side, outer) => outer && side === 'bottom',
+        left: (side, outer) => outer && side === 'left',
+        right: (side, outer) => outer && side === 'right',
+    };
+
+    /*
+     * Draw borders of a block of cells with `value` (a CSS border such as
+     * "1px solid #000000"; "none" removes them). kind: a key of BORDER_KINDS, as
+     * PowerPoint's Borders list. Borders collapse, so a line is written on both
+     * cells it runs between (the cell outside the block too): neither one wins.
+     */
+    App.tables.setBorders = function setBorders(table, block, kind, value) {
+        const grid = App.tables.gridOf(table);
+        const draws = BORDER_KINDS[kind];
+        App.tables.cellBoxes(table).filter((box) => overlaps(box, block)).forEach((box) => {
+            const bottom = box.row + box.rowSpan - 1;
+            const right = box.col + box.colSpan - 1;
+            const sides = {
+                top: { outer: box.row === block.top, slots: range(box.col, right).map((c) => [box.row - 1, c]) },
+                bottom: { outer: bottom === block.bottom, slots: range(box.col, right).map((c) => [bottom + 1, c]) },
+                left: { outer: box.col === block.left, slots: range(box.row, bottom).map((r) => [r, box.col - 1]) },
+                right: { outer: right === block.right, slots: range(box.row, bottom).map((r) => [r, right + 1]) },
+            };
+            Object.keys(sides).filter((side) => draws(side, sides[side].outer)).forEach((side) => {
+                setCellStyle(box.cell, 'border-' + side, value);
+                const facing = new Set(sides[side].slots.map(([r, c]) => (grid.cells[r] || [])[c]).filter(Boolean));
+                facing.forEach((cell) => setCellStyle(cell, 'border-' + FACING[side], value));
+            });
+        });
+    };
+
+    function range(from, to) {
+        const values = [];
+        for (let value = from; value <= to; value++) {
+            values.push(value);
+        }
+        return values;
+    }
+
+    /*
+     * Padding or vertical alignment ('padding' | 'vertical-align') for some
+     * cells, or for all of them (cells = null): then once on the table, as its
+     * --cell-… variable (not written when it is the default), and the cells'
+     * own values go.
+     */
+    App.tables.setCellBox = function setCellBox(table, cells, property, value) {
+        if (cells) {
+            cells.forEach((cell) => setCellStyle(cell, property, value));
+            return;
+        }
+        const variable = '--cell-' + property;
+        if (CELL_DEFAULTS[variable] === value) {
+            table.style.removeProperty(variable);
+        } else {
+            table.style.setProperty(variable, value);
+        }
+        table.querySelectorAll(':scope > tbody > tr > td').forEach((cell) => setCellStyle(cell, property, null));
+    };
+
     /* The cell of a table element under slide point (x, y), or null (the slide must be shown). */
     App.tables.cellAt = function cellAt(element, x, y) {
         const hit = element.ownerDocument.elementFromPoint(x, y);

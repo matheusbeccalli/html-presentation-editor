@@ -6,7 +6,7 @@
  * fills them. Buttons only name a command; commands.js does the work.
  *
  * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips),
- *           textcontrols.js and tablecontrols.js (controls that show a value or open a picker).
+ *           textcontrols.js, tablecontrols.js and tabledesign.js (controls that show a value or open a picker).
  */
 
 (function () {
@@ -58,6 +58,17 @@
                 'slide (or drag to set its width). Images, shapes and charts arrive in Phases 5 and 6.',
         },
         {
+            // Shown only while a table is selected (PowerPoint's Table Design tab).
+            id: 'table-design', label: 'Table Design', contextual: () => App.tableControls.isTableSelected(),
+            groups: [
+                { label: 'Table Style Options', commands: [{ control: 'tableStyleOptions' }] },
+                { label: 'Shading & Borders', rows: [[{ control: 'cellFill' }, { control: 'cellBorders' }],
+                    [{ control: 'penWeight' }, { control: 'penColor' }]] },
+            ],
+            note: 'Shading and Borders change the selected cells, the cell you type in, or (table selected, Esc after typing) ' +
+                'all its cells. Borders draw with the pen weight and colour.',
+        },
+        {
             // Shown only while a table is selected (PowerPoint's Table Layout tab).
             id: 'table-layout', label: 'Layout', contextual: () => App.tableControls.isTableSelected(),
             groups: [
@@ -66,6 +77,8 @@
                 { label: 'Rows & Columns', commands: [['insertRowAbove', 'insertRowAbove'], ['insertRowBelow', 'insertRowBelow'],
                     ['insertColumnLeft', 'insertColumnLeft'], ['insertColumnRight', 'insertColumnRight']] },
                 { label: 'Merge', commands: [['mergeCells', 'mergeCells'], ['splitCells', 'splitCells']] },
+                { label: 'Alignment', rows: [[['cellAlignTop', 'cellAlignTop'], ['cellAlignMiddle', 'cellAlignMiddle'],
+                    ['cellAlignBottom', 'cellAlignBottom']], [{ control: 'cellMargins' }]] },
             ],
             note: 'Click in a cell, or drag across cells to select several (Shift+click too). Delete empties the selected cells. ' +
                 'Drag a table by its edge to move it.',
@@ -131,7 +144,7 @@
 
     /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
     function createControl(name) {
-        return App.tableControls.create(name) || App.textControls.create(name);
+        return App.tableControls.create(name) || App.tableDesign.create(name) || App.textControls.create(name);
     }
 
     function renderTab(tab) {
@@ -281,5 +294,6 @@
         });
         App.textControls.refresh();
         App.tableControls.refresh();
+        App.tableDesign.refresh();
     };
 })();

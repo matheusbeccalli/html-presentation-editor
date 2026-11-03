@@ -2834,6 +2834,9 @@
         element.removeAttribute('contenteditable');
         element.removeAttribute('spellcheck');
         element.classList.remove('editor-editing');
+        if (!element.getAttribute('class')) {
+            element.removeAttribute('class');   // a cell had none: no class="" left behind
+        }
     }
 
     function overlayElement() {

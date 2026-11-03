@@ -105,6 +105,11 @@
 .ribbon-tab[hidden] { display: none; }
 /* Insert > Table: the 10 x 10 grid picker (tablecontrols.js). */
 .table-grid-menu { min-width: 0; padding: 6px; }
+/* Table Design: the style option checkboxes in two columns; buttons with a value and a list. */
+.table-style-options { display: grid; grid-template-columns: auto auto; gap: 4px 14px; align-content: center; height: 100%; }
+.table-style-option { display: flex; align-items: center; gap: 5px; font-size: 12px; white-space: nowrap; cursor: default; }
+.table-style-option input { margin: 0; }
+.list-button { white-space: nowrap; font-size: 12px; }
 .table-grid-menu:focus { outline: none; }
 .table-grid-label { padding: 0 2px 6px; font-size: 12px; }
 .table-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 3px; }

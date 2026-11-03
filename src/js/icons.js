@@ -56,6 +56,13 @@
         alignCenter: '<path d="M3 4.5h14M5.5 8.5h9M3 12.5h14M5.5 16.5h9"/>',
         alignRight: '<path d="M3 4.5h14M8 8.5h9M3 12.5h14M8 16.5h9"/>',
         alignJustify: '<path d="M3 4.5h14M3 8.5h14M3 12.5h14M3 16.5h14"/>',
+        // Table Design / Layout > Alignment (tabledesign.js).
+        shading: '<path d="M4 9.5l5.5-5.5 5.5 5.5-5.5 5.5z"/><path d="M15 9.5c1 1.5 1.5 2.5 1.5 3.2a1.5 1.5 0 0 1-3 0c0-.7.5-1.7 1.5-3.2z"/><path d="M7 3l2.5 1"/>',
+        penColor: '<path d="M5 13l8.5-8.5 2 2L7 15H5z"/><path d="M12 6l2 2"/>',
+        cellAlignTop: '<rect x="2.5" y="2.5" width="15" height="15"/><path d="M6 6h8M6 9h8"/>',
+        cellAlignMiddle: '<rect x="2.5" y="2.5" width="15" height="15"/><path d="M6 8.5h8M6 11.5h8"/>',
+        cellAlignBottom: '<rect x="2.5" y="2.5" width="15" height="15"/><path d="M6 11h8M6 14h8"/>',
+        cellMargins: '<rect x="2.5" y="2.5" width="15" height="15"/><rect x="6" y="6" width="8" height="8" stroke-dasharray="1.5 1.5"/>',
         lineSpacing: '<path d="M9 4.5h8.5M9 8.5h8.5M9 12.5h8.5M9 16.5h8.5"/><path d="M2.5 6L4.5 3.5 6.5 6M2.5 14l2 2.5 2-2.5M4.5 3.5v13"/>',
         bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
             '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
@@ -83,6 +90,20 @@
         replace: '<path d="M3 6.5h9.5M9.5 3.5l3 3-3 3"/><path d="M17 13.5H7.5M10.5 10.5l-3 3 3 3"/>',
         back: '<rect x="8" y="8" width="9" height="9" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
     };
+
+    // Table borders: a faint 2 x 2 grid of cells, the lines a kind draws in full (tabledesign.js).
+    const GRID_LINES = { top: 'M3 3h14', bottom: 'M3 17h14', left: 'M3 3v14', right: 'M17 3v14', h: 'M3 10h14', v: 'M10 3v14' };
+    const BORDER_KINDS = {
+        all: ['top', 'bottom', 'left', 'right', 'h', 'v'], none: [], outside: ['top', 'bottom', 'left', 'right'],
+        inside: ['h', 'v'], insideHorizontal: ['h'], insideVertical: ['v'],
+        top: ['top'], bottom: ['bottom'], left: ['left'], right: ['right'],
+    };
+    Object.keys(BORDER_KINDS).forEach((kind) => {
+        const drawn = BORDER_KINDS[kind];
+        PATHS['borders-' + kind] = Object.keys(GRID_LINES).map((line) => (drawn.indexOf(line) === -1
+            ? '<path d="' + GRID_LINES[line] + '" stroke-dasharray="1 2" stroke-width="1"/>'
+            : '<path d="' + GRID_LINES[line] + '" stroke-width="2"/>')).join('');
+    });
 
     App.icons.get = function get(name) {
         const path = PATHS[name];

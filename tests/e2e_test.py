@@ -1652,6 +1652,110 @@ def test_table_column_borders(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+# The comps table's <table> (its look, rows and cells; not its box or column widths, which a first change
+# fits to the rows) without the marks of a cell being typed in.
+E9_HTML = """(() => { const copy = App.deck.getDocument().querySelector('[data-id="e9"] > table').cloneNode(true);
+    copy.querySelector('colgroup').remove();
+    copy.querySelectorAll('[contenteditable]').forEach((cell) => {
+        ['contenteditable', 'spellcheck'].forEach((name) => cell.removeAttribute(name));
+        cell.classList.remove('editor-editing');
+        if (!cell.getAttribute('class')) { cell.removeAttribute('class'); }
+    });
+    return copy.outerHTML; })()"""
+CELL_STYLE = """([r, c, property]) => { const doc = App.deck.getDocument();
+    const cell = doc.querySelector('[data-id="e9"] > table').rows[r].cells[c];
+    return doc.defaultView.getComputedStyle(cell)[property]; }"""
+
+
+def test_table_design(browser):
+    """Table Design: style options, shading, borders with the pen; Layout > Alignment: vertical alignment, cell margins."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(2)")   # the comps table e9 (Beta Foods' row about y = 196; its numbers from x = 375)
+    design_tab = ".ribbon-tab[data-tab='table-design']"
+    key = lambda: page.evaluate(EDITING_KEY)  # noqa: E731
+    style = lambda r, c, prop: page.evaluate(CELL_STYLE, [r, c, prop])  # noqa: E731
+    attribute = lambda name: page.evaluate(f"App.deck.getDocument().querySelector('[data-id=\"e9\"] > table').hasAttribute('{name}')")  # noqa: E731
+    start = page.evaluate(E9_HTML)
+    check(page.is_hidden(design_tab), "no Table Design tab without a table")
+
+    # Style options: the checkboxes show the table's; a click turns one on or off, typing goes on.
+    page.mouse.click(*slide_to_screen(page, 200, 196))   # Beta Foods
+    page.click(design_tab)
+    page.screenshot(path=str(OUTPUT / "45-table-design-tab.png"))
+    banded = attribute("data-banded-rows")
+    check(page.is_checked("input[data-command='tableBandedRows']") == banded and
+          page.is_checked("input[data-command='tableHeaderRow']") == attribute("data-header-row"), "the checkboxes show the table's options")
+    page.click("label:has(input[data-command='tableBandedRows'])")
+    check(attribute("data-banded-rows") != banded and page.is_checked("input[data-command='tableBandedRows']") != banded,
+          "Banded Rows switched")
+    check(key() == "e9/1/0", f"typing goes on: {key()}")
+    page.click("label:has(input[data-command='tableTotalRow'])")
+    check(style(5, 0, "borderTopWidth") == "2px" and style(5, 0, "fontWeight") == "700", "Total Row: the last row bold, a 2 px line above")
+    page.keyboard.press("Control+Z")
+    page.keyboard.press("Control+Z")
+    check(page.evaluate(E9_HTML) == start, "two undos")
+
+    # Shading: the cell typed in; "Table style fill" gives it back.
+    page.click(".cell-fill-menu-button")
+    page.click(".cell-fill-menu .color-swatch[title='Red']")
+    check(style(1, 0, "backgroundColor") == "rgb(255, 0, 0)" and style(1, 1, "backgroundColor") != "rgb(255, 0, 0)", "Beta Foods red")
+    check(page.evaluate("App.history.undoLabel()") == "Shading" and key() == "e9/1/0", "one undo step, typing goes on")
+    page.click(".cell-fill-menu-button")
+    page.click(".cell-fill-menu .menu-item[title='Table style fill']")
+    check(page.evaluate(E9_HTML) == start, "the table style fill again: as it was")
+
+    # Borders with the pen on selected cells: outside only, the cells stay selected.
+    page.keyboard.press("Escape")
+    drag(page, slide_to_screen(page, 480, 196), slide_to_screen(page, 750, 232))   # 2.450 … 8,9x
+    page.click(design_tab)
+    page.click(".pen-weight")
+    page.click(".pen-weight-menu .menu-item:has-text('3 px')")
+    page.click(".borders-menu-button")
+    page.click(".borders-menu .menu-item:has-text('Outside Borders')")
+    check(style(1, 1, "borderTopWidth") == "3px" and style(1, 1, "borderLeftWidth") == "3px" and style(2, 2, "borderRightWidth") == "3px"
+          and style(2, 2, "borderBottomWidth") == "3px", "the four cells' outline is 3 px")
+    check(style(1, 1, "borderRightWidth") != "3px" and style(1, 1, "borderBottomWidth") != "3px", "no line inside")
+    check(page.is_visible(".cell-block") and page.evaluate("App.history.undoLabel()") == "Outside Borders", "still selected; one undo step")
+    check(page.get_attribute(".borders-main", "title") == "Borders: Outside Borders", "the Borders button draws that kind next")
+
+    # Layout > Alignment: the selected cells to the bottom (the table centres its cells); Cell Margins Wide for the whole table.
+    page.click(".ribbon-tab[data-tab='table-layout']")
+    check(page.get_attribute(".ribbon-button[data-command='cellAlignMiddle']", "aria-pressed") == "true", "the button shows the centring")
+    page.click(".ribbon-button[data-command='cellAlignBottom']")
+    check(style(1, 1, "verticalAlign") == "bottom" and style(2, 2, "verticalAlign") == "bottom" and style(1, 0, "verticalAlign") == "middle",
+          "the selected cells at the bottom")
+    check(page.get_attribute(".ribbon-button[data-command='cellAlignBottom']", "aria-pressed") == "true", "the button shows it")
+    page.keyboard.press("Escape")
+    check(page.is_hidden(".cell-block") and key() is None, "the whole table selected")
+    height = element_rect(page, "e9")["height"]
+    page.click(".cell-margins")
+    page.click(".cell-margins-menu .menu-item:has-text('Wide')")
+    check(style(0, 0, "paddingLeft") == "14px" and style(4, 3, "paddingTop") == "14px", "every cell has wide margins")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e9\"] > table').style.getPropertyValue('--cell-padding')") == "14px",
+          "written once, on the table")
+    check(element_rect(page, "e9")["height"] > height + 50, "the rows got taller")
+    page.screenshot(path=str(OUTPUT / "46-table-layout-alignment.png"))
+    for _ in range(3):
+        page.keyboard.press("Control+Z")
+    check(page.evaluate(E9_HTML) == start, "three undos: as it was")
+
+    # A new table has Header Row and Banded Rows on; unticking Header Row takes the dark header away.
+    page.evaluate("App.commands.run('insertTable', { rows: 4, cols: 4 })")
+    new_id = page.evaluate("App.selection.selectedId()")
+    first_fill = lambda: page.evaluate("""id => { const doc = App.deck.getDocument();  // noqa: E731
+        return doc.defaultView.getComputedStyle(doc.querySelector('[data-id="' + id + '"] td')).backgroundColor; }""", new_id)
+    page.click(design_tab)
+    check(page.is_checked("input[data-command='tableHeaderRow']") and page.is_checked("input[data-command='tableBandedRows']"),
+          "a new table: Header Row and Banded Rows ticked")
+    dark = first_fill()
+    page.click("label:has(input[data-command='tableHeaderRow'])")
+    check(dark == "rgb(31, 42, 68)" and first_fill() == "rgb(242, 242, 242)",
+          f"the dark header goes; the bands now start at the first row: {dark} -> {first_fill()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -2700,6 +2804,7 @@ TESTS = [
     test_table_cell_editing,
     test_table_layout,
     test_table_column_borders,
+    test_table_design,
 ]
 
 

@@ -1441,7 +1441,7 @@ def test_insert_and_resize_table(browser):
     check(page.evaluate(TABLE_SHAPE, table_id)["rows"] == 3, "redo brings it back")
 
     # Narrower by the right handle: the four columns stay equal; shorter than its text: the rows stop at the text.
-    page.mouse.click(*slide_to_screen(page, 400, 320))
+    page.mouse.click(*slide_to_screen(page, 300, 320))
     check(page.evaluate("App.selection.selectedId()") == table_id, "a click selects the table (and types in a cell)")
     page.keyboard.press("Escape")
     drag(page, slide_to_screen(page, 1120, 360), slide_to_screen(page, 880, 360))
@@ -1594,6 +1594,62 @@ E9_GRID = """() => {
     return App.tables.gridOf(table).cells.map((row) => row.map((cell) =>
         App.text.getModel(cell).map((line) => line.text).join('/') || '_').join('|'));
 }"""
+
+
+def test_table_column_borders(browser):
+    """Dragging a column border: the column left of it gives or takes width from the one right of it; one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(2)")   # the comps table e9: column borders at x = 375 / 592 / 915, Beta Foods' row about y = 196
+    shape = lambda: page.evaluate(TABLE_SHAPE, "e9")  # noqa: E731
+    key = lambda: page.evaluate(EDITING_KEY)  # noqa: E731
+    start = shape()["widths"]
+    box = element_rect(page, "e9")
+
+    # Nothing being typed: the overlay shows the border cursor and does the drag.
+    page.mouse.move(*slide_to_screen(page, 375, 196))
+    check(page.evaluate("document.getElementById('overlay').style.cursor") == "col-resize", "the border cursor over a column border")
+    page.mouse.move(*slide_to_screen(page, 300, 196))
+    check(page.evaluate("document.getElementById('overlay').style.cursor") == "text", "an I-beam inside a cell")
+    drag(page, slide_to_screen(page, 375, 196), slide_to_screen(page, 415, 196))
+    widths = shape()["widths"]
+    check(abs(widths[0] - start[0] - 40) < 1 and abs(widths[1] - start[1] + 40) < 1 and
+          all(abs(a - b) < 0.05 for a, b in zip(widths[2:], start[2:])),
+          f"the first column 40 px wider, the second 40 px narrower: {start} -> {widths}")
+    check(abs(element_rect(page, "e9")["width"] - box["width"]) < 0.05, "the table keeps its width")
+    check(page.evaluate("App.selection.selectedId()") == "e9" and key() is None and page.is_hidden(".cell-block"),
+          "the table selected, no typing, no cells selected")
+    check(page.evaluate("App.history.undoLabel()") == "Resize column", "one undo step")
+    page.keyboard.press("Control+Z")
+    check(shape()["widths"] == start, "undo")
+
+    # Typing in a cell: the border still drags, and typing goes on in that cell.
+    page.mouse.click(*slide_to_screen(page, 200, 196))   # Beta Foods
+    check(key() == "e9/1/0", f"typing in Beta Foods: {key()}")
+    page.mouse.move(*slide_to_screen(page, 592, 196))
+    cursor = page.evaluate("""() => { const doc = App.deck.getDocument();
+        return doc.defaultView.getComputedStyle(doc.querySelector('[data-id="e9"] > table').rows[1].cells[1]).cursor; }""")
+    check(cursor == "col-resize", f"the border cursor while typing: {cursor}")
+    drag(page, slide_to_screen(page, 592, 196), slide_to_screen(page, 552, 196))
+    widths = shape()["widths"]
+    check(abs(widths[1] - start[1] + 40) < 1 and abs(widths[2] - start[2] - 40) < 1, f"the border moved 40 px left: {widths}")
+    check(key() == "e9/1/0", f"typing goes on in Beta Foods: {key()}")
+    page.keyboard.type("!")
+    check(page.evaluate(CELL_TEXT, [1, 0]) == "Beta Foods!", "the cursor stayed where it was")
+
+    # A column never gets narrower than 24 px; its text wraps and the table grows taller.
+    page.keyboard.press("Escape")
+    height = element_rect(page, "e9")["height"]
+    drag(page, slide_to_screen(page, 375, 196), slide_to_screen(page, 10, 196))
+    check(abs(shape()["widths"][0] - 24) < 0.01, f"the first column stops at 24 px: {shape()['widths']}")
+    check(element_rect(page, "e9")["height"] > height + 50, f"the table grew with the wrapped names: {height} -> {element_rect(page, 'e9')}")
+    page.screenshot(path=str(OUTPUT / "44-table-column-border.png"))
+    for _ in range(3):
+        page.keyboard.press("Control+Z")
+    check(shape()["widths"] == start and abs(element_rect(page, "e9")["height"] - box["height"]) < 0.05,
+          f"undo, undo (typing), undo: as it was: {shape()['widths']}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
 
 
 def test_table_layout(browser):
@@ -2643,6 +2699,7 @@ TESTS = [
     test_insert_and_resize_table,
     test_table_cell_editing,
     test_table_layout,
+    test_table_column_borders,
 ]
 
 

@@ -477,3 +477,42 @@ test('text: clearText empties a cell, keeping one line to type in', () => {
     App.text.clearText(cell);
     assertEqual(cell.innerHTML, '<p data-list="none" data-level="1"><br></p>');
 });
+
+// ---------- step 5: dragging a column border ----------
+
+test('tables: resizeColumn moves a border: the column left of it gives or takes width from the one right of it', () => {
+    const move = (border, dx) => App.tables.resizeColumn([100, 100, 100], border, dx, 24).join();
+    assertEqual(move(1, 30), '130,70,100');
+    assertEqual(move(2, -12.345), '100,87.66,112.34', 'two decimals');
+    assertEqual(move(1, -90), '24,176,100', 'a column is never narrower than the minimum');
+    assertEqual(move(2, 200), '100,176,24', 'nor the one right of the border');
+});
+
+test('tables: colWidths and setColumnWidths read and write the colgroup', () => {
+    const table = grid3x3();
+    assertEqual(App.tables.colWidths(table).join(), '100,100,100');
+    App.tables.setColumnWidths(table, [50, 150.5, 99.5]);
+    assertEqual(Array.from(table.querySelectorAll('col'), (col) => col.style.width).join(), '50px,150.5px,99.5px');
+});
+
+test('tables: columnBorderAt finds the inner column border under a point, where a cell edge is drawn', () => {
+    const { frame, element, table } = tableFrame((doc) =>
+        App.tables.createTable(doc, 3, 4, { left: 160, top: 300, width: 960, height: 120 }, 'e1'));
+    try {
+        // x from the table's left edge (four 240 px columns), y in row r.
+        const box = element.getBoundingClientRect();
+        const at = (x, r) => App.tables.columnBorderAt(element, box.left + x, table.rows[r].getBoundingClientRect().top + 10, 4);
+        assertEqual(at(240, 0), 1, 'the border between columns 1 and 2');
+        assertEqual(at(243.5, 0), 1, 'near it');
+        assertEqual(at(235, 0), -1, 'too far from it');
+        assertEqual(at(720, 2), 3);
+        assertEqual(at(0, 0), -1, 'the outer left edge moves the table, it is no column border');
+        assertEqual(at(960, 0), -1, 'nor is the outer right edge (the handles resize the table)');
+        assertEqual(App.tables.columnBorderAt(element, box.left + 240, box.top - 20, 4), -1, 'above the table');
+        App.tables.mergeCells(table, { top: 1, left: 0, bottom: 1, right: 1 });
+        assertEqual(at(240, 1), -1, 'no border inside a merged cell');
+        assertEqual(at(240, 0), 1, 'the row above still has it');
+    } finally {
+        frame.remove();
+    }
+});

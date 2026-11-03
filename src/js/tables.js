@@ -252,6 +252,61 @@
     }
 
     // ---------------------------------------------------------------
+    // Column borders
+    // ---------------------------------------------------------------
+
+    /* The column widths of a table, from its colgroup (slide px). */
+    App.tables.colWidths = function colWidths(table) {
+        return Array.from(table.querySelectorAll(':scope > colgroup > col'), (col) => parseFloat(col.style.width) || 0);
+    };
+
+    App.tables.setColumnWidths = function setColumnWidths(table, widths) {
+        table.querySelectorAll(':scope > colgroup > col').forEach((col, index) => col.style.setProperty('width', widths[index] + 'px'));
+    };
+
+    /*
+     * The widths after dragging inner border `border` (between columns border - 1
+     * and border) by dx px, as in PowerPoint: the column left of it gives or
+     * takes width from the one right of it, the table keeps its width, and
+     * neither gets narrower than `min`.
+     */
+    App.tables.resizeColumn = function resizeColumn(widths, border, dx, min) {
+        const left = widths[border - 1];
+        const right = widths[border];
+        const step = Math.max(Math.min(round2(dx), right - min), min - left);
+        const next = widths.slice();
+        next[border - 1] = round2(left + step);
+        next[border] = round2(right - step);
+        return next;
+    };
+
+    /*
+     * The inner column border within `tolerance` px of point (x, y) of a laid-out
+     * table element (slide px, as the deck shows them), or -1. Only where a cell
+     * edge is drawn: not across a cell merged over the border. The outer edges
+     * are not column borders (the edge moves the table, the handles resize it).
+     */
+    App.tables.columnBorderAt = function columnBorderAt(element, x, y, tolerance) {
+        const table = element.querySelector(':scope > table');
+        const rect = table ? table.getBoundingClientRect() : null;
+        if (!rect || y < rect.top || y > rect.bottom) {
+            return -1;
+        }
+        const row = Array.from(table.rows).findIndex((tr) => y <= tr.getBoundingClientRect().bottom);
+        const widths = App.tables.colWidths(table);
+        let edge = rect.left;
+        for (let border = 1; border < widths.length; border++) {
+            edge += widths[border - 1];
+            const across = App.tables.cellBoxes(table).some((box) =>
+                box.row <= row && row < box.row + box.rowSpan && box.col < border && border < box.col + box.colSpan);
+            if (Math.abs(x - edge) <= tolerance && !across) {
+                return border;
+            }
+        }
+        return -1;
+    };
+
+    // ---------------------------------------------------------------
     // Rows and cells
     // ---------------------------------------------------------------
 

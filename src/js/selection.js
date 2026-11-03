@@ -198,12 +198,14 @@
     }
 
     function updateHoverCursor(event) {
-        if (dragging || insertCallback) {
+        if (dragging || insertCallback || App.tableControls.isDraggingBorder()) {
             return;
         }
         const point = toSlidePoint(event);
         const element = App.selection.elementAt(point.x, point.y);
-        overlay.style.cursor = inTableCells(element, point) ? 'text' : element ? 'move' : '';
+        const cells = inTableCells(element, point);
+        overlay.style.cursor = cells && App.tableControls.borderAt(element, point) >= 0 ? 'col-resize'
+            : cells ? 'text' : element ? 'move' : '';
     }
 
     function onPointerDown(event) {
@@ -234,7 +236,13 @@
             }
             App.text.stopPainter();
         }
-        // In a table's cells: a click types in the cell, a drag selects cells (tablecontrols.js).
+        // In a table: a column border drags; in its cells a click types in the cell, a drag selects cells (tablecontrols.js).
+        const border = event.button === 0 && inTableCells(element, point) ? App.tableControls.borderAt(element, point) : -1;
+        if (border >= 0) {
+            App.selection.select(element);
+            App.tableControls.dragBorder(element, border, event, overlay, toSlidePoint);
+            return;
+        }
         const cell = event.button === 0 && inTableCells(element, point) ? App.tables.cellAt(element, point.x, point.y) : null;
         if (cell) {
             App.selection.select(element);

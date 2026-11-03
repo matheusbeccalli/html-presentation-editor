@@ -9,6 +9,11 @@
  * typing in a cell) selects a block of cells, drawn on the overlay (nothing is
  * written into the deck). Esc lets go of it; Delete empties its cells.
  *
+ * Column borders: the mouse over an inner border shows the border cursor; a
+ * drag moves it, the column left of it giving or taking width from the one
+ * right of it (the table keeps its width), as in PowerPoint. It works whether
+ * or not a cell is being typed in (typing goes on afterwards); one undo step.
+ *
  * The Layout tab (shown while a table is selected) works on the selected cells,
  * or the cell being typed in: insert rows / columns, delete rows / columns /
  * the table, merge, split. Each is one undo step; tables.js changes the grid.
@@ -411,7 +416,7 @@
 
     /* The columns decide the table's width (after inserting or deleting columns). */
     function widthFromColumns(element) {
-        const widths = Array.from(tableOf(element).querySelectorAll(':scope > colgroup > col'), (col) => parseFloat(col.style.width) || 0);
+        const widths = App.tables.colWidths(tableOf(element));
         const total = widths.reduce((a, b) => a + b, 0);
         if (total > 0) {
             element.style.setProperty('width', Math.round(total * 100) / 100 + 'px');
@@ -451,15 +456,135 @@
         }
     };
 
+    // ---------------------------------------------------------------
+    // Column borders
+    // ---------------------------------------------------------------
+
+    const BORDER_GRIP = 4;      // screen px either side of a column border
+    const MIN_COLUMN = 24;      // slide px: room for the cell padding and a letter
+    const DRAG_THRESHOLD = 3;   // screen px before a press becomes a drag
+
+    let borderDrag = null;    // { element } while a column border is being dragged
+    let hoverStyle = null;    // the deck's border-cursor rule while the mouse is over a border (typing)
+
+    /* The inner column border of a table element under slide point `point`, or -1. */
+    App.tableControls.borderAt = function borderAt(element, point) {
+        return App.tables.columnBorderAt(element, point.x, point.y, BORDER_GRIP / App.canvas.getZoom());
+    };
+
+    App.tableControls.isDraggingBorder = function isDraggingBorder() {
+        return borderDrag !== null;
+    };
+
+    /*
+     * Follow a press on column border `border` until the mouse is released.
+     * `target` keeps the mouse (the overlay, or the deck element pressed while
+     * typing); toPoint(event) gives slide px. The columns follow live; the
+     * whole drag is one undo step. A table pressed while typing elsewhere is
+     * selected at the end.
+     */
+    App.tableControls.dragBorder = function dragBorder(element, border, downEvent, target, toPoint) {
+        const table = tableOf(element);
+        const startX = toPoint(downEvent).x;
+        const startWidths = App.tables.colWidths(table);
+        const zoom = App.canvas.getZoom();
+        let started = false;
+        borderDrag = { element: element };
+        target.setPointerCapture(downEvent.pointerId);
+
+        function onMove(event) {
+            const dx = toPoint(event).x - startX;
+            if (!started) {
+                if (Math.abs(dx) * zoom < DRAG_THRESHOLD) {
+                    return;
+                }
+                started = true;
+                App.history.begin('Resize column', slideScope(element));
+            }
+            App.tables.setColumnWidths(table, App.tables.resizeColumn(startWidths, border, dx, MIN_COLUMN));
+            App.tables.fitTable(element);   // the rows follow their wrapped text
+            App.selection.refresh();
+            drawBlock();
+        }
+
+        function finish() {
+            target.removeEventListener('pointermove', onMove);
+            target.removeEventListener('pointerup', finish);
+            target.removeEventListener('pointercancel', finish);
+            borderDrag = null;
+            if (started) {
+                App.history.commit();
+            }
+            const typing = App.text.editingElement();
+            if (typing && !element.contains(typing)) {
+                App.text.exitEdit({ select: false });
+            }
+            if (element.isConnected) {
+                App.selection.select(element);
+            }
+        }
+
+        target.addEventListener('pointermove', onMove);
+        target.addEventListener('pointerup', finish);
+        target.addEventListener('pointercancel', finish);
+    };
+
+    function deckTableAt(event) {
+        const element = event.target.closest ? event.target.closest('.el[data-type="table"]') : null;
+        return element && tableOf(element) ? element : null;
+    }
+
+    /*
+     * While typing, the deck gets the mouse: over a column border, a rule in the
+     * deck's head (editor-only, outside the slide's undo snapshots) shows the
+     * border cursor over that table.
+     */
+    function onDeckHover(event) {
+        if (borderDrag || event.buttons) {
+            return;
+        }
+        const element = deckTableAt(event);
+        const id = element && App.tableControls.borderAt(element, { x: event.clientX, y: event.clientY }) >= 0
+            ? element.getAttribute('data-id') : null;
+        const rule = id ? '[data-id="' + CSS.escape(id) + '"], [data-id="' + CSS.escape(id) + '"] * { cursor: col-resize !important; }' : '';
+        if (rule && !(hoverStyle && hoverStyle.isConnected)) {
+            hoverStyle = el('style', { 'data-editor-only': 'col-resize' });
+            App.deck.getDocument().head.appendChild(hoverStyle);
+        }
+        if (hoverStyle && hoverStyle.textContent !== rule) {
+            hoverStyle.textContent = rule;
+        }
+    }
+
+    /* A press on a column border in the deck (while typing): drag it; the deck element pressed keeps the mouse. */
+    function onDeckBorderDown(event) {
+        const element = event.button === 0 ? deckTableAt(event) : null;
+        const point = { x: event.clientX, y: event.clientY };
+        const border = element ? App.tableControls.borderAt(element, point) : -1;
+        if (border < 0) {
+            return false;
+        }
+        event.preventDefault();   // the cursor stays where it is
+        event.stopImmediatePropagation();
+        clearBlock();
+        App.tableControls.dragBorder(element, border, event, event.target, (e) => ({ x: e.clientX, y: e.clientY }));
+        return true;
+    }
+
     App.tableControls.init = function init() {
         App.events.on('deck-loaded', () => {
             block = null;
             press = null;
+            borderDrag = null;
+            hoverStyle = null;
             drawBlock();
             const doc = App.deck.getDocument();
             // Before text.js's own listener (added when typing starts): Shift+click must win over "edit that cell".
-            doc.addEventListener('pointerdown', onDeckPointerDown, true);
-            doc.addEventListener('pointermove', (event) => followPress({ x: event.clientX, y: event.clientY }, event.buttons));
+            doc.addEventListener('pointerdown', (event) => onDeckBorderDown(event) || onDeckPointerDown(event), true);
+            doc.addEventListener('pointermove', (event) => {
+                followPress({ x: event.clientX, y: event.clientY }, event.buttons);
+                onDeckHover(event);
+            });
             doc.addEventListener('pointerup', endPress);
         });
         window.addEventListener('keydown', onKeyDown, true);

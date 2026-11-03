@@ -100,6 +100,9 @@
 .color-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 4px; padding: 0 6px 6px; }
 .color-swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 2px; cursor: pointer; }
 .color-swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Contextual tabs (Table > Layout) show only while they apply, in the accent colour as in PowerPoint. */
+.ribbon-tab.contextual { color: var(--accent); }
+.ribbon-tab[hidden] { display: none; }
 /* Insert > Table: the 10 x 10 grid picker (tablecontrols.js). */
 .table-grid-menu { min-width: 0; padding: 6px; }
 .table-grid-menu:focus { outline: none; }

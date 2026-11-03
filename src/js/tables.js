@@ -282,6 +282,245 @@
         return row;
     };
 
+    // ---------------------------------------------------------------
+    // Blocks of cells; inserting, deleting, merging, splitting (Layout tab)
+    // ---------------------------------------------------------------
+    //
+    // These work on the grid of slots (gridOf): row and column numbers count
+    // slots, so a merged cell is at the row and column of its top-left slot.
+    // A block is { top, left, bottom, right }, inclusive.
+
+    /* Every cell with the slot it starts at and its spans: [{ cell, row, col, rowSpan, colSpan }] in reading order. */
+    App.tables.cellBoxes = function cellBoxes(table) {
+        const grid = App.tables.gridOf(table);
+        const boxes = new Map();
+        grid.cells.forEach((slots, r) => slots.forEach((cell, c) => {
+            if (!cell) {
+                return;
+            }
+            const box = boxes.get(cell);
+            if (!box) {
+                boxes.set(cell, { cell: cell, row: r, col: c, rowSpan: 1, colSpan: 1 });
+            } else {
+                box.rowSpan = Math.max(box.rowSpan, r - box.row + 1);
+                box.colSpan = Math.max(box.colSpan, c - box.col + 1);
+            }
+        }));
+        return Array.from(boxes.values());
+    };
+
+    function overlaps(box, block) {
+        return box.row <= block.bottom && box.row + box.rowSpan - 1 >= block.top &&
+            box.col <= block.right && box.col + box.colSpan - 1 >= block.left;
+    }
+
+    /*
+     * The block from slot `a` to slot `b` ({ row, col }), grown until no merged
+     * cell sticks out of it (as PowerPoint selects cells).
+     */
+    App.tables.blockAround = function blockAround(table, a, b) {
+        const block = { top: Math.min(a.row, b.row), left: Math.min(a.col, b.col),
+            bottom: Math.max(a.row, b.row), right: Math.max(a.col, b.col) };
+        const boxes = App.tables.cellBoxes(table);
+        let grown = true;
+        while (grown) {
+            grown = false;
+            boxes.filter((box) => overlaps(box, block)).forEach((box) => {
+                const edges = { top: box.row, left: box.col, bottom: box.row + box.rowSpan - 1, right: box.col + box.colSpan - 1 };
+                ['top', 'left'].forEach((side) => {
+                    if (edges[side] < block[side]) {
+                        block[side] = edges[side];
+                        grown = true;
+                    }
+                });
+                ['bottom', 'right'].forEach((side) => {
+                    if (edges[side] > block[side]) {
+                        block[side] = edges[side];
+                        grown = true;
+                    }
+                });
+            });
+        }
+        return block;
+    };
+
+    /* The block a single cell covers. */
+    App.tables.blockOf = function blockOf(cell) {
+        const box = App.tables.cellBoxes(cell.closest('table')).find((item) => item.cell === cell);
+        return { top: box.row, left: box.col, bottom: box.row + box.rowSpan - 1, right: box.col + box.colSpan - 1 };
+    };
+
+    function setSpan(cell, name, value) {
+        if (value > 1) {
+            cell.setAttribute(name, String(value));
+        } else {
+            cell.removeAttribute(name);
+        }
+    }
+
+    /* An empty cell with the look of `model` (fill, borders …) but none of its spans. */
+    function emptyCellLike(model, doc) {
+        const cell = model ? model.cloneNode(false) : doc.createElement('td');
+        cell.removeAttribute('rowspan');
+        cell.removeAttribute('colspan');
+        App.text.normalizeCell(cell);
+        return cell;
+    }
+
+    /*
+     * Put `cell` into row `rowIndex` so that it starts at slot column `col`:
+     * before the first cell that starts in that row further right. `boxes` are
+     * the cell boxes from before any change, so several cells can be placed in turn.
+     */
+    function placeCell(table, boxes, rowIndex, col, cell) {
+        const after = boxes.filter((box) => box.row === rowIndex && box.col > col && box.cell.parentElement === table.rows[rowIndex])
+            .sort((x, y) => x.col - y.col)[0];
+        table.rows[rowIndex].insertBefore(cell, after ? after.cell : null);
+    }
+
+    /*
+     * Insert `count` empty rows before slot row `at` (at = the number of rows: at
+     * the end). Each new row has the height of row `model` and its cells' look.
+     * A cell merged down across the place where the rows go gets taller instead.
+     */
+    App.tables.insertRows = function insertRows(table, at, count, model) {
+        const doc = table.ownerDocument;
+        const grid = App.tables.gridOf(table);
+        const across = new Set();
+        const created = [];
+        for (let k = 0; k < count; k++) {
+            const row = doc.createElement('tr');
+            if (table.rows[model].style.height) {
+                row.style.setProperty('height', table.rows[model].style.height);
+            }
+            for (let c = 0; c < grid.cols; c++) {
+                const spanning = at > 0 && at < grid.rows && grid.cells[at - 1][c] && grid.cells[at - 1][c] === grid.cells[at][c];
+                if (spanning) {
+                    across.add(grid.cells[at][c]);
+                } else {
+                    row.appendChild(emptyCellLike(grid.cells[model][c], doc));
+                }
+            }
+            created.push(row);
+        }
+        const before = table.rows[at] || null;
+        created.forEach((row) => (before ? before.parentElement.insertBefore(row, before) : table.tBodies[0].appendChild(row)));
+        across.forEach((cell) => setSpan(cell, 'rowspan', cell.rowSpan + count));
+        return created;
+    };
+
+    /*
+     * Insert `count` empty columns before slot column `at`, each as wide as
+     * column `model` and with its cells' look. A cell merged across the place
+     * where the columns go gets wider instead. The table gets wider.
+     */
+    App.tables.insertColumns = function insertColumns(table, at, count, model) {
+        const doc = table.ownerDocument;
+        const grid = App.tables.gridOf(table);
+        const boxes = App.tables.cellBoxes(table);
+        const cols = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+        if (cols.length > 0) {
+            for (let k = 0; k < count; k++) {
+                const col = doc.createElement('col');
+                if (cols[model] && cols[model].style.width) {
+                    col.style.setProperty('width', cols[model].style.width);
+                }
+                cols[0].parentElement.insertBefore(col, cols[at] || null);
+            }
+        }
+        const across = new Set();
+        for (let r = 0; r < grid.rows; r++) {
+            const spanning = at > 0 && at < grid.cols && grid.cells[r][at - 1] && grid.cells[r][at - 1] === grid.cells[r][at];
+            if (spanning) {
+                across.add(grid.cells[r][at]);
+                continue;
+            }
+            for (let k = 0; k < count; k++) {
+                placeCell(table, boxes, r, at - 0.5, emptyCellLike(grid.cells[r][model], doc));
+            }
+        }
+        across.forEach((cell) => setSpan(cell, 'colspan', cell.colSpan + count));
+    };
+
+    /*
+     * Delete slot rows `top` … `bottom`. A merged cell reaching into them from
+     * above gets shorter; one that starts in them and goes on below moves down
+     * to the first row left under them.
+     */
+    App.tables.deleteRows = function deleteRows(table, top, bottom) {
+        const boxes = App.tables.cellBoxes(table);
+        boxes.forEach((box) => {
+            const end = box.row + box.rowSpan - 1;
+            const overlap = Math.min(end, bottom) - Math.max(box.row, top) + 1;
+            if (overlap <= 0 || (box.row >= top && end <= bottom)) {
+                return;   // untouched, or gone with its row
+            }
+            setSpan(box.cell, 'rowspan', box.rowSpan - overlap);
+            if (box.row >= top) {
+                placeCell(table, boxes, bottom + 1, box.col, box.cell);
+            }
+        });
+        for (let r = bottom; r >= top; r--) {
+            table.rows[r].remove();
+        }
+    };
+
+    /* Delete slot columns `left` … `right`; a cell merged across them gets narrower. The table gets narrower. */
+    App.tables.deleteColumns = function deleteColumns(table, left, right) {
+        App.tables.cellBoxes(table).forEach((box) => {
+            const end = box.col + box.colSpan - 1;
+            const overlap = Math.min(end, right) - Math.max(box.col, left) + 1;
+            if (overlap <= 0) {
+                return;
+            }
+            if (box.col >= left && end <= right) {
+                box.cell.remove();
+            } else {
+                setSpan(box.cell, 'colspan', box.colSpan - overlap);
+            }
+        });
+        const cols = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+        cols.slice(left, right + 1).forEach((col) => col.remove());
+    };
+
+    /*
+     * Merge a block into its top-left cell, as PowerPoint does: the lines of the
+     * other cells (empty ones add nothing) follow in reading order. Returns the cell.
+     */
+    App.tables.mergeCells = function mergeCells(table, block) {
+        const inside = App.tables.cellBoxes(table).filter((box) => overlaps(box, block));
+        const first = inside[0].cell;
+        const hasText = (cell) => cell.textContent.trim() !== '';
+        if (!hasText(first)) {
+            first.replaceChildren();
+        }
+        inside.slice(1).forEach((box) => {
+            if (hasText(box.cell)) {
+                first.append(...Array.from(box.cell.childNodes));
+            }
+            box.cell.remove();
+        });
+        setSpan(first, 'rowspan', block.bottom - block.top + 1);
+        setSpan(first, 'colspan', block.right - block.left + 1);
+        App.text.normalizeCell(first);
+        return first;
+    };
+
+    /* Split a merged cell back into one cell per slot; its text stays in the first, the others are empty with its look. */
+    App.tables.splitCell = function splitCell(table, cell) {
+        const boxes = App.tables.cellBoxes(table);
+        const box = boxes.find((item) => item.cell === cell);
+        for (let r = box.row; r < box.row + box.rowSpan; r++) {
+            for (let c = box.col; c < box.col + box.colSpan; c++) {
+                if (r !== box.row || c !== box.col) {
+                    placeCell(table, boxes, r, c, emptyCellLike(cell, table.ownerDocument));
+                }
+            }
+        }
+        cell.removeAttribute('rowspan');
+        cell.removeAttribute('colspan');
+    };
+
     /* The cell of a table element under slide point (x, y), or null (the slide must be shown). */
     App.tables.cellAt = function cellAt(element, x, y) {
         const hit = element.ownerDocument.elementFromPoint(x, y);

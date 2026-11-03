@@ -86,6 +86,14 @@
     outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
     pointer-events: none;                    /* clicks go through to the overlay's hit test */
 }
+/* Selected table cells (tablecontrols.js): one shaded rectangle over them. */
+.cell-block {
+    position: absolute;
+    background: rgba(0, 120, 212, 0.18);
+    outline: calc(1px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;
+}
+.cell-block[hidden] { display: none; }
 .selection-handle {
     position: absolute;
     width: calc(9px * var(--inverse-zoom));

@@ -821,6 +821,12 @@
         }
     };
 
+    /* Remove all the text of a container (selected table cells + Delete), leaving one empty line. */
+    App.text.clearText = function clearText(container) {
+        container.replaceChildren();
+        App.text.normalizeCell(container);
+    };
+
     // ---------------------------------------------------------------
     // Where text lives: text boxes and table cells ("containers")
     // ---------------------------------------------------------------

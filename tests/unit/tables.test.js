@@ -372,3 +372,108 @@ test('table controls: the grid picker moves with the arrow keys inside 10 x 10',
     assertEqual(move({ rows: 3, cols: 4 }, 'ArrowUp'), JSON.stringify({ rows: 2, cols: 4 }));
     assertEqual(App.tableControls.pickLabel({ rows: 3, cols: 4 }), '4 × 3 table', 'columns first, as PowerPoint');
 });
+
+// ---------- step 4: blocks of cells, rows and columns, merge and split ----------
+
+/* A 3 x 3 table A..I with a colgroup of 100 px columns, for the grid operations. */
+function grid3x3() {
+    return tableFrom('<colgroup><col style="width: 100px"><col style="width: 100px"><col style="width: 100px"></colgroup>' +
+        '<tbody><tr style="height: 30px"><td>A</td><td>B</td><td>C</td></tr>' +
+        '<tr style="height: 40px"><td>D</td><td>E</td><td>F</td></tr>' +
+        '<tr style="height: 50px"><td>G</td><td>H</td><td>I</td></tr></tbody>');
+}
+
+/* Like gridText, with the new (empty) cells shown as "_". */
+function cellShape(table) {
+    return gridText({ cells: App.tables.gridOf(table).cells.map((row) => row.map((cell) => (cell && cell.textContent === '' ? { textContent: '_' } : cell))) });
+}
+
+const block = (top, left, bottom, right) => ({ top: top, left: left, bottom: bottom, right: right });
+
+test('tables: cellBoxes gives each cell\'s row, column and spans', () => {
+    const boxes = App.tables.cellBoxes(tableFrom('<tr><td colspan="2">A</td><td rowspan="2">B</td></tr><tr><td>C</td><td>D</td></tr>'));
+    assertEqual(boxes.map((b) => b.cell.textContent + b.row + b.col + b.rowSpan + b.colSpan).join(), 'A0012,B0221,C1011,D1111');
+});
+
+test('tables: blockAround grows a block until no merged cell sticks out of it', () => {
+    const table = tableFrom('<tr><td>A</td><td colspan="2">B</td></tr><tr><td rowspan="2">C</td><td>D</td><td>E</td></tr>' +
+        '<tr><td>F</td><td>G</td></tr>');
+    assertEqual(JSON.stringify(App.tables.blockAround(table, { row: 0, col: 0 }, { row: 0, col: 1 })), JSON.stringify(block(0, 0, 0, 2)));
+    assertEqual(JSON.stringify(App.tables.blockAround(table, { row: 0, col: 0 }, { row: 1, col: 0 })), JSON.stringify(block(0, 0, 2, 0)));
+    assertEqual(JSON.stringify(App.tables.blockAround(table, { row: 2, col: 2 }, { row: 1, col: 1 })), JSON.stringify(block(1, 1, 2, 2)));
+});
+
+test('tables: insertRows adds empty rows like the model row; a cell merged across the gap grows', () => {
+    const table = grid3x3();
+    App.tables.insertRows(table, 1, 2, 0);
+    assertEqual(cellShape(table), 'ABC|___|___|DEF|GHI');
+    assertEqual(Array.from(table.rows).map((row) => row.style.height).join(), '30px,30px,30px,40px,50px');
+    const merged = tableFrom('<tr><td rowspan="2">A</td><td>B</td></tr><tr><td>C</td></tr>');
+    App.tables.insertRows(merged, 1, 1, 0);
+    assertEqual(cellShape(merged), 'AB|A_|AC');
+    assertEqual(merged.rows[0].cells[0].getAttribute('rowspan'), '3');
+});
+
+test('tables: insertColumns adds empty columns as wide as the model column; a cell merged across grows', () => {
+    const table = grid3x3();
+    App.tables.insertColumns(table, 3, 1, 2);
+    assertEqual(cellShape(table), 'ABC_|DEF_|GHI_');
+    assertEqual(table.querySelectorAll('col').length, 4);
+    const merged = tableFrom('<colgroup><col style="width: 50px"><col style="width: 70px"></colgroup>' +
+        '<tr><td colspan="2">A</td></tr><tr><td>B</td><td>C</td></tr>');
+    App.tables.insertColumns(merged, 1, 1, 0);
+    assertEqual(cellShape(merged), 'AAA|B_C');
+    assertEqual(Array.from(merged.querySelectorAll('col'), (col) => col.style.width).join(), '50px,50px,70px');
+});
+
+test('tables: deleteRows removes rows; a merged cell that started in them moves down, shorter', () => {
+    const table = grid3x3();
+    App.tables.deleteRows(table, 0, 1);
+    assertEqual(cellShape(table), 'GHI');
+    const merged = tableFrom('<tr><td rowspan="3">A</td><td>B</td></tr><tr><td>C</td></tr><tr><td>D</td></tr>');
+    App.tables.deleteRows(merged, 0, 0);
+    assertEqual(cellShape(merged), 'AC|AD');
+    assertEqual(merged.rows[0].cells[0].getAttribute('rowspan'), '2');
+    const above = tableFrom('<tr><td rowspan="3">A</td><td>B</td></tr><tr><td>C</td></tr><tr><td>D</td></tr>');
+    App.tables.deleteRows(above, 1, 1);
+    assertEqual(cellShape(above), 'AB|AD');
+});
+
+test('tables: deleteColumns removes columns and narrows cells merged across them', () => {
+    const table = grid3x3();
+    App.tables.deleteColumns(table, 1, 1);
+    assertEqual(cellShape(table), 'AC|DF|GI');
+    assertEqual(table.querySelectorAll('col').length, 2);
+    const merged = tableFrom('<colgroup><col><col><col></colgroup><tr><td colspan="3">A</td></tr><tr><td>B</td><td>C</td><td>D</td></tr>');
+    App.tables.deleteColumns(merged, 0, 1);
+    assertEqual(cellShape(merged), 'A|D');
+    assert(!merged.rows[0].cells[0].hasAttribute('colspan'), 'a span of 1 is no attribute');
+});
+
+test('tables: mergeCells makes one cell of a block, keeping the text of every cell in order', () => {
+    const table = grid3x3();
+    table.rows[1].cells[1].textContent = '';   // E is empty: it adds no line
+    Array.from(table.querySelectorAll('td')).forEach((cell) => App.text.normalizeCell(cell));
+    const merged = App.tables.mergeCells(table, block(0, 0, 1, 1));
+    const slots = App.tables.gridOf(table).cells.map((row) => row.map((cell) => (cell === merged ? 'X' : cell.textContent)).join(''));
+    assertEqual(slots.join('|'), 'XXC|XXF|GHI');
+    assertEqual(merged.getAttribute('colspan'), '2');
+    assertEqual(merged.getAttribute('rowspan'), '2');
+    assertEqual(App.text.getModel(merged).map((line) => line.text).join('/'), 'A/B/D');
+});
+
+test('tables: splitCell gives back one cell per slot; the text stays in the first', () => {
+    const table = tableFrom('<tr><td colspan="2" rowspan="2" style="background-color: red">A</td><td>B</td></tr>' +
+        '<tr><td>C</td></tr><tr><td>D</td><td>E</td><td>F</td></tr>');
+    App.tables.splitCell(table, table.rows[0].cells[0]);
+    assertEqual(cellShape(table), 'A_B|__C|DEF');
+    assertEqual(table.rows[1].cells[0].style.backgroundColor, 'red', 'the new cells keep the look');
+    assert(!table.rows[0].cells[0].hasAttribute('colspan') && !table.rows[0].cells[0].hasAttribute('rowspan'), 'no spans left');
+});
+
+test('text: clearText empties a cell, keeping one line to type in', () => {
+    const cell = parseDoc('<table><tr><td><p data-list="bullet" data-level="2">Um</p><p data-list="none" data-level="1">Dois</p></td></tr></table>')
+        .querySelector('td');
+    App.text.clearText(cell);
+    assertEqual(cell.innerHTML, '<p data-list="none" data-level="1"><br></p>');
+});

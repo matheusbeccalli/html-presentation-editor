@@ -58,6 +58,19 @@
                 'slide (or drag to set its width). Images, shapes and charts arrive in Phases 5 and 6.',
         },
         {
+            // Shown only while a table is selected (PowerPoint's Table Layout tab).
+            id: 'table-layout', label: 'Layout', contextual: () => App.tableControls.isTableSelected(),
+            groups: [
+                { label: 'Delete', commands: [['deleteRows', 'deleteRows'], ['deleteColumns', 'deleteColumns'],
+                    ['deleteTable', 'deleteTable']] },
+                { label: 'Rows & Columns', commands: [['insertRowAbove', 'insertRowAbove'], ['insertRowBelow', 'insertRowBelow'],
+                    ['insertColumnLeft', 'insertColumnLeft'], ['insertColumnRight', 'insertColumnRight']] },
+                { label: 'Merge', commands: [['mergeCells', 'mergeCells'], ['splitCells', 'splitCells']] },
+            ],
+            note: 'Click in a cell, or drag across cells to select several (Shift+click too). Delete empties the selected cells. ' +
+                'Drag a table by its edge to move it.',
+        },
+        {
             id: 'arrange', label: 'Arrange',
             groups: [
                 {
@@ -216,7 +229,8 @@
         TABS.forEach((tab) => {
             // Switching tabs is not an action: typing in a text box goes on (data-keep-edit, focus kept).
             tabRow.appendChild(el('button', {
-                type: 'button', class: 'ribbon-tab', role: 'tab', 'data-tab': tab.id, 'data-keep-edit': '',
+                type: 'button', class: 'ribbon-tab' + (tab.contextual ? ' contextual' : ''), role: 'tab',
+                'data-tab': tab.id, 'data-keep-edit': '', hidden: !!tab.contextual,
                 onmousedown: (event) => event.preventDefault(),
                 onclick: () => selectTab(tab.id),
             }, [tab.label]));
@@ -234,9 +248,21 @@
         });
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
-         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed']
+         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
+
+    /* Contextual tabs (Layout) show only while they apply; if the one open goes away, Home opens. */
+    function showContextualTabs() {
+        TABS.filter((tab) => tab.contextual).forEach((tab) => {
+            const tabButton = document.querySelector('.ribbon-tab[data-tab="' + tab.id + '"]');
+            const shown = tab.contextual();
+            tabButton.hidden = !shown;
+            if (!shown && tabButton.classList.contains('selected')) {
+                selectTab('home');
+            }
+        });
+    }
 
     App.ribbon.showDefaultTab = function showDefaultTab() {
         selectTab('home');
@@ -245,6 +271,7 @@
     /* Grey out buttons whose command cannot run right now (e.g. Undo with nothing to undo);
        toggle buttons (Bullets …) show whether they are on. */
     App.ribbon.refresh = function refresh() {
+        showContextualTabs();
         buttons.forEach(({ button, command }) => {
             button.disabled = !App.commands.isEnabled(command);
             const checked = App.commands.isChecked(command);

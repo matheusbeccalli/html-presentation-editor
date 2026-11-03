@@ -45,6 +45,7 @@ App.start = function start() {
     App.ui.init();
     App.ribbon.init();
     App.textControls.init();
+    App.tableControls.init();
     App.findReplace.init();
     App.canvas.init();
     App.selection.init();

@@ -15,8 +15,9 @@
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
- * Double-click on a text box starts editing it (text.js); a click into a
- * table (no drag) types in the cell under the mouse. Insert mode
+ * Double-click on a text box starts editing it (text.js). A press inside a
+ * table types in the cell under the mouse, and a drag from there selects cells
+ * (tablecontrols.js); a table moves by its edge, as in PowerPoint. Insert mode
  * (armInsert): the next click or drag on the slide gives a spot to a callback,
  * e.g. Insert > Text box.
  *
@@ -135,6 +136,21 @@
         return { x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom };
     }
 
+    App.selection.slidePoint = toSlidePoint;
+
+    // A table is moved by its edge (this many screen px); a press further in is in its cells, as in PowerPoint.
+    const TABLE_EDGE = 8;
+
+    function inTableCells(element, point) {
+        if (!element || element.getAttribute('data-type') !== 'table') {
+            return false;
+        }
+        const rect = App.transform.readRect(element);
+        const edge = TABLE_EDGE / App.canvas.getZoom();
+        return point.x > rect.left + edge && point.x < rect.left + rect.width - edge &&
+            point.y > rect.top + edge && point.y < rect.top + rect.height - edge;
+    }
+
     /* The element under slide point (x, y), or null. */
     App.selection.elementAt = function elementAt(x, y) {
         const slide = App.deck.getCurrentSlide();
@@ -172,7 +188,7 @@
         }
     }
 
-    /* A click into a table types in the cell under it, as in PowerPoint (a drag still moves the table). */
+    /* Type in the table cell under `point` (a double-click into a table). */
     function editCellAt(element, point) {
         const cell = App.tables.cellAt(element, point.x, point.y);
         if (cell) {
@@ -186,7 +202,8 @@
             return;
         }
         const point = toSlidePoint(event);
-        overlay.style.cursor = App.selection.elementAt(point.x, point.y) ? 'move' : '';
+        const element = App.selection.elementAt(point.x, point.y);
+        overlay.style.cursor = inTableCells(element, point) ? 'text' : element ? 'move' : '';
     }
 
     function onPointerDown(event) {
@@ -216,6 +233,13 @@
                 return;
             }
             App.text.stopPainter();
+        }
+        // In a table's cells: a click types in the cell, a drag selects cells (tablecontrols.js).
+        const cell = event.button === 0 && inTableCells(element, point) ? App.tables.cellAt(element, point.x, point.y) : null;
+        if (cell) {
+            App.selection.select(element);
+            App.tableControls.pressCells(element, cell, event, point);
+            return;
         }
         App.selection.select(element);
         if (element && event.button === 0) {
@@ -334,9 +358,6 @@
             overlay.removeEventListener('pointercancel', onCancel);
             window.removeEventListener('keydown', onKey, true);
             if (!started) {
-                if (kind === 'move' && !cancelled && element.getAttribute('data-type') === 'table') {
-                    editCellAt(element, start);
-                }
                 return;
             }
             dragging = false;

@@ -241,6 +241,15 @@
                 App.ui.setStatus('Click on the slide to place the text box, or drag to set its width (Esc cancels)');
             },
         });
+        // Table > Layout (tablecontrols.js): the selected cells, or the cell being typed in.
+        ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight', 'deleteRows', 'deleteColumns',
+         'deleteTable', 'mergeCells', 'splitCells'].forEach((name) => {
+            App.commands.define(name, {
+                label: App.tableControls.layoutLabel(name), keepsEdit: true,
+                isEnabled: () => App.tableControls.canLayout(name),
+                run: () => App.tableControls.layout(name),
+            });
+        });
         // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
         App.commands.define('insertTable', {
             label: 'Table', isEnabled: hasDeck,

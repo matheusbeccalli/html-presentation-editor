@@ -1589,6 +1589,97 @@ def test_table_cell_editing(browser):
     editor.close()
 
 
+E9_GRID = """() => {
+    const table = App.deck.getDocument().querySelector('[data-id="e9"] > table');
+    return App.tables.gridOf(table).cells.map((row) => row.map((cell) =>
+        App.text.getModel(cell).map((line) => line.text).join('/') || '_').join('|'));
+}"""
+
+
+def test_table_layout(browser):
+    """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(2)")   # the comps table e9: rows from y = 140 (about 37 px), columns at x = 64 / 375 / 592 / 915
+    grid = lambda: page.evaluate(E9_GRID)  # noqa: E731
+    layout_tab = ".ribbon-tab[data-tab='table-layout']"
+    run = lambda command: page.click(f".ribbon-button[data-command='{command}']")  # noqa: E731
+    key = lambda: page.evaluate(EDITING_KEY)  # noqa: E731
+    start = grid()
+    check(page.is_hidden(layout_tab), "no Layout tab without a table")
+
+    # Typing in a cell shows the Layout tab; it works on that cell.
+    page.mouse.click(*slide_to_screen(page, 200, 196))   # Beta Foods
+    check(page.is_visible(layout_tab), "a table selected: the Layout tab shows")
+    page.click(layout_tab)
+    check(key() == "e9/1/0", f"the tab does not end typing: {key()}")
+    page.screenshot(path=str(OUTPUT / "43-table-layout-tab.png"))
+    run("insertRowBelow")
+    check(len(grid()) == 7 and grid()[2] == "_|_|_|_" and key() == "e9/1/0", f"a row under Beta Foods, typing goes on: {grid()}")
+    run("insertRowAbove")
+    check(len(grid()) == 8 and grid()[1] == "_|_|_|_" and grid()[2].startswith("Beta Foods"), f"a row above: {grid()}")
+    width = element_rect(page, "e9")["width"]
+    run("insertColumnRight")
+    check(grid()[0] == "Empresa|_|EV (R$ mn)|EV/EBITDA 2025E|Margem EBITDA", f"a column right of it: {grid()[0]}")
+    check(element_rect(page, "e9")["width"] > width + 300, f"the table got wider by that column: {element_rect(page, 'e9')}")
+    page.keyboard.press("Tab")   # into the new column
+    run("deleteColumns")
+    check(abs(element_rect(page, "e9")["width"] - width) < 0.05, "the column deleted: back to its width")
+    check(key() == "e9/2/1", f"typing goes on in the cell now in its place (Beta's 2.450): {key()}")
+    run("deleteRows")
+    check(len(grid()) == 7 and not any(row.startswith("Beta Foods") for row in grid()), f"Beta's row deleted: {grid()}")
+    for _ in range(5):
+        page.keyboard.press("Control+Z")
+    check(grid() == start, f"five undos: as it was: {grid()}")
+
+    # A drag across cells selects them; Merge makes one cell of them, Split gives them back.
+    page.keyboard.press("Escape")
+    drag(page, slide_to_screen(page, 480, 196), slide_to_screen(page, 750, 232))
+    check(key() is None and page.is_visible(".cell-block"), "a drag across cells selects cells, not text")
+    block = page.evaluate("App.transform.readRect(document.querySelector('.cell-block'))")
+    check(abs(block["left"] - 375) < 2 and abs(block["top"] - 178) < 2 and abs(block["width"] - 540) < 3 and abs(block["height"] - 73.5) < 2,
+          f"the shaded block covers the four cells: {block}")
+    page.click(layout_tab)
+    run("mergeCells")
+    check(grid()[1] == "Beta Foods|2.450/9,8x/1.120/8,9x|2.450/9,8x/1.120/8,9x|19,5%", f"merged, the text kept: {grid()[1:3]}")
+    check(key() == "e9/1/1" and page.evaluate("App.history.undoLabel()") == "Merge cells", f"typing in the merged cell: {key()}")
+    run("splitCells")
+    check(grid()[1] == "Beta Foods|2.450/9,8x/1.120/8,9x|_|19,5%" and grid()[2] == "Gama Nutrição|_|_|17,2%", f"split: {grid()[1:3]}")
+    page.keyboard.press("Control+Z")
+    page.keyboard.press("Control+Z")
+    check(grid() == start, "undo split, undo merge")
+
+    # Shift+click selects from the cell being typed in; Delete empties the cells (they stay selected).
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 200, 270))   # Delta Snacks
+    page.keyboard.down("Shift")
+    page.mouse.click(*slide_to_screen(page, 480, 306))   # 530
+    page.keyboard.up("Shift")
+    check(page.is_visible(".cell-block") and key() is None, "Shift+click selects cells")
+    page.keyboard.press("Delete")
+    check(grid()[3].startswith("_|_|") and grid()[4].startswith("_|_|") and page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e9\"]') !== null"),
+          f"Delete empties the cells, the table stays: {grid()[3:5]}")
+    check(page.is_visible(".cell-block"), "still selected")
+    page.keyboard.press("Control+Z")
+    check(grid() == start, "undo")
+    page.keyboard.press("Escape")
+    check(page.is_hidden(".cell-block") and page.evaluate("App.selection.selectedId()") == "e9", "Esc lets go of the cells, the table stays selected")
+
+    # The edge moves the table; Delete table; the tab goes with the selection.
+    drag(page, slide_to_screen(page, 66, 250), slide_to_screen(page, 116, 250))
+    check(abs(element_rect(page, "e9")["left"] - 114) <= 1, f"dragged by its edge: {element_rect(page, 'e9')}")
+    page.mouse.click(*slide_to_screen(page, 200, 196))
+    page.click(layout_tab)
+    run("deleteTable")
+    check(page.evaluate("!App.deck.getDocument().querySelector('[data-id=\"e9\"]')"), "Delete table")
+    check(page.is_hidden(layout_tab) and page.is_visible(".ribbon-tab.selected[data-tab='home']"), "the Layout tab goes, Home opens")
+    page.keyboard.press("Control+Z")
+    check(grid() == start, "undo brings the table back")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_saved_deck_presents_on_its_own(browser):
     saved = OUTPUT / "contract-saved.html"
     check(saved.exists(), "run after the contract round-trip test")
@@ -2551,6 +2642,7 @@ TESTS = [
     test_phase3_done_when,
     test_insert_and_resize_table,
     test_table_cell_editing,
+    test_table_layout,
 ]
 
 

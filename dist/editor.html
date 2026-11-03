@@ -238,6 +238,9 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .color-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 4px; padding: 0 6px 6px; }
 .color-swatch { width: 18px; height: 18px; padding: 0; border: 1px solid rgba(0, 0, 0, 0.25); border-radius: 2px; cursor: pointer; }
 .color-swatch:hover { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Contextual tabs (Table > Layout) show only while they apply, in the accent colour as in PowerPoint. */
+.ribbon-tab.contextual { color: var(--accent); }
+.ribbon-tab[hidden] { display: none; }
 /* Insert > Table: the 10 x 10 grid picker (tablecontrols.js). */
 .table-grid-menu { min-width: 0; padding: 6px; }
 .table-grid-menu:focus { outline: none; }
@@ -395,6 +398,14 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
     pointer-events: none;                    /* clicks go through to the overlay's hit test */
 }
+/* Selected table cells (tablecontrols.js): one shaded rectangle over them. */
+.cell-block {
+    position: absolute;
+    background: rgba(0, 120, 212, 0.18);
+    outline: calc(1px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;
+}
+.cell-block[hidden] { display: none; }
 .selection-handle {
     position: absolute;
     width: calc(9px * var(--inverse-zoom));
@@ -857,6 +868,7 @@ App.start = function start() {
     App.ui.init();
     App.ribbon.init();
     App.textControls.init();
+    App.tableControls.init();
     App.findReplace.init();
     App.canvas.init();
     App.selection.init();
@@ -2547,6 +2559,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             p.appendChild(cell.ownerDocument.createElement('br'));
             cell.appendChild(p);
         }
+    };
+
+    /* Remove all the text of a container (selected table cells + Delete), leaving one empty line. */
+    App.text.clearText = function clearText(container) {
+        container.replaceChildren();
+        App.text.normalizeCell(container);
     };
 
     // ---------------------------------------------------------------
@@ -5892,6 +5910,245 @@ App.template.newDeckHtml = function newDeckHtml() {
         return row;
     };
 
+    // ---------------------------------------------------------------
+    // Blocks of cells; inserting, deleting, merging, splitting (Layout tab)
+    // ---------------------------------------------------------------
+    //
+    // These work on the grid of slots (gridOf): row and column numbers count
+    // slots, so a merged cell is at the row and column of its top-left slot.
+    // A block is { top, left, bottom, right }, inclusive.
+
+    /* Every cell with the slot it starts at and its spans: [{ cell, row, col, rowSpan, colSpan }] in reading order. */
+    App.tables.cellBoxes = function cellBoxes(table) {
+        const grid = App.tables.gridOf(table);
+        const boxes = new Map();
+        grid.cells.forEach((slots, r) => slots.forEach((cell, c) => {
+            if (!cell) {
+                return;
+            }
+            const box = boxes.get(cell);
+            if (!box) {
+                boxes.set(cell, { cell: cell, row: r, col: c, rowSpan: 1, colSpan: 1 });
+            } else {
+                box.rowSpan = Math.max(box.rowSpan, r - box.row + 1);
+                box.colSpan = Math.max(box.colSpan, c - box.col + 1);
+            }
+        }));
+        return Array.from(boxes.values());
+    };
+
+    function overlaps(box, block) {
+        return box.row <= block.bottom && box.row + box.rowSpan - 1 >= block.top &&
+            box.col <= block.right && box.col + box.colSpan - 1 >= block.left;
+    }
+
+    /*
+     * The block from slot `a` to slot `b` ({ row, col }), grown until no merged
+     * cell sticks out of it (as PowerPoint selects cells).
+     */
+    App.tables.blockAround = function blockAround(table, a, b) {
+        const block = { top: Math.min(a.row, b.row), left: Math.min(a.col, b.col),
+            bottom: Math.max(a.row, b.row), right: Math.max(a.col, b.col) };
+        const boxes = App.tables.cellBoxes(table);
+        let grown = true;
+        while (grown) {
+            grown = false;
+            boxes.filter((box) => overlaps(box, block)).forEach((box) => {
+                const edges = { top: box.row, left: box.col, bottom: box.row + box.rowSpan - 1, right: box.col + box.colSpan - 1 };
+                ['top', 'left'].forEach((side) => {
+                    if (edges[side] < block[side]) {
+                        block[side] = edges[side];
+                        grown = true;
+                    }
+                });
+                ['bottom', 'right'].forEach((side) => {
+                    if (edges[side] > block[side]) {
+                        block[side] = edges[side];
+                        grown = true;
+                    }
+                });
+            });
+        }
+        return block;
+    };
+
+    /* The block a single cell covers. */
+    App.tables.blockOf = function blockOf(cell) {
+        const box = App.tables.cellBoxes(cell.closest('table')).find((item) => item.cell === cell);
+        return { top: box.row, left: box.col, bottom: box.row + box.rowSpan - 1, right: box.col + box.colSpan - 1 };
+    };
+
+    function setSpan(cell, name, value) {
+        if (value > 1) {
+            cell.setAttribute(name, String(value));
+        } else {
+            cell.removeAttribute(name);
+        }
+    }
+
+    /* An empty cell with the look of `model` (fill, borders …) but none of its spans. */
+    function emptyCellLike(model, doc) {
+        const cell = model ? model.cloneNode(false) : doc.createElement('td');
+        cell.removeAttribute('rowspan');
+        cell.removeAttribute('colspan');
+        App.text.normalizeCell(cell);
+        return cell;
+    }
+
+    /*
+     * Put `cell` into row `rowIndex` so that it starts at slot column `col`:
+     * before the first cell that starts in that row further right. `boxes` are
+     * the cell boxes from before any change, so several cells can be placed in turn.
+     */
+    function placeCell(table, boxes, rowIndex, col, cell) {
+        const after = boxes.filter((box) => box.row === rowIndex && box.col > col && box.cell.parentElement === table.rows[rowIndex])
+            .sort((x, y) => x.col - y.col)[0];
+        table.rows[rowIndex].insertBefore(cell, after ? after.cell : null);
+    }
+
+    /*
+     * Insert `count` empty rows before slot row `at` (at = the number of rows: at
+     * the end). Each new row has the height of row `model` and its cells' look.
+     * A cell merged down across the place where the rows go gets taller instead.
+     */
+    App.tables.insertRows = function insertRows(table, at, count, model) {
+        const doc = table.ownerDocument;
+        const grid = App.tables.gridOf(table);
+        const across = new Set();
+        const created = [];
+        for (let k = 0; k < count; k++) {
+            const row = doc.createElement('tr');
+            if (table.rows[model].style.height) {
+                row.style.setProperty('height', table.rows[model].style.height);
+            }
+            for (let c = 0; c < grid.cols; c++) {
+                const spanning = at > 0 && at < grid.rows && grid.cells[at - 1][c] && grid.cells[at - 1][c] === grid.cells[at][c];
+                if (spanning) {
+                    across.add(grid.cells[at][c]);
+                } else {
+                    row.appendChild(emptyCellLike(grid.cells[model][c], doc));
+                }
+            }
+            created.push(row);
+        }
+        const before = table.rows[at] || null;
+        created.forEach((row) => (before ? before.parentElement.insertBefore(row, before) : table.tBodies[0].appendChild(row)));
+        across.forEach((cell) => setSpan(cell, 'rowspan', cell.rowSpan + count));
+        return created;
+    };
+
+    /*
+     * Insert `count` empty columns before slot column `at`, each as wide as
+     * column `model` and with its cells' look. A cell merged across the place
+     * where the columns go gets wider instead. The table gets wider.
+     */
+    App.tables.insertColumns = function insertColumns(table, at, count, model) {
+        const doc = table.ownerDocument;
+        const grid = App.tables.gridOf(table);
+        const boxes = App.tables.cellBoxes(table);
+        const cols = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+        if (cols.length > 0) {
+            for (let k = 0; k < count; k++) {
+                const col = doc.createElement('col');
+                if (cols[model] && cols[model].style.width) {
+                    col.style.setProperty('width', cols[model].style.width);
+                }
+                cols[0].parentElement.insertBefore(col, cols[at] || null);
+            }
+        }
+        const across = new Set();
+        for (let r = 0; r < grid.rows; r++) {
+            const spanning = at > 0 && at < grid.cols && grid.cells[r][at - 1] && grid.cells[r][at - 1] === grid.cells[r][at];
+            if (spanning) {
+                across.add(grid.cells[r][at]);
+                continue;
+            }
+            for (let k = 0; k < count; k++) {
+                placeCell(table, boxes, r, at - 0.5, emptyCellLike(grid.cells[r][model], doc));
+            }
+        }
+        across.forEach((cell) => setSpan(cell, 'colspan', cell.colSpan + count));
+    };
+
+    /*
+     * Delete slot rows `top` … `bottom`. A merged cell reaching into them from
+     * above gets shorter; one that starts in them and goes on below moves down
+     * to the first row left under them.
+     */
+    App.tables.deleteRows = function deleteRows(table, top, bottom) {
+        const boxes = App.tables.cellBoxes(table);
+        boxes.forEach((box) => {
+            const end = box.row + box.rowSpan - 1;
+            const overlap = Math.min(end, bottom) - Math.max(box.row, top) + 1;
+            if (overlap <= 0 || (box.row >= top && end <= bottom)) {
+                return;   // untouched, or gone with its row
+            }
+            setSpan(box.cell, 'rowspan', box.rowSpan - overlap);
+            if (box.row >= top) {
+                placeCell(table, boxes, bottom + 1, box.col, box.cell);
+            }
+        });
+        for (let r = bottom; r >= top; r--) {
+            table.rows[r].remove();
+        }
+    };
+
+    /* Delete slot columns `left` … `right`; a cell merged across them gets narrower. The table gets narrower. */
+    App.tables.deleteColumns = function deleteColumns(table, left, right) {
+        App.tables.cellBoxes(table).forEach((box) => {
+            const end = box.col + box.colSpan - 1;
+            const overlap = Math.min(end, right) - Math.max(box.col, left) + 1;
+            if (overlap <= 0) {
+                return;
+            }
+            if (box.col >= left && end <= right) {
+                box.cell.remove();
+            } else {
+                setSpan(box.cell, 'colspan', box.colSpan - overlap);
+            }
+        });
+        const cols = Array.from(table.querySelectorAll(':scope > colgroup > col'));
+        cols.slice(left, right + 1).forEach((col) => col.remove());
+    };
+
+    /*
+     * Merge a block into its top-left cell, as PowerPoint does: the lines of the
+     * other cells (empty ones add nothing) follow in reading order. Returns the cell.
+     */
+    App.tables.mergeCells = function mergeCells(table, block) {
+        const inside = App.tables.cellBoxes(table).filter((box) => overlaps(box, block));
+        const first = inside[0].cell;
+        const hasText = (cell) => cell.textContent.trim() !== '';
+        if (!hasText(first)) {
+            first.replaceChildren();
+        }
+        inside.slice(1).forEach((box) => {
+            if (hasText(box.cell)) {
+                first.append(...Array.from(box.cell.childNodes));
+            }
+            box.cell.remove();
+        });
+        setSpan(first, 'rowspan', block.bottom - block.top + 1);
+        setSpan(first, 'colspan', block.right - block.left + 1);
+        App.text.normalizeCell(first);
+        return first;
+    };
+
+    /* Split a merged cell back into one cell per slot; its text stays in the first, the others are empty with its look. */
+    App.tables.splitCell = function splitCell(table, cell) {
+        const boxes = App.tables.cellBoxes(table);
+        const box = boxes.find((item) => item.cell === cell);
+        for (let r = box.row; r < box.row + box.rowSpan; r++) {
+            for (let c = box.col; c < box.col + box.colSpan; c++) {
+                if (r !== box.row || c !== box.col) {
+                    placeCell(table, boxes, r, c, emptyCellLike(cell, table.ownerDocument));
+                }
+            }
+        }
+        cell.removeAttribute('rowspan');
+        cell.removeAttribute('colspan');
+    };
+
     /* The cell of a table element under slide point (x, y), or null (the slide must be shown). */
     App.tables.cellAt = function cellAt(element, x, y) {
         const hit = element.ownerDocument.elementFromPoint(x, y);
@@ -7841,6 +8098,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         check: '<path d="M4 10.5l4 4 8-9"/>',
         formatPainter: '<rect x="3" y="2.5" width="12" height="5" rx="1"/><path d="M15 5h2v4.5h-7.5V12"/><rect x="8" y="12" width="3" height="5.5" rx="0.5"/>',
         table: '<rect x="2.5" y="3.5" width="15" height="13"/><path d="M2.5 7.5h15M2.5 12h15M7.5 3.5v13M12.5 3.5v13"/>',
+        insertRowAbove: '<rect x="3" y="9.5" width="14" height="8"/><path d="M3 13.5h14M10 2v5.5M7.25 4.75h5.5"/>',
+        insertRowBelow: '<rect x="3" y="2.5" width="14" height="8"/><path d="M3 6.5h14M10 12.5V18M7.25 15.25h5.5"/>',
+        insertColumnLeft: '<rect x="9.5" y="3" width="8" height="14"/><path d="M13.5 3v14M2 10h5.5M4.75 7.25v5.5"/>',
+        insertColumnRight: '<rect x="2.5" y="3" width="8" height="14"/><path d="M6.5 3v14M12.5 10H18M15.25 7.25v5.5"/>',
+        deleteRows: '<rect x="3" y="2.5" width="14" height="7"/><path d="M3 6h14M7.5 12l5 5.5M12.5 12l-5 5.5"/>',
+        deleteColumns: '<rect x="2.5" y="3" width="7" height="14"/><path d="M6 3v14M12 7.5l5.5 5M17.5 7.5l-5.5 5"/>',
+        deleteTable: '<rect x="2.5" y="2.5" width="11" height="10"/><path d="M2.5 6h11M8 2.5v10M12 12.5l5 5M17 12.5l-5 5"/>',
+        mergeCells: '<rect x="2.5" y="4" width="15" height="12"/><path d="M5 10h10M12.5 7.5L15 10l-2.5 2.5M7.5 7.5L5 10l2.5 2.5"/>',
+        splitCells: '<rect x="2.5" y="4" width="15" height="12"/><path d="M10 4v12M8 10H4.5M6.5 8L4.5 10l2 2M12 10h3.5M13.5 8l2 2-2 2"/>',
         textBox: '<rect x="2.5" y="4" width="15" height="12" stroke-dasharray="2 1.5"/><path d="M6.5 7.5h7M10 7.5v6"/>',
         close: '<path d="M5 5l10 10M15 5L5 15"/>',
         bold: '<path stroke-width="2" d="M6 3.5h4.8a3 3 0 0 1 0 6H6zM6 9.5h5.5a3.5 3.5 0 0 1 0 7H6z"/>',
@@ -8631,8 +8897,9 @@ App.template.newDeckHtml = function newDeckHtml() {
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
- * Double-click on a text box starts editing it (text.js); a click into a
- * table (no drag) types in the cell under the mouse. Insert mode
+ * Double-click on a text box starts editing it (text.js). A press inside a
+ * table types in the cell under the mouse, and a drag from there selects cells
+ * (tablecontrols.js); a table moves by its edge, as in PowerPoint. Insert mode
  * (armInsert): the next click or drag on the slide gives a spot to a callback,
  * e.g. Insert > Text box.
  *
@@ -8751,6 +9018,21 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom };
     }
 
+    App.selection.slidePoint = toSlidePoint;
+
+    // A table is moved by its edge (this many screen px); a press further in is in its cells, as in PowerPoint.
+    const TABLE_EDGE = 8;
+
+    function inTableCells(element, point) {
+        if (!element || element.getAttribute('data-type') !== 'table') {
+            return false;
+        }
+        const rect = App.transform.readRect(element);
+        const edge = TABLE_EDGE / App.canvas.getZoom();
+        return point.x > rect.left + edge && point.x < rect.left + rect.width - edge &&
+            point.y > rect.top + edge && point.y < rect.top + rect.height - edge;
+    }
+
     /* The element under slide point (x, y), or null. */
     App.selection.elementAt = function elementAt(x, y) {
         const slide = App.deck.getCurrentSlide();
@@ -8788,7 +9070,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     }
 
-    /* A click into a table types in the cell under it, as in PowerPoint (a drag still moves the table). */
+    /* Type in the table cell under `point` (a double-click into a table). */
     function editCellAt(element, point) {
         const cell = App.tables.cellAt(element, point.x, point.y);
         if (cell) {
@@ -8802,7 +9084,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         const point = toSlidePoint(event);
-        overlay.style.cursor = App.selection.elementAt(point.x, point.y) ? 'move' : '';
+        const element = App.selection.elementAt(point.x, point.y);
+        overlay.style.cursor = inTableCells(element, point) ? 'text' : element ? 'move' : '';
     }
 
     function onPointerDown(event) {
@@ -8832,6 +9115,13 @@ App.template.newDeckHtml = function newDeckHtml() {
                 return;
             }
             App.text.stopPainter();
+        }
+        // In a table's cells: a click types in the cell, a drag selects cells (tablecontrols.js).
+        const cell = event.button === 0 && inTableCells(element, point) ? App.tables.cellAt(element, point.x, point.y) : null;
+        if (cell) {
+            App.selection.select(element);
+            App.tableControls.pressCells(element, cell, event, point);
+            return;
         }
         App.selection.select(element);
         if (element && event.button === 0) {
@@ -8950,9 +9240,6 @@ App.template.newDeckHtml = function newDeckHtml() {
             overlay.removeEventListener('pointercancel', onCancel);
             window.removeEventListener('keydown', onKey, true);
             if (!started) {
-                if (kind === 'move' && !cancelled && element.getAttribute('data-type') === 'table') {
-                    editCellAt(element, start);
-                }
                 return;
             }
             dragging = false;
@@ -11926,6 +12213,15 @@ App.template.newDeckHtml = function newDeckHtml() {
                 App.ui.setStatus('Click on the slide to place the text box, or drag to set its width (Esc cancels)');
             },
         });
+        // Table > Layout (tablecontrols.js): the selected cells, or the cell being typed in.
+        ['insertRowAbove', 'insertRowBelow', 'insertColumnLeft', 'insertColumnRight', 'deleteRows', 'deleteColumns',
+         'deleteTable', 'mergeCells', 'splitCells'].forEach((name) => {
+            App.commands.define(name, {
+                label: App.tableControls.layoutLabel(name), keepsEdit: true,
+                isEnabled: () => App.tableControls.canLayout(name),
+                run: () => App.tableControls.layout(name),
+            });
+        });
         // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
         App.commands.define('insertTable', {
             label: 'Table', isEnabled: hasDeck,
@@ -12477,13 +12773,24 @@ App.template.newDeckHtml = function newDeckHtml() {
 <script>
 // ---- js/tablecontrols.js ----
 /*
- * tablecontrols.js - the ribbon's table controls (SPEC Phase 4).
+ * tablecontrols.js - the table controls of the editor (SPEC Phase 4).
  *
  * Insert > Table opens a 10 x 10 grid, as in PowerPoint: moving the mouse over
  * it picks a size ("4 × 3 table": columns first), a click inserts it. The arrow
  * keys move the pick and Enter inserts it; Esc or a click elsewhere closes it.
  *
- * Talks to: commands.js (insertTable), ribbon.js (places the control).
+ * Selected cells: dragging from one cell to another (or Shift+click while
+ * typing in a cell) selects a block of cells, drawn on the overlay (nothing is
+ * written into the deck). Esc lets go of it; Delete empties its cells.
+ *
+ * The Layout tab (shown while a table is selected) works on the selected cells,
+ * or the cell being typed in: insert rows / columns, delete rows / columns /
+ * the table, merge, split. Each is one undo step; tables.js changes the grid.
+ *
+ * Talks to: tables.js (the grid), text.js (the cell being typed in, emptying
+ * cells), selection.js (the mouse press that starts in a table), commands.js
+ * (insertTable and the Layout commands), ribbon.js (places the controls),
+ * history.js, deck.js.
  */
 
 (function () {
@@ -12599,6 +12906,352 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* The control named in the ribbon's layout, or null when it is not a table control. */
     App.tableControls.create = function create(name) {
         return name === 'insertTable' ? createInsertTable() : null;
+    };
+
+    // ---------------------------------------------------------------
+    // Selected cells
+    // ---------------------------------------------------------------
+
+    let block = null;   // { element, slideId, anchor: { row, col }, focus: { row, col } } while a block of cells is selected
+    let press = null;   // { element, cell } while the mouse button is down in a table
+    let blockBox = null;   // the shaded rectangle on the overlay
+
+    function slotOf(cell) {
+        const cells = App.tables.blockOf(cell);
+        return { row: cells.top, col: cells.left };
+    }
+
+    function tableOf(element) {
+        return element.querySelector(':scope > table');
+    }
+
+    function currentBlock() {
+        return block && block.element.isConnected
+            ? App.tables.blockAround(tableOf(block.element), block.anchor, block.focus) : null;
+    }
+
+    /* Shade the selected cells: one rectangle around them, on the overlay (slide px, like the selection box). */
+    function drawBlock() {
+        const cells = currentBlock();
+        if (!cells) {
+            if (blockBox) {
+                blockBox.hidden = true;
+            }
+            return;
+        }
+        if (!blockBox) {
+            blockBox = el('div', { class: 'cell-block' });
+            document.getElementById('overlay').appendChild(blockBox);
+        }
+        const rects = App.tables.cellBoxes(tableOf(block.element))
+            .filter((box) => box.row >= cells.top && box.row <= cells.bottom && box.col >= cells.left && box.col <= cells.right)
+            .map((box) => box.cell.getBoundingClientRect());   // the deck shows the slide at 1:1: slide px
+        const left = Math.min(...rects.map((r) => r.left));
+        const top = Math.min(...rects.map((r) => r.top));
+        App.transform.writeRect(blockBox, { left: left, top: top,
+            width: Math.max(...rects.map((r) => r.right)) - left, height: Math.max(...rects.map((r) => r.bottom)) - top });
+        blockBox.hidden = false;
+    }
+
+    function selectCells(element, from, to) {
+        block = { element: element, slideId: element.closest('section.slide').getAttribute('data-slide-id'),
+            anchor: slotOf(from), focus: slotOf(to) };
+        drawBlock();
+        App.events.emit('table-cells-changed');
+    }
+
+    function clearBlock() {
+        if (block) {
+            block = null;
+            drawBlock();
+            App.events.emit('table-cells-changed');
+        }
+    }
+
+    function startPress(element, cell) {
+        clearBlock();
+        press = { element: element, cell: cell };
+    }
+
+    /*
+     * Undo / redo rebuilt the slide: the same cells stay selected in the table
+     * found again by its id, if they are still inside it (else they are let go).
+     */
+    function keepBlockAfterChange() {
+        if (!block || block.element.isConnected) {
+            drawBlock();
+            return;
+        }
+        const doc = App.deck.getDocument();
+        const found = doc && doc.querySelector('[data-id="' + CSS.escape(block.element.getAttribute('data-id')) + '"]');
+        const grid = found && tableOf(found) ? App.tables.gridOf(tableOf(found)) : null;
+        const inside = (slot) => grid && slot.row < grid.rows && slot.col < grid.cols;
+        if (inside(block.anchor) && inside(block.focus)) {
+            block.element = found;
+            drawBlock();
+        } else {
+            clearBlock();
+        }
+    }
+
+    /*
+     * A press in a table's cells while nothing is being typed (selection.js hands
+     * it over): the overlay keeps the mouse until it is released. A drag into
+     * another cell selects cells; a release in the same cell types in it, with
+     * the cursor where the press was (as a click into a table in PowerPoint).
+     */
+    App.tableControls.pressCells = function pressCells(element, cell, downEvent, point) {
+        const overlay = document.getElementById('overlay');
+        startPress(element, cell);
+        overlay.setPointerCapture(downEvent.pointerId);
+        const onMove = (event) => followPress(App.selection.slidePoint(event), event.buttons);
+        const finish = (event) => {
+            overlay.removeEventListener('pointermove', onMove);
+            overlay.removeEventListener('pointerup', finish);
+            overlay.removeEventListener('pointercancel', finish);
+            press = null;
+            if (!block && event.type === 'pointerup') {
+                App.text.enterEdit(cell, { point: point });
+            }
+        };
+        overlay.addEventListener('pointermove', onMove);
+        overlay.addEventListener('pointerup', finish);
+        overlay.addEventListener('pointercancel', finish);
+    };
+
+    function followPress(point, buttons) {
+        if (!press || !(buttons & 1)) {
+            return;
+        }
+        const cell = App.tables.cellAt(press.element, point.x, point.y);
+        if (!cell || (!block && cell === press.cell)) {
+            return;
+        }
+        if (!block) {
+            App.text.exitEdit({ select: false });   // from one cell into another: cells, not text
+        }
+        selectCells(press.element, press.cell, cell);
+        App.deck.getDocument().getSelection().removeAllRanges();
+    }
+
+    function endPress() {
+        press = null;
+    }
+
+    /* Presses inside the deck happen while a cell is being typed in (the overlay lets them through). */
+    function onDeckPointerDown(event) {
+        const cell = event.target.closest ? event.target.closest(App.tables.CELL_SELECTOR) : null;
+        const typing = App.text.editingElement();
+        if (!cell || event.button !== 0) {
+            return;
+        }
+        const element = cell.closest('.el');
+        if (event.shiftKey && typing && typing.tagName === 'TD' && typing.closest('.el') === element && typing !== cell) {
+            // Shift+click: the cells from the one being typed in to this one.
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            App.text.exitEdit({ select: false });
+            selectCells(element, typing, cell);
+            return;
+        }
+        startPress(element, cell);
+    }
+
+    /* While cells are selected: Esc lets go of them (the table stays selected), Delete / Backspace empties them. */
+    function onKeyDown(event) {
+        if (!currentBlock()) {
+            return;
+        }
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            clearBlock();
+        } else if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();
+            event.stopPropagation();
+            clearCells();
+        }
+    }
+
+    function selectedCellsOf(element, cells) {
+        return App.tables.cellBoxes(tableOf(element))
+            .filter((box) => box.row >= cells.top && box.row <= cells.bottom && box.col >= cells.left && box.col <= cells.right)
+            .map((box) => box.cell);
+    }
+
+    function clearCells() {
+        const kept = block;
+        const cells = selectedCellsOf(kept.element, currentBlock());
+        App.history.change('Clear cells', slideScope(kept.element), () => {
+            cells.forEach((cell) => App.text.clearText(cell));
+            App.tables.fitTable(kept.element);
+        });
+        block = kept;   // the cells stay selected, as in PowerPoint (the change let go of them)
+        drawBlock();
+        App.events.emit('table-cells-changed');
+    }
+
+    function slideScope(element) {
+        return { slideId: element.closest('section.slide').getAttribute('data-slide-id') };
+    }
+
+    // ---------------------------------------------------------------
+    // The Layout tab
+    // ---------------------------------------------------------------
+
+    /* Whether a table is the selected element (the Layout tab shows). */
+    App.tableControls.isTableSelected = function isTableSelected() {
+        const element = App.selection.getElement();
+        return !!element && element.getAttribute('data-type') === 'table';
+    };
+
+    /* What the Layout buttons work on: the selected cells, or the cell being typed in. */
+    function layoutTarget() {
+        const cells = currentBlock();
+        if (cells) {
+            return { element: block.element, table: tableOf(block.element), cells: cells, cell: null };
+        }
+        const typing = App.text.editingElement();
+        if (typing && typing.tagName === 'TD') {
+            const element = typing.closest('.el');
+            return { element: element, table: tableOf(element), cells: App.tables.blockOf(typing), cell: typing };
+        }
+        return null;
+    }
+
+    const rowCount = (cells) => cells.bottom - cells.top + 1;
+    const colCount = (cells) => cells.right - cells.left + 1;
+
+    /* The cell covering slot (row, col), moved inside the table if the table is now smaller. */
+    function cellAtSlot(table, row, col) {
+        const grid = App.tables.gridOf(table);
+        const cells = grid.cells[Math.min(row, grid.rows - 1)];
+        return cells[Math.min(col, grid.cols - 1)];
+    }
+
+    function mergedIn(target) {
+        return selectedCellsOf(target.element, target.cells).filter((cell) => cell.rowSpan > 1 || cell.colSpan > 1);
+    }
+
+    /*
+     * The Layout actions: label, whether it can run on a target, and run(target),
+     * which changes the table and returns the cell to type in afterwards (or null).
+     */
+    const LAYOUT = {
+        insertRowAbove: { label: 'Insert rows above', run: (t) => { App.tables.insertRows(t.table, t.cells.top, rowCount(t.cells), t.cells.top); } },
+        insertRowBelow: { label: 'Insert rows below',
+            run: (t) => { App.tables.insertRows(t.table, t.cells.bottom + 1, rowCount(t.cells), t.cells.bottom); } },
+        insertColumnLeft: { label: 'Insert columns left',
+            run: (t) => { App.tables.insertColumns(t.table, t.cells.left, colCount(t.cells), t.cells.left); } },
+        insertColumnRight: { label: 'Insert columns right',
+            run: (t) => { App.tables.insertColumns(t.table, t.cells.right + 1, colCount(t.cells), t.cells.right); } },
+        // After a delete, typing goes on in the cell that is now where the deleted ones were.
+        deleteRows: { label: 'Delete rows', run: (t) => {
+            if (rowCount(t.cells) === t.table.rows.length) {
+                t.element.remove();   // every row: the table goes
+                return null;
+            }
+            App.tables.deleteRows(t.table, t.cells.top, t.cells.bottom);
+            return cellAtSlot(t.table, t.cells.top, t.cells.left);
+        } },
+        deleteColumns: { label: 'Delete columns', run: (t) => {
+            if (colCount(t.cells) === App.tables.gridOf(t.table).cols) {
+                t.element.remove();
+                return null;
+            }
+            App.tables.deleteColumns(t.table, t.cells.left, t.cells.right);
+            return cellAtSlot(t.table, t.cells.top, t.cells.left);
+        } },
+        mergeCells: { label: 'Merge cells', canRun: (t) => selectedCellsOf(t.element, t.cells).length > 1,
+            run: (t) => App.tables.mergeCells(t.table, t.cells) },
+        splitCells: { label: 'Split cells', canRun: (t) => mergedIn(t).length > 0, run: (t) => {
+            const merged = mergedIn(t);
+            merged.forEach((cell) => App.tables.splitCell(t.table, cell));
+            return merged[0];
+        } },
+    };
+
+    App.tableControls.layoutLabel = function layoutLabel(action) {
+        return action === 'deleteTable' ? 'Delete table' : LAYOUT[action].label;
+    };
+
+    App.tableControls.canLayout = function canLayout(action) {
+        if (action === 'deleteTable') {
+            return App.tableControls.isTableSelected();
+        }
+        const target = layoutTarget();
+        return !!target && (!LAYOUT[action].canRun || LAYOUT[action].canRun(target));
+    };
+
+    /* The columns decide the table's width (after inserting or deleting columns). */
+    function widthFromColumns(element) {
+        const widths = Array.from(tableOf(element).querySelectorAll(':scope > colgroup > col'), (col) => parseFloat(col.style.width) || 0);
+        const total = widths.reduce((a, b) => a + b, 0);
+        if (total > 0) {
+            element.style.setProperty('width', Math.round(total * 100) / 100 + 'px');
+        }
+    }
+
+    /* Run a Layout action as one undo step; typing goes on in the same cell if it is still there. */
+    App.tableControls.layout = function layout(action) {
+        if (action === 'deleteTable') {
+            App.text.exitEdit({ select: false });
+            clearBlock();
+            App.elements.remove('Delete table');
+            return;
+        }
+        const target = layoutTarget();
+        if (!App.tableControls.canLayout(action)) {
+            return;
+        }
+        App.text.exitEdit({ select: false });
+        clearBlock();
+        let next = null;
+        App.history.change(LAYOUT[action].label, slideScope(target.element), () => {
+            next = LAYOUT[action].run(target) || null;
+            if (target.element.isConnected) {
+                widthFromColumns(target.element);
+                App.tables.fitTable(target.element);
+            }
+        });
+        if (!target.element.isConnected) {
+            App.selection.clear();
+            return;
+        }
+        App.selection.select(target.element);
+        const cell = next || (target.cell && target.cell.isConnected ? target.cell : null);
+        if (cell) {
+            App.text.enterEdit(cell, { caret: 'end' });
+        }
+    };
+
+    App.tableControls.init = function init() {
+        App.events.on('deck-loaded', () => {
+            block = null;
+            press = null;
+            drawBlock();
+            const doc = App.deck.getDocument();
+            // Before text.js's own listener (added when typing starts): Shift+click must win over "edit that cell".
+            doc.addEventListener('pointerdown', onDeckPointerDown, true);
+            doc.addEventListener('pointermove', (event) => followPress({ x: event.clientX, y: event.clientY }, event.buttons));
+            doc.addEventListener('pointerup', endPress);
+        });
+        window.addEventListener('keydown', onKeyDown, true);
+        App.events.on('selection-changed', clearBlock);
+        // deck.js also says "slide-changed" after an undo on the same slide: only a real slide change counts.
+        App.events.on('slide-changed', () => {
+            const slide = App.deck.getCurrentSlide();
+            if (block && (!slide || slide.getAttribute('data-slide-id') !== block.slideId)) {
+                clearBlock();
+            }
+        });
+        App.events.on('history-changed', keepBlockAfterChange);
+        App.events.on('text-edit-changed', (info) => {
+            if (info.editing) {
+                clearBlock();
+            }
+        });
+        App.events.on('zoom-changed', drawBlock);
     };
 
     App.tableControls.refresh = function refresh() {
@@ -13031,6 +13684,19 @@ App.template.newDeckHtml = function newDeckHtml() {
                 'slide (or drag to set its width). Images, shapes and charts arrive in Phases 5 and 6.',
         },
         {
+            // Shown only while a table is selected (PowerPoint's Table Layout tab).
+            id: 'table-layout', label: 'Layout', contextual: () => App.tableControls.isTableSelected(),
+            groups: [
+                { label: 'Delete', commands: [['deleteRows', 'deleteRows'], ['deleteColumns', 'deleteColumns'],
+                    ['deleteTable', 'deleteTable']] },
+                { label: 'Rows & Columns', commands: [['insertRowAbove', 'insertRowAbove'], ['insertRowBelow', 'insertRowBelow'],
+                    ['insertColumnLeft', 'insertColumnLeft'], ['insertColumnRight', 'insertColumnRight']] },
+                { label: 'Merge', commands: [['mergeCells', 'mergeCells'], ['splitCells', 'splitCells']] },
+            ],
+            note: 'Click in a cell, or drag across cells to select several (Shift+click too). Delete empties the selected cells. ' +
+                'Drag a table by its edge to move it.',
+        },
+        {
             id: 'arrange', label: 'Arrange',
             groups: [
                 {
@@ -13189,7 +13855,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         TABS.forEach((tab) => {
             // Switching tabs is not an action: typing in a text box goes on (data-keep-edit, focus kept).
             tabRow.appendChild(el('button', {
-                type: 'button', class: 'ribbon-tab', role: 'tab', 'data-tab': tab.id, 'data-keep-edit': '',
+                type: 'button', class: 'ribbon-tab' + (tab.contextual ? ' contextual' : ''), role: 'tab',
+                'data-tab': tab.id, 'data-keep-edit': '', hidden: !!tab.contextual,
                 onmousedown: (event) => event.preventDefault(),
                 onclick: () => selectTab(tab.id),
             }, [tab.label]));
@@ -13207,9 +13874,21 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
-         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed']
+         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
+
+    /* Contextual tabs (Layout) show only while they apply; if the one open goes away, Home opens. */
+    function showContextualTabs() {
+        TABS.filter((tab) => tab.contextual).forEach((tab) => {
+            const tabButton = document.querySelector('.ribbon-tab[data-tab="' + tab.id + '"]');
+            const shown = tab.contextual();
+            tabButton.hidden = !shown;
+            if (!shown && tabButton.classList.contains('selected')) {
+                selectTab('home');
+            }
+        });
+    }
 
     App.ribbon.showDefaultTab = function showDefaultTab() {
         selectTab('home');
@@ -13218,6 +13897,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* Grey out buttons whose command cannot run right now (e.g. Undo with nothing to undo);
        toggle buttons (Bullets …) show whether they are on. */
     App.ribbon.refresh = function refresh() {
+        showContextualTabs();
         buttons.forEach(({ button, command }) => {
             button.disabled = !App.commands.isEnabled(command);
             const checked = App.commands.isChecked(command);

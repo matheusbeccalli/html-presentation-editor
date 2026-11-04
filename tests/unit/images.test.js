@@ -120,3 +120,25 @@ test('images: the picture element follows the deck contract', () => {
     assertEqual(element.outerHTML, '<img class="el" data-type="image" data-id="e9" alt="" ' +
         'style="left: 440px; top: 260px; width: 400px; height: 200px;" src="data:image/png;base64,AAAA">');
 });
+
+test('images: a drag of picture files puts them on the slide; an .html file among them opens it as a deck', () => {
+    const png = { kind: 'file', type: 'image/png' };
+    assert(App.images.isPictureDrop([png]), 'one picture');
+    assert(App.images.isPictureDrop([{ kind: 'string', type: 'text/uri-list' }, png, { kind: 'file', type: 'image/jpeg' }]),
+        'pictures dragged from a web page bring their link too');
+    assert(App.images.isPictureDrop([png, { kind: 'file', type: 'application/pdf' }]), 'a PDF among them is named, not opened');
+    assert(!App.images.isPictureDrop([png, { kind: 'file', type: 'text/html' }]), 'an .html deck among them');
+    assert(!App.images.isPictureDrop([{ kind: 'file', type: 'text/html' }]), 'a deck');
+    assert(!App.images.isPictureDrop([{ kind: 'string', type: 'text/plain' }]), 'text dragged: no files');
+    assert(!App.images.isPictureDrop([]), 'nothing');
+});
+
+test('images: the picture files of a paste or a drop (Excel puts a picture of the cells there too)', () => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['x'], 'image.png', { type: 'image/png' }));
+    transfer.items.add(new File(['x'], 'notes.txt', { type: 'text/plain' }));
+    transfer.items.add('a b', 'text/plain');
+    assertEqual(App.images.picturesIn(transfer).map((file) => file.name), ['image.png']);
+    assertEqual(App.images.picturesIn(new DataTransfer()), []);
+    assertEqual(App.images.picturesIn(null), []);
+});

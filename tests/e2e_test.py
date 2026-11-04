@@ -2068,6 +2068,102 @@ def test_insert_picture(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def put_picture_on_clipboard(page, kind, width, height, html=None, text=None):
+    """A picture on the system clipboard, as Win+Shift+S puts a screenshot there; html / text too, as Excel copies cells."""
+    page.evaluate("""async ([draw, html, text]) => {
+        const blob = new Blob([Uint8Array.from(atob(draw), (c) => c.charCodeAt(0))], { type: 'image/png' });
+        const item = { 'image/png': blob };
+        if (html !== null) item['text/html'] = new Blob([html], { type: 'text/html' });
+        if (text !== null) item['text/plain'] = new Blob([text], { type: 'text/plain' });
+        await navigator.clipboard.write([new ClipboardItem(item)]);
+    }""", [page.evaluate(DRAW_PICTURE, [kind, width, height]), html, text])
+
+
+DROP_FILES = """([files, type]) => {
+    const transfer = new DataTransfer();
+    files.forEach(([name, mime, base64]) => {
+        const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+        transfer.items.add(new File([bytes], name, { type: mime }));
+    });
+    const target = App.deck.getDocument().defaultView;
+    target.dispatchEvent(new DragEvent(type, { dataTransfer: transfer, cancelable: true }));
+}"""
+
+
+def test_paste_and_drop_pictures(browser):
+    """Ctrl+V of a screenshot, a picture dropped on the slide; Excel's cells stay a table (their picture is ignored);
+    a picture pasted while typing becomes its own picture; our own newer copy still wins."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    editor.open(CONTRACT)
+    page = editor.page
+    selected = lambda: page.evaluate("App.selection.selectedId()")  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    page.evaluate("App.deck.goTo(4)")
+    page.mouse.click(*slide_to_screen(page, 640, 500))   # empty slide space
+
+    # A screenshot (Win+Shift+S): Ctrl+V puts it in the middle of the slide, one undo step.
+    put_picture_on_clipboard(page, "logo", 300, 100)
+    page.keyboard.press("Control+v")
+    wait_until(page, "App.history.undoLabel() === 'Paste picture'")
+    shot = page.evaluate(PICTURE_INFO, selected())
+    check(shot["type"] == "image" and shot["src"] == "data:image/png;base64," and
+          shot["rect"] == {"left": 490, "top": 310, "width": 300, "height": 100}, f"the screenshot, centred: {shot}")
+
+    # Our own copy, newer than the screenshot, wins; a screenshot taken after it wins again.
+    page.keyboard.press("Control+c")
+    page.keyboard.press("Control+v")
+    check(label() == "Paste" and page.evaluate(PICTURE_INFO, selected())["rect"]["left"] != 490, "our copy pasted")
+    put_picture_on_clipboard(page, "logo", 200, 100)
+    page.keyboard.press("Control+v")
+    wait_until(page, "App.history.undoLabel() === 'Paste picture'")
+    check(page.evaluate(PICTURE_INFO, selected())["natural"] == [200, 100], "the newer screenshot")
+
+    # Excel copies cells as a table and as a picture of them: the table wins.
+    comps = clipboard_fixture("excel-comps")
+    page.keyboard.press("Escape")
+    put_picture_on_clipboard(page, "logo", 400, 150, comps["text/html"], comps["text/plain"])
+    page.keyboard.press("Control+v")
+    check(label() == "Paste table", f"Excel's cells pasted as a table: {label()}")
+    page.keyboard.press("Control+z")
+
+    # A picture pasted while typing becomes its own picture; the text is untouched.
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e15\"]'))")
+    before = page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e15\"]').innerHTML")
+    page.keyboard.press("Enter")
+    check(page.evaluate("App.text.isEditing()"), "typing in e15")
+    pictures = "App.deck.getCurrentSlide().querySelectorAll('img').length"
+    count = page.evaluate(pictures)
+    put_picture_on_clipboard(page, "logo", 300, 100)
+    page.keyboard.press("Control+v")
+    wait_until(page, f"{pictures} === {count + 1}")
+    check(not page.evaluate("App.text.isEditing()") and page.evaluate(PICTURE_INFO, selected())["type"] == "image",
+          "typing ended, the picture is selected")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e15\"]').innerHTML") == before, "the text is as it was")
+
+    # Dropped on the slide: the drop zone says so; a file that is not a picture is named.
+    photo = ["photo.png", "image/png", page.evaluate(DRAW_PICTURE, ["noise", 3000, 2000])]
+    notes = ["notes.pdf", "application/pdf", base64.b64encode(b"%PDF-1.4 fake").decode()]
+    page.evaluate(DROP_FILES, [[photo, notes], "dragover"])
+    check(page.text_content("#drop-zone") == "Drop to put the picture on this slide", page.text_content("#drop-zone"))
+    page.screenshot(path=str(OUTPUT / "51-drop-picture.png"))
+    page.evaluate(DROP_FILES, [[photo, notes], "drop"])
+    wait_until(page, "App.history.undoLabel() === 'Insert picture'")
+    dropped = page.evaluate(PICTURE_INFO, selected())
+    check(dropped["src"] == "data:image/jpeg;base64" and dropped["natural"] == [1920, 1280], f"compressed: {dropped}")
+    check(page.is_hidden("#drop-zone"), "the drop zone hidden again")
+    check("notes.pdf" in page.text_content("#status-message"), f"the PDF named: {page.text_content('#status-message')}")
+    page.screenshot(path=str(OUTPUT / "52-pictures-pasted-and-dropped.png"))
+
+    # An .html file dragged in still opens as a deck.
+    page.evaluate(DROP_FILES, [[["deck.html", "text/html", base64.b64encode(b"<p>x</p>").decode()]], "dragover"])
+    check(page.text_content("#drop-zone") == "Drop the .html deck to open it", page.text_content("#drop-zone"))
+    page.evaluate("window.dispatchEvent(new DragEvent('dragleave', { relatedTarget: null }))")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -3121,6 +3217,7 @@ TESTS = [
     test_paste_from_excel,
     test_phase4_done_when,
     test_insert_picture,
+    test_paste_and_drop_pictures,
 ]
 
 

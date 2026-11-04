@@ -3145,6 +3145,12 @@
         const mode = plainPaste ? 'plain' : 'normal';
         plainPaste = false;
         const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
+        const pictures = App.images.picturesIn(event.clipboardData);
+        if (mode === 'normal' && pictures.length > 0 && !clipboard.text.trim()) {
+            App.text.exitEdit({ select: false });   // a screenshot pasted while typing: its own picture on the slide
+            App.images.insertFiles(pictures, 'Paste');
+            return;
+        }
         if (mode === 'normal' && isCell(editing.element) && App.tablePaste.pasteIntoCell(editing.element, clipboard)) {
             return;   // several cells from Excel: they fill the table from this cell on
         }

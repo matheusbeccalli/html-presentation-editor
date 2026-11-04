@@ -18,6 +18,10 @@
   number formats. Use it only on a sheet of FAKE numbers: Excel also writes cell
   values inside its tags (x:num="…"), which the fake letters never touch.
 
+  Pictures (Phase 5): files on the clipboard (a screenshot, an Excel chart, the
+  picture Excel adds to copied cells) are listed by type and size only; the
+  picture itself is never saved.
+
   Python comparison: like a small Flask page that dumps request.files, but it
   runs in the browser with no server.
 -->
@@ -59,6 +63,7 @@
         'use strict';
 
         let captured = null;   // { type: data } as pasted
+        let files = [];        // [{ type, size }] of the files pasted (pictures): never their content
 
         /* A fake letter of the same kind: 'a' for lower case, 'A' for upper, '0' for digits (accents too). */
         function fakeText(text) {
@@ -89,6 +94,13 @@
         function render() {
             const box = document.getElementById('formats');
             box.innerHTML = '';
+            if (files.length > 0) {
+                const heading = document.createElement('h2');
+                heading.textContent = 'Files (pictures): type and size only';
+                const pre = document.createElement('pre');
+                pre.textContent = files.map((file) => file.type + ', ' + file.size + ' bytes').join('\n');
+                box.append(heading, pre);
+            }
             Object.keys(captured).forEach((type) => {
                 const heading = document.createElement('h2');
                 heading.textContent = type + ' (' + captured[type].length + ' characters)';
@@ -101,6 +113,7 @@
         document.addEventListener('paste', (event) => {
             event.preventDefault();
             captured = {};
+            files = Array.from(event.clipboardData.files, (file) => ({ type: file.type, size: file.size }));
             Array.from(event.clipboardData.types).forEach((type) => {
                 if (type !== 'Files') {
                     captured[type] = event.clipboardData.getData(type);
@@ -124,6 +137,7 @@
                 fakeText: document.getElementById('fake').checked,
                 keptDigits: document.getElementById('fake').checked && document.getElementById('keep-digits').checked,
                 types: types,
+                files: files,
             };
             const text = '// Clipboard fixture captured with tests/clipboard-capture.html (fake text).\n' +
                 'CLIPBOARD_FIXTURES.push(' + JSON.stringify(fixture, null, 2) + ');\n';

@@ -702,7 +702,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 
 <input type="file" id="file-input" accept=".html,.htm,text/html" hidden>
 <input type="file" id="picture-input" accept="image/*" multiple hidden>
-<div id="drop-zone" hidden><div>Drop the .html deck to open it</div></div>
+<div id="drop-zone" hidden><div id="drop-zone-text">Drop the .html deck to open it</div></div>
 <div id="busy" hidden><div id="busy-text"></div></div>
 
 <!-- Not run by the editor: copied into every saved deck (SPEC 3.6). -->
@@ -4900,6 +4900,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         const mode = plainPaste ? 'plain' : 'normal';
         plainPaste = false;
         const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
+        const pictures = App.images.picturesIn(event.clipboardData);
+        if (mode === 'normal' && pictures.length > 0 && !clipboard.text.trim()) {
+            App.text.exitEdit({ select: false });   // a screenshot pasted while typing: its own picture on the slide
+            App.images.insertFiles(pictures, 'Paste');
+            return;
+        }
         if (mode === 'normal' && isCell(editing.element) && App.tablePaste.pasteIntoCell(editing.element, clipboard)) {
             return;   // several cells from Excel: they fill the table from this cell on
         }
@@ -6868,6 +6874,11 @@ App.template.newDeckHtml = function newDeckHtml() {
  * A new picture is centred on the slide at its own size, or smaller to fit
  * inside the margins (placeRect).
  *
+ * Three ways in, all through insertFiles: Insert > Pictures (the file picker),
+ * a picture file dropped on the window (fileio.js) and Ctrl+V of a picture on
+ * the clipboard, e.g. a screenshot or an Excel chart (elements.js; text.js
+ * while typing).
+ *
  * Talks to: elements.js (ids, on top of the slide), history.js, selection.js,
  *           deck.js, ui.js (messages).
  */
@@ -6975,6 +6986,29 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     // ---------------------------------------------------------------
+    // Pictures from a drop or a paste
+    // ---------------------------------------------------------------
+
+    function isPicture(type) {
+        return /^image\//.test(type || '');
+    }
+
+    /*
+     * A drag over the window carries pictures for the slide (true) or a deck to
+     * open (false). During the drag only the kinds and types are known, not the
+     * names: { kind: 'file' | 'string', type }. An .html file among them wins.
+     */
+    App.images.isPictureDrop = function isPictureDrop(items) {
+        const files = Array.from(items || []).filter((item) => item.kind === 'file');
+        return files.some((item) => isPicture(item.type)) && !files.some((item) => item.type === 'text/html');
+    };
+
+    /* The picture files of a paste or a drop (a DataTransfer), or []. */
+    App.images.picturesIn = function picturesIn(transfer) {
+        return transfer ? Array.from(transfer.files || []).filter((file) => isPicture(file.type)) : [];
+    };
+
+    // ---------------------------------------------------------------
     // The picture element
     // ---------------------------------------------------------------
 
@@ -6995,8 +7029,9 @@ App.template.newDeckHtml = function newDeckHtml() {
      * Put pictures from files on the current slide: one undo step, the last one
      * selected. Several files are stepped 10 px aside each, like pasting.
      * Files that are not pictures, or cannot be shown, are named in the status bar.
+     * `verb` names the undo step: 'Insert' (the default) or 'Paste'.
      */
-    App.images.insertFiles = async function insertFiles(files) {
+    App.images.insertFiles = async function insertFiles(files, verb) {
         const slide = App.deck.getCurrentSlide();
         const pictures = [];
         const refused = [];
@@ -7015,7 +7050,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const doc = slide.ownerDocument;
         const added = [];
-        App.history.change(pictures.length > 1 ? 'Insert pictures' : 'Insert picture',
+        App.history.change((verb || 'Insert') + (pictures.length > 1 ? ' pictures' : ' picture'),
             { slideId: slide.getAttribute('data-slide-id') }, () => {
                 pictures.forEach((picture, index) => {
                     const rect = App.images.placeRect(picture.width, picture.height);
@@ -10295,15 +10330,23 @@ App.template.newDeckHtml = function newDeckHtml() {
         event.clipboardData.setData('text/plain', data.text);
     }
 
-    /* Ctrl+V: a table from another program (Excel), else our own copy. */
+    /*
+     * Ctrl+V: a table from another program (Excel), else a picture (a
+     * screenshot, an Excel chart), else our own copy. Excel puts a picture of
+     * copied cells on the clipboard too, so the table is looked for first.
+     */
     function onPasteEvent(event) {
         if (!forTheSlide(event)) {
             return;
         }
         const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
         const ours = copyMark !== null && clipboard.html.indexOf(copyMark) !== -1;
+        const pictures = App.images.picturesIn(event.clipboardData);
         if (!ours && App.tablePaste.paste(clipboard)) {
             event.preventDefault();
+        } else if (!ours && pictures.length > 0) {
+            event.preventDefault();
+            App.images.insertFiles(pictures, 'Paste');
         } else if (App.elements.canPaste()) {
             event.preventDefault();
             App.elements.paste();
@@ -11232,17 +11275,19 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     /*
-     * Drag and drop. getAsFileSystemHandle() must be called straight away in
-     * the drop event (before any "await"), or the browser forgets the data.
+     * Drag and drop: pictures go on the current slide (images.js), an .html
+     * file opens as a deck. getAsFileSystemHandle() must be called straight
+     * away in the drop event (before any "await"), or the browser forgets the data.
      */
     App.fileio.listenForDrops = function listenForDrops(targetWindow) {
         const hasFiles = (event) => event.dataTransfer && Array.from(event.dataTransfer.types).indexOf('Files') !== -1;
+        const forTheSlide = (event) => App.state.hasDeck && App.images.isPictureDrop(event.dataTransfer.items);
 
         targetWindow.addEventListener('dragover', (event) => {
             if (hasFiles(event)) {
                 event.preventDefault();   // without this the browser would open the file itself
                 event.dataTransfer.dropEffect = 'copy';
-                App.ui.showDropZone(true);
+                App.ui.showDropZone(true, forTheSlide(event) ? 'pictures' : 'deck');
             }
         });
         targetWindow.addEventListener('dragleave', (event) => {
@@ -11256,6 +11301,11 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
             event.preventDefault();
             App.ui.showDropZone(false);
+            if (forTheSlide(event)) {
+                App.text.exitEdit({ select: false });
+                App.images.insertFiles(event.dataTransfer.files);   // all of them: the others are named in the status bar
+                return;
+            }
             const item = Array.from(event.dataTransfer.items).find((entry) => entry.kind === 'file');
             if (!item) {
                 return;
@@ -15942,7 +15992,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     App.ui.init = function init() {
         ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size', 'notes-text',
-         'welcome', 'canvas-stage-box', 'drop-zone', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
+         'welcome', 'canvas-stage-box', 'drop-zone', 'drop-zone-text', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
 
@@ -16066,8 +16116,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.ui.refreshQuickAccess();
     };
 
-    App.ui.showDropZone = function showDropZone(visible) {
+    /* The drop zone over the window while files are dragged in: `kind` 'deck' (to open) or 'pictures' (for the slide). */
+    App.ui.showDropZone = function showDropZone(visible, kind) {
         nodes['drop-zone'].hidden = !visible;
+        if (visible) {
+            nodes['drop-zone-text'].textContent = kind === 'pictures' ? 'Drop to put the picture on this slide' : 'Drop the .html deck to open it';
+        }
     };
 
     /* Show a "please wait" layer with a message; pass null to hide it. */

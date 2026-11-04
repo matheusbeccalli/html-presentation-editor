@@ -275,15 +275,23 @@
         event.clipboardData.setData('text/plain', data.text);
     }
 
-    /* Ctrl+V: a table from another program (Excel), else our own copy. */
+    /*
+     * Ctrl+V: a table from another program (Excel), else a picture (a
+     * screenshot, an Excel chart), else our own copy. Excel puts a picture of
+     * copied cells on the clipboard too, so the table is looked for first.
+     */
     function onPasteEvent(event) {
         if (!forTheSlide(event)) {
             return;
         }
         const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
         const ours = copyMark !== null && clipboard.html.indexOf(copyMark) !== -1;
+        const pictures = App.images.picturesIn(event.clipboardData);
         if (!ours && App.tablePaste.paste(clipboard)) {
             event.preventDefault();
+        } else if (!ours && pictures.length > 0) {
+            event.preventDefault();
+            App.images.insertFiles(pictures, 'Paste');
         } else if (App.elements.canPaste()) {
             event.preventDefault();
             App.elements.paste();

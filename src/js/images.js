@@ -15,6 +15,11 @@
  * A new picture is centred on the slide at its own size, or smaller to fit
  * inside the margins (placeRect).
  *
+ * Three ways in, all through insertFiles: Insert > Pictures (the file picker),
+ * a picture file dropped on the window (fileio.js) and Ctrl+V of a picture on
+ * the clipboard, e.g. a screenshot or an Excel chart (elements.js; text.js
+ * while typing).
+ *
  * Talks to: elements.js (ids, on top of the slide), history.js, selection.js,
  *           deck.js, ui.js (messages).
  */
@@ -122,6 +127,29 @@
     };
 
     // ---------------------------------------------------------------
+    // Pictures from a drop or a paste
+    // ---------------------------------------------------------------
+
+    function isPicture(type) {
+        return /^image\//.test(type || '');
+    }
+
+    /*
+     * A drag over the window carries pictures for the slide (true) or a deck to
+     * open (false). During the drag only the kinds and types are known, not the
+     * names: { kind: 'file' | 'string', type }. An .html file among them wins.
+     */
+    App.images.isPictureDrop = function isPictureDrop(items) {
+        const files = Array.from(items || []).filter((item) => item.kind === 'file');
+        return files.some((item) => isPicture(item.type)) && !files.some((item) => item.type === 'text/html');
+    };
+
+    /* The picture files of a paste or a drop (a DataTransfer), or []. */
+    App.images.picturesIn = function picturesIn(transfer) {
+        return transfer ? Array.from(transfer.files || []).filter((file) => isPicture(file.type)) : [];
+    };
+
+    // ---------------------------------------------------------------
     // The picture element
     // ---------------------------------------------------------------
 
@@ -142,8 +170,9 @@
      * Put pictures from files on the current slide: one undo step, the last one
      * selected. Several files are stepped 10 px aside each, like pasting.
      * Files that are not pictures, or cannot be shown, are named in the status bar.
+     * `verb` names the undo step: 'Insert' (the default) or 'Paste'.
      */
-    App.images.insertFiles = async function insertFiles(files) {
+    App.images.insertFiles = async function insertFiles(files, verb) {
         const slide = App.deck.getCurrentSlide();
         const pictures = [];
         const refused = [];
@@ -162,7 +191,7 @@
         }
         const doc = slide.ownerDocument;
         const added = [];
-        App.history.change(pictures.length > 1 ? 'Insert pictures' : 'Insert picture',
+        App.history.change((verb || 'Insert') + (pictures.length > 1 ? ' pictures' : ' picture'),
             { slideId: slide.getAttribute('data-slide-id') }, () => {
                 pictures.forEach((picture, index) => {
                     const rect = App.images.placeRect(picture.width, picture.height);

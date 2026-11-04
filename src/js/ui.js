@@ -62,7 +62,7 @@
 
     App.ui.init = function init() {
         ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size', 'notes-text',
-         'welcome', 'canvas-stage-box', 'drop-zone', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
+         'welcome', 'canvas-stage-box', 'drop-zone', 'drop-zone-text', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
 
@@ -186,8 +186,12 @@
         App.ui.refreshQuickAccess();
     };
 
-    App.ui.showDropZone = function showDropZone(visible) {
+    /* The drop zone over the window while files are dragged in: `kind` 'deck' (to open) or 'pictures' (for the slide). */
+    App.ui.showDropZone = function showDropZone(visible, kind) {
         nodes['drop-zone'].hidden = !visible;
+        if (visible) {
+            nodes['drop-zone-text'].textContent = kind === 'pictures' ? 'Drop to put the picture on this slide' : 'Drop the .html deck to open it';
+        }
     };
 
     /* Show a "please wait" layer with a message; pass null to hide it. */

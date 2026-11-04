@@ -325,17 +325,19 @@
     };
 
     /*
-     * Drag and drop. getAsFileSystemHandle() must be called straight away in
-     * the drop event (before any "await"), or the browser forgets the data.
+     * Drag and drop: pictures go on the current slide (images.js), an .html
+     * file opens as a deck. getAsFileSystemHandle() must be called straight
+     * away in the drop event (before any "await"), or the browser forgets the data.
      */
     App.fileio.listenForDrops = function listenForDrops(targetWindow) {
         const hasFiles = (event) => event.dataTransfer && Array.from(event.dataTransfer.types).indexOf('Files') !== -1;
+        const forTheSlide = (event) => App.state.hasDeck && App.images.isPictureDrop(event.dataTransfer.items);
 
         targetWindow.addEventListener('dragover', (event) => {
             if (hasFiles(event)) {
                 event.preventDefault();   // without this the browser would open the file itself
                 event.dataTransfer.dropEffect = 'copy';
-                App.ui.showDropZone(true);
+                App.ui.showDropZone(true, forTheSlide(event) ? 'pictures' : 'deck');
             }
         });
         targetWindow.addEventListener('dragleave', (event) => {
@@ -349,6 +351,11 @@
             }
             event.preventDefault();
             App.ui.showDropZone(false);
+            if (forTheSlide(event)) {
+                App.text.exitEdit({ select: false });
+                App.images.insertFiles(event.dataTransfer.files);   // all of them: the others are named in the status bar
+                return;
+            }
             const item = Array.from(event.dataTransfer.items).find((entry) => entry.kind === 'file');
             if (!item) {
                 return;

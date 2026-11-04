@@ -1806,6 +1806,11 @@ def test_table_numbers(browser):
     check(page.evaluate("JSON.parse(localStorage.getItem('deck-editor-settings')).numberLocale") == "en-US", "remembered")
     page.click(button("increaseDecimals"))
     check(margins() == ["19.50%", "17.20%", "21.00%", "(3.50%)"], f"written the en-US way: {margins()}")
+    # en-US chosen, but this table and deck are pt-BR: 1.120 is read as 1120, not 1.12.
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 480, 232))   # 1.120
+    page.click(button("increaseDecimals"))
+    check(grid()[2].split("|")[1] == "1,120.0", f"1.120 read the pt-BR way, written the en-US way: {grid()[2]}")
     page.screenshot(path=str(OUTPUT / "47-table-numbers.png"))
 
     # A new table: a column of numbers lines up on the right once its cell is left, header too; undo takes it back.

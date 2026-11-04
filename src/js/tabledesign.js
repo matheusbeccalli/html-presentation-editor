@@ -13,7 +13,9 @@
  *     Percent Style, Negatives in Parentheses. They rewrite the numbers in the
  *     cells (numbers.js), written as pt-BR (1.234,5) or en-US (1,234.5): the
  *     locale chosen beside them (remembered in the settings), else the deck's
- *     language.
+ *     language. A number that reads both ways (2.450) is read the way the
+ *     table's clear numbers (9,8x) are written, else as the deck's language,
+ *     so a locale chosen for another deck cannot misread it.
  * Layout > Alignment: align the text to the top / middle / bottom of its cells;
  * Cell Margins (Normal, None, Narrow, Wide).
  *
@@ -175,10 +177,17 @@
         return App.settings.get().numberLocale || App.numbers.localeFor(doc ? doc.documentElement.getAttribute('lang') : '');
     };
 
+    /* The locale a table's numbers are read in: as its clear numbers show, else the deck's language, else the one chosen. */
+    function readLocale(table) {
+        const doc = App.deck.getDocument();
+        const lang = doc ? doc.documentElement.getAttribute('lang') : '';
+        return App.tables.numberLocaleOf(table) || (lang ? App.numbers.localeFor(lang) : App.tableDesign.numberLocale());
+    }
+
     /* The numbers in the cells the buttons work on. */
     function targetNumbers() {
         const t = target();
-        return t ? App.tables.numbersIn(t.cells, App.tableDesign.numberLocale()).map((found) => found.number) : [];
+        return t ? App.tables.numbersIn(t.cells, readLocale(t.table)).map((found) => found.number) : [];
     }
 
     const isBig = (number) => number.int.replace(/^0+/, '').length >= 4;
@@ -235,7 +244,7 @@
             App.text.exitEdit({ select: false });
         }
         change(label, (on) => {
-            App.tables.formatNumbers(on.cells, App.tableDesign.numberLocale(), rewrite);
+            App.tables.formatNumbers(on.cells, readLocale(on.table), App.tableDesign.numberLocale(), rewrite);
             App.tables.alignNumbers(on.table);
         }, t);
         if (typing && typing.isConnected) {

@@ -101,3 +101,12 @@ test('numbers: the locale follows the deck language', () => {
     assertEqual(App.numbers.localeFor(''), 'pt-BR');
     assertEqual(App.numbers.localeFor(null), 'pt-BR');
 });
+
+test('numbers: localeShown tells the locale from the numbers that are clear about it', () => {
+    assertEqual(App.numbers.localeShown(['9,8x', '19,5%', '2.450', 'Beta']), 'pt-BR');
+    assertEqual(App.numbers.localeShown(['1.234.567', '780']), 'pt-BR', 'a separator used twice groups thousands');
+    assertEqual(App.numbers.localeShown(['1,234.5', '2.450']), 'en-US');
+    assertEqual(App.numbers.localeShown(['0,123']), 'pt-BR', 'a leading zero: a decimal comma');
+    assertEqual(App.numbers.localeShown(['2.450', '780', 'n.a.']), null, 'nothing clear');
+    assertEqual(App.numbers.localeShown(['19,5%', '1.5x']), null, 'both: nothing to go by');
+});

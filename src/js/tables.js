@@ -724,6 +724,11 @@
         return changed;
     };
 
+    /* The locale the table's numbers are clearly written in (App.numbers.localeShown), or null. */
+    App.tables.numberLocaleOf = function numberLocaleOf(table) {
+        return App.numbers.localeShown(Array.from(table.querySelectorAll(':scope > tbody > tr > td')).map(oneLine).filter((text) => text));
+    };
+
     /* The cells of `cells` that hold one number: [{ cell, number }] (number: App.numbers.parse, read in `locale`). */
     App.tables.numbersIn = function numbersIn(cells, locale) {
         return cells.map((cell) => {
@@ -733,12 +738,12 @@
     };
 
     /*
-     * Rewrite the number in each of `cells` as change(number) returns it
-     * (null: leave it), written in `locale`. The new text takes the look of
-     * the old one's first character.
+     * Rewrite the number in each of `cells` (read in `readLocale`) as
+     * change(number) returns it (null: leave it), written in `writeLocale`.
+     * The new text takes the look of the old one's first character.
      */
-    App.tables.formatNumbers = function formatNumbers(cells, locale, change) {
-        App.tables.numbersIn(cells, locale).forEach((found) => {
+    App.tables.formatNumbers = function formatNumbers(cells, readLocale, writeLocale, change) {
+        App.tables.numbersIn(cells, readLocale).forEach((found) => {
             const next = change(found.number);
             if (!next) {
                 return;
@@ -747,7 +752,7 @@
             const p = lines.findIndex((line) => line.trim() !== '');
             const start = lines[p].indexOf(lines[p].trim());
             App.text.replaceAll(found.cell, [{ p: p, start: start, end: start + lines[p].trim().length }],
-                App.numbers.format(next, locale));
+                App.numbers.format(next, writeLocale));
         });
     };
 

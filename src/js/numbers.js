@@ -89,7 +89,8 @@
     }
 
     /* The parts of a number written as `text`, read the `locale`'s way where it is ambiguous; null when it is not one number. */
-    App.numbers.parse = function parse(text, locale) {
+    /* The parts of `text` as NUMBER finds them (found[4]: the digits), and whether it is in parentheses; null if it is no number. */
+    function match(text) {
         let rest = String(text).trim();
         const parens = /^\(.*\)$/.test(rest);
         if (parens) {
@@ -99,6 +100,15 @@
         if (!found || (found[1] && found[3]) || (parens && (found[1] || found[3]))) {
             return null;
         }
+        return { found: found, parens: parens };
+    }
+
+    App.numbers.parse = function parse(text, locale) {
+        const matched = match(text);
+        if (!matched) {
+            return null;
+        }
+        const { found, parens } = matched;
         const digits = readDigits(found[4], locale || 'pt-BR');
         if (!digits) {
             return null;
@@ -108,6 +118,31 @@
             sign: sign, negative: parens || sign === '-' || sign === '−', parens: parens,
             prefix: found[2] || '', int: digits.int, frac: digits.frac, grouped: digits.grouped, suffix: found[5] || '',
         };
+    };
+
+    /*
+     * The locale that the numbers among `texts` which are clear about it are
+     * written in ("19,5%", "1.234.567": pt-BR; "1,234.5": en-US), or null when
+     * none is clear ("2.450", "780") or both kinds are there.
+     */
+    App.numbers.localeShown = function localeShown(texts) {
+        const shown = new Set();
+        texts.forEach((text) => {
+            const matched = match(text);
+            if (!matched || !App.numbers.parse(text)) {
+                return;
+            }
+            const body = matched.found[4];
+            const decimal = decimalOf(body, 'pt-BR');
+            if (decimal !== decimalOf(body, 'en-US')) {
+                return;   // read differently by each: it tells nothing
+            }
+            const separator = decimal || body.replace(/\d/g, '')[0];
+            if (separator) {
+                shown.add((decimal ? decimal === ',' : separator === '.') ? 'pt-BR' : 'en-US');
+            }
+        });
+        return shown.size === 1 ? Array.from(shown)[0] : null;
     };
 
     function isZero(number) {

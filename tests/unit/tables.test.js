@@ -655,9 +655,15 @@ test('tables: formatNumbers rewrites the number in each cell and keeps its look'
     const cells = Array.from(table.rows[0].cells);
     assertEqual(App.tables.numbersIn(cells, 'pt-BR').map((found) => found.cell.textContent), ['2.450', '9,8x'],
         'a cell of two lines is not one number');
-    App.tables.formatNumbers(cells, 'pt-BR', (number) => App.numbers.withDecimals(number, 2));
+    App.tables.formatNumbers(cells, 'pt-BR', 'pt-BR', (number) => App.numbers.withDecimals(number, 2));
     assertEqual(cells.map((cell) => cell.textContent), ['2.450,00', 'Beta', '9,80x', '12', '']);
     assert(cells[0].querySelector('b'), 'still bold: ' + cells[0].innerHTML);
-    App.tables.formatNumbers(cells, 'en-US', (number) => (number.suffix === 'x' ? null : number));
+    App.tables.formatNumbers(cells, 'pt-BR', 'en-US', (number) => (number.suffix === 'x' ? null : number));
     assertEqual(cells.map((cell) => cell.textContent).slice(0, 3), ['2,450.00', 'Beta', '9,80x'], 'null leaves a number as it is');
+});
+
+test('tables: numberLocaleOf reads the table\'s clear numbers', () => {
+    assertEqual(App.tables.numberLocaleOf(textTable([['EV', 'Mult.'], ['2.450', '9,8x']])), 'pt-BR');
+    assertEqual(App.tables.numberLocaleOf(textTable([['EV', 'Mult.'], ['2,450', '9.8x']])), 'en-US');
+    assertEqual(App.tables.numberLocaleOf(textTable([['EV'], ['2.450'], ['<p>1,5</p><p>2</p>']])), null, 'a cell of two lines does not count');
 });

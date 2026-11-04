@@ -1909,6 +1909,84 @@ def test_paste_from_excel(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_phase4_done_when(browser):
+    """
+    Phase 4 "done when", automated: a comps table copied from Excel (the real capture, fake text) becomes an
+    editable, formatted table on a slide in under a minute: pasted, typed in, numbers reformatted from the ribbon,
+    saved, reopened (still a table, still editable) and shown by the saved file on its own.
+    """
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    page = editor.page
+    page.evaluate("App.commands.run('newDeck')")   # File > New deck
+    wait_until(page, "App.deck.getSlides().length === 2")
+    comps = clipboard_fixture("excel-comps")
+    put_on_clipboard(page, comps["text/html"], comps["text/plain"])
+    started = time.time()
+
+    # Slide 2 ("Título do slide"): the body text box goes, the table from Excel takes its place.
+    page.evaluate("App.deck.goTo(1)")
+    page.mouse.click(*slide_to_screen(page, 600, 200))   # the bulleted body box
+    check(page.evaluate("App.selection.selectedId()") == "e6", "the body box selected")
+    page.keyboard.press("Delete")
+    page.mouse.click(*slide_to_screen(page, 640, 400))   # now empty slide space
+    page.keyboard.press("Control+v")
+    table_id = page.evaluate("App.selection.selectedId()")
+    texts = lambda: page.evaluate(TABLE_TEXTS, table_id)  # noqa: E731
+    check(texts() and texts()[1] == "Aaaa Aaaaa|2.450|9,8x|19,50%", f"Excel's table on the slide: {texts()}")
+
+    # Edit: type in a cell, Tab into the next one (its text selected) and replace it.
+    page.mouse.click(*slide_to_screen(page, *page.evaluate(CELL_CENTER, [table_id, 1, 0])))
+    page.keyboard.press("End")
+    page.keyboard.type(" S.A.")
+    page.keyboard.press("Tab")
+    page.keyboard.type("2.500")
+    page.keyboard.press("Escape")
+    check(texts()[1] == "Aaaa Aaaaa S.A.|2.500|9,8x|19,50%", f"typed in: {texts()[1]}")
+
+    # Format from the ribbon only: the percentages to one decimal, negatives in parentheses.
+    drag(page, slide_to_screen(page, *page.evaluate(CELL_CENTER, [table_id, 1, 3])),
+         slide_to_screen(page, *page.evaluate(CELL_CENTER, [table_id, 5, 3])))
+    page.click(".ribbon-tab[data-tab='table-design']")
+    page.click(".ribbon-button[data-command='decreaseDecimals']")
+    page.click(".ribbon-button[data-command='negativeParens']")
+    percents = [row.split("|")[3] for row in texts()[1:]]
+    check(percents == ["19,5%", "17,2%", "21,0%", "(3,5%)", "18,4%"], f"one decimal, (3,5%): {percents}")
+    elapsed = time.time() - started
+    check(elapsed < 60, f"pasted, edited and formatted in under a minute: {elapsed:.1f} s")
+    page.keyboard.press("Escape")
+    wait_until(page, """() => { const thumb = document.querySelector('.thumb[data-index="1"] iframe').contentDocument;
+        return !!thumb.querySelector('table') && thumb.body.textContent.includes('(3,5%)'); }""")   # redrawn after a short pause
+    page.screenshot(path=str(OUTPUT / "49-phase4-done-when.png"))
+
+    # Saved and reopened: the same table, its style and numbers on the right, and it can still be typed in.
+    saved = editor.save_as_download("phase4-done-when.html")
+    before = texts()
+    editor.open(saved)
+    check(editor.report_dialog_text() is None, "a deck the editor saved opens without an import report")
+    page.evaluate("App.deck.goTo(1)")
+    check(texts() == before, f"the table came back as saved: {texts()}")
+    style = page.evaluate("""id => { const table = App.deck.getDocument().querySelector('[data-id="' + id + '"] > table');
+        return ['data-header-row', 'data-banded-rows', 'data-total-row'].map((name) => table.hasAttribute(name)); }""", table_id)
+    check(style == [True, True, True], f"header, bands and the Mediana total row: {style}")
+    check(page.evaluate(LINE_ALIGN, [table_id, 2, 1]) == "right", "numbers on the right")
+    page.mouse.click(*slide_to_screen(page, *page.evaluate(CELL_CENTER, [table_id, 2, 2])))
+    page.keyboard.press("End")
+    page.keyboard.type("!")
+    check(texts()[2].split("|")[2] == "8,9x!", f"still editable: {texts()[2]}")
+
+    # The saved file on its own shows the table.
+    player, errors = play_saved_deck(browser, saved)
+    player.keyboard.press("ArrowRight")
+    drawn = rendered_text(player, 'section.slide[data-slide-id="s2"]')
+    for expected in ["Aaaa Aaaaa S.A.", "2.500", "(3,5%)", "18,4%"]:
+        check(expected in drawn, f"the saved deck shows {expected!r}: {drawn[:300]!r}")
+    check(errors == [] and editor.errors == [], f"no errors: {errors} {editor.errors}")
+    player.context.close()
+    editor.close()
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -2960,6 +3038,7 @@ TESTS = [
     test_table_design,
     test_table_numbers,
     test_paste_from_excel,
+    test_phase4_done_when,
 ]
 
 

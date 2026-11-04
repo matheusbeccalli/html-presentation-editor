@@ -81,3 +81,9 @@ test('transform: topLevelElements lists the slide\'s own .el children in stackin
     const ids = App.transform.topLevelElements(doc.querySelector('.slide')).map((e) => e.getAttribute('data-id'));
     assertEqual(ids, ['c', 'b', 'a']);   // no z-index counts as 0
 });
+
+test('transform: a picture keeps its proportions by its corners; anything does with Shift', () => {
+    assertEqual(['nw', 'se', 'e', 's'].map((handle) => App.transform.keepsAspect('image', handle, false)), [true, true, false, false]);
+    assertEqual(App.transform.keepsAspect('text', 'se', false), false);
+    assertEqual(App.transform.keepsAspect('text', 'e', true), true);
+});

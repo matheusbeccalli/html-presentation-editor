@@ -206,6 +206,7 @@
     font-size: 12px; color: var(--text-muted);
 }
 #status-message { flex: 1; }
+#status-size.too-big { color: #9C5700; background: #FFEB9C; padding: 0 6px; border-radius: 3px; }
 
 @media (max-width: 900px) {
     #format-pane { display: none; }

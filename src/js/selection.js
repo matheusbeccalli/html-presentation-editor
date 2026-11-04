@@ -322,7 +322,7 @@
 
     /*
      * Follow the mouse until it is released. kind is 'move' or 'resize';
-     * Shift while resizing keeps the aspect ratio.
+     * Shift while resizing keeps the aspect ratio (a picture's corners always do).
      */
     function startDrag(downEvent, kind, handle) {
         const element = App.selection.getElement();
@@ -350,7 +350,8 @@
             }
             const rect = kind === 'move'
                 ? App.transform.moveRect(startRect, dx, dy)
-                : App.transform.resizeRect(startRect, handle, dx, dy, event.shiftKey);
+                : App.transform.resizeRect(startRect, handle, dx, dy,
+                    App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey));
             App.transform.writeRect(element, rect);
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live

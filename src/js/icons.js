@@ -28,6 +28,7 @@
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
         check: '<path d="M4 10.5l4 4 8-9"/>',
         formatPainter: '<rect x="3" y="2.5" width="12" height="5" rx="1"/><path d="M15 5h2v4.5h-7.5V12"/><rect x="8" y="12" width="3" height="5.5" rx="0.5"/>',
+        picture: '<rect x="2.5" y="3.5" width="15" height="13" rx="1"/><circle cx="7" cy="8" r="1.5"/><path d="M2.5 14.5l4.5-4 3 2.5 3.5-3.5 4 4"/>',
         table: '<rect x="2.5" y="3.5" width="15" height="13"/><path d="M2.5 7.5h15M2.5 12h15M7.5 3.5v13M12.5 3.5v13"/>',
         insertRowAbove: '<rect x="3" y="9.5" width="14" height="8"/><path d="M3 13.5h14M10 2v5.5M7.25 4.75h5.5"/>',
         insertRowBelow: '<rect x="3" y="2.5" width="14" height="8"/><path d="M3 6.5h14M10 12.5V18M7.25 15.25h5.5"/>',

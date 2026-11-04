@@ -32,6 +32,11 @@
      * corner the opposite corner stays put; on a side the box grows evenly
      * on the other axis, like PowerPoint.
      */
+    /* Whether a resize keeps the width/height ratio: with Shift, or a picture by a corner (as in PowerPoint). */
+    App.transform.keepsAspect = function keepsAspect(type, handle, shiftKey) {
+        return !!shiftKey || (type === 'image' && handle.length === 2);
+    };
+
     App.transform.resizeRect = function resizeRect(rect, handle, dx, dy, keepAspect) {
         const min = App.transform.MIN_SIZE;
         const movesLeft = handle.indexOf('w') !== -1;

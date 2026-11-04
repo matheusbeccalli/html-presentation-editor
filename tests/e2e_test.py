@@ -19,6 +19,7 @@ Screenshots and saved decks go to tests/output/ (ignored by Git) for manual revi
 Usage:  python build.py && python tests/e2e_test.py
 """
 
+import base64
 import json
 import re
 import shutil
@@ -1987,6 +1988,86 @@ def test_phase4_done_when(browser):
     editor.close()
 
 
+# Test pictures drawn on a canvas in the page (fake data): a photo-like noise and a flat logo with text, as PNG bytes.
+DRAW_PICTURE = """([kind, width, height]) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (kind === 'noise') {
+        for (let y = 0; y < height; y += 4) for (let x = 0; x < width; x += 4) {
+            context.fillStyle = 'rgb(' + [0, 1, 2].map(() => Math.floor(Math.random() * 256)).join(',') + ')';
+            context.fillRect(x, y, 4, 4);
+        }
+    } else {
+        context.fillStyle = '#ffffff'; context.fillRect(0, 0, width, height);
+        context.fillStyle = '#1F2A44'; context.fillRect(10, 10, 80, 80);
+        context.font = 'bold 40px sans-serif'; context.fillText('ACME', 110, 65);
+    }
+    return canvas.toDataURL('image/png').split(',')[1];
+}"""
+
+
+def picture_file(page, name, kind, width, height):
+    path = OUTPUT / name
+    path.write_bytes(base64.b64decode(page.evaluate(DRAW_PICTURE, [kind, width, height])))
+    return path
+
+
+PICTURE_INFO = """id => { const img = App.deck.getDocument().querySelector('[data-id="' + id + '"]');
+    return { type: img.getAttribute('data-type'), src: img.src.slice(0, 22), natural: [img.naturalWidth, img.naturalHeight],
+             rect: App.transform.readRect(img) }; }"""
+
+
+def test_insert_picture(browser):
+    """Insert > Pictures: made smaller on the way in (1920 px, the smaller of PNG and JPEG), centred, one undo step;
+    a picture's corner keeps its proportions; the deck size in the status bar follows."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    photo = picture_file(page, "test-photo.png", "noise", 3000, 2000)
+    logo = picture_file(page, "test-logo.png", "logo", 300, 100)
+    size_text = lambda: page.text_content("#status-size")  # noqa: E731
+    check(re.fullmatch(r"Deck \d+ KB", size_text() or ""), f"the deck size in the status bar: {size_text()}")
+    before = size_text()
+    page.evaluate("App.deck.goTo(5)")
+    page.click(".ribbon-tab[data-tab='insert']")
+    with page.expect_file_chooser() as chooser:
+        page.click(".ribbon-button[data-command='insertPicture']")
+    chooser.value.set_files([str(photo)])
+    wait_until(page, "App.history.undoLabel() === 'Insert picture'")
+    photo_id = page.evaluate("App.selection.selectedId()")
+    info = page.evaluate(PICTURE_INFO, photo_id)
+    check(info["type"] == "image" and info["src"] == "data:image/jpeg;base64" and info["natural"] == [1920, 1280],
+          f"the 3000 x 2000 photo stored as a 1920 x 1280 JPEG: {info}")
+    check(info["rect"] == {"left": 196, "top": 64, "width": 888, "height": 592}, f"centred, fitting the slide: {info['rect']}")
+
+    # A picture's corner keeps its proportions.
+    corner = page.locator("#overlay .selection-handle[data-handle='se']").bounding_box()
+    drag(page, (corner["x"] + 4, corner["y"] + 4), (corner["x"] - 200, corner["y"] - 20))
+    rect = element_rect(page, photo_id)
+    check(abs(rect["width"] / rect["height"] - 1.5) < 0.01 and rect["width"] < 800, f"still 3:2, smaller: {rect}")
+
+    # Two files at once: one undo step; the flat logo stays PNG at its own size.
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(page.evaluate("id => !App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]')", photo_id), "undone")
+    with page.expect_file_chooser() as chooser:
+        page.click(".ribbon-button[data-command='insertPicture']")
+    chooser.value.set_files([str(photo), str(logo)])
+    wait_until(page, "App.history.undoLabel() === 'Insert pictures'")
+    logo_info = page.evaluate(PICTURE_INFO, page.evaluate("App.selection.selectedId()"))
+    check(logo_info["src"] == "data:image/png;base64," and logo_info["natural"] == [300, 100] and
+          logo_info["rect"]["width"] == 300, f"the logo: PNG, 300 x 100: {logo_info}")
+    page.screenshot(path=str(OUTPUT / "50-pictures.png"))
+
+    # The deck size follows (a moment after the change), close to the saved file's size.
+    wait_until(page, "t => document.getElementById('status-size').textContent !== t", arg=before)
+    shown = float(re.search(r"([\d.]+) (KB|MB)", size_text()).group(1)) * (1024 if "KB" in size_text() else 1024 * 1024)
+    saved = editor.save_as_download("pictures-saved.html")
+    check(abs(shown - saved.stat().st_size) / saved.stat().st_size < 0.05, f"{size_text()} vs {saved.stat().st_size} bytes saved")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -3039,6 +3120,7 @@ TESTS = [
     test_table_numbers,
     test_paste_from_excel,
     test_phase4_done_when,
+    test_insert_picture,
 ]
 
 

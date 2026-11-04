@@ -253,6 +253,13 @@
         // Table Design and Layout > Alignment (tabledesign.js): the selected cells, the cell typed in, or the whole table.
         const design = App.tableDesign.commands();
         Object.keys(design).forEach((name) => App.commands.define(name, design[name]));
+        App.commands.define('insertPicture', {
+            label: 'Pictures', isEnabled: hasDeck,
+            run: () => {
+                App.text.exitEdit({ select: false });
+                App.images.choose();
+            },
+        });
         // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
         App.commands.define('insertTable', {
             label: 'Table', isEnabled: hasDeck,

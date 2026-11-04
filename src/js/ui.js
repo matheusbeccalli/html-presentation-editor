@@ -26,6 +26,16 @@
      * The save-state text (tested in tests/unit/settings.test.js).
      * state = { hasDeck, saving, dirty, isNew, autosaveOff, draftAt, recoveryUnavailable }
      */
+    const TOO_BIG = 20 * 1024 * 1024;   // Outlook refuses attachments of about 20-25 MB
+
+    /* The deck size for the status bar: { text: "640 KB" | "3.4 MB", tooBig }. */
+    App.ui.sizeText = function sizeText(bytes) {
+        const text = bytes < 1024 * 1024
+            ? Math.max(1, Math.round(bytes / 1024)) + ' KB'
+            : (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        return { text: text, tooBig: bytes > TOO_BIG };
+    };
+
     App.ui.statusText = function statusText(state) {
         const parts = [];
         if (state.hasDeck) {
@@ -51,7 +61,7 @@
     }
 
     App.ui.init = function init() {
-        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'notes-text',
+        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size', 'notes-text',
          'welcome', 'canvas-stage-box', 'drop-zone', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
@@ -73,7 +83,25 @@
         App.events.on('saved', App.ui.updateTitle);
         ['deck-loaded', 'history-changed', 'saved', 'saving', 'autosave-changed', 'drafts-changed']
             .forEach((name) => App.events.on(name, updateSaveState));
+        const sizeLater = App.util.debounce(updateSize, 1000);   // a big deck takes a moment to measure
+        App.events.on('deck-loaded', updateSize);
+        App.events.on('history-changed', sizeLater);
     };
+
+    /* The deck's size as saved, near enough: its HTML (pictures are data: URIs inside it). */
+    function updateSize() {
+        const doc = App.state.hasDeck ? App.deck.getDocument() : null;
+        const node = nodes['status-size'];
+        node.hidden = !doc;
+        if (!doc) {
+            return;
+        }
+        const size = App.ui.sizeText(doc.documentElement.outerHTML.length);
+        node.textContent = 'Deck ' + size.text;
+        node.classList.toggle('too-big', size.tooBig);
+        node.title = size.tooBig ? 'Over 20 MB: the file may be too big to send by email. Pictures take most of the space.'
+            : 'The deck file\'s size, pictures included';
+    }
 
     function updateSaveState() {
         nodes['status-save'].textContent = App.ui.statusText({

@@ -52,10 +52,11 @@
             id: 'insert', label: 'Insert',
             groups: [
                 { label: 'Tables', commands: [{ control: 'insertTable' }] },
+                { label: 'Images', commands: [['insertPicture', 'picture']] },
                 { label: 'Text', commands: [['insertTextBox', 'textBox']] },
             ],
-            note: 'Table: move over the grid to pick a size, click to insert. Text box: click it, then click on the ' +
-                'slide (or drag to set its width). Images, shapes and charts arrive in Phases 5 and 6.',
+            note: 'Table: move over the grid to pick a size, click to insert. Pictures: from a file, made smaller on the way ' +
+                'in. Text box: click it, then click on the slide (or drag to set its width). Shapes and charts arrive in Phases 5 and 6.',
         },
         {
             // Shown only while a table is selected (PowerPoint's Table Design tab).

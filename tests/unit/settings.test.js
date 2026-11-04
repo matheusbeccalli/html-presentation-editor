@@ -66,3 +66,11 @@ test('status: the save state in the status bar (SPEC 6.4)', () => {
     assertEqual(text({ dirty: true, recoveryUnavailable: true }), 'Unsaved changes · Recovery unavailable');
     assertEqual(text({ hasDeck: false, recoveryUnavailable: true }), 'Recovery unavailable');
 });
+
+test('status bar: the deck size in KB or MB, flagged above 20 MB', () => {
+    assertEqual(App.ui.sizeText(300), { text: '1 KB', tooBig: false });
+    assertEqual(App.ui.sizeText(655360), { text: '640 KB', tooBig: false });
+    assertEqual(App.ui.sizeText(3.4 * 1024 * 1024), { text: '3.4 MB', tooBig: false });
+    assertEqual(App.ui.sizeText(20 * 1024 * 1024), { text: '20.0 MB', tooBig: false });
+    assertEqual(App.ui.sizeText(21 * 1024 * 1024), { text: '21.0 MB', tooBig: true });
+});

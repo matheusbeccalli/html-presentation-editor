@@ -203,18 +203,19 @@ Nested bullets are the top priority of this phase.
 
 ## Phase 5: Images and shapes
 
-- [ ] Insert image from file
+- [x] Insert image from file *(Insert > Pictures; several files at once (one undo step, each 10 px aside); centred at its own size, smaller to fit inside the slide's margins; selected. A picture's corner handles keep its proportions, as in PowerPoint)*
 - [ ] Insert image by drag-and-drop
 - [ ] Paste image from clipboard (Win+Shift+S then Ctrl+V)
 - [ ] Replace image (keeps position and size)
 - [ ] Crop with handles, stored as a true crop via `<canvas>`
 - [ ] Reset image size
-- [ ] Compress on insert: longest side max 1920 px, JPEG quality 0.85 unless the image has transparency (keep PNG)
-- [ ] Deck file size shown in the status bar
+- [x] Compress on insert: longest side max 1920 px, JPEG quality 0.85 unless the image has transparency (keep PNG) *(decided in the Phase 5 Q&A: the smaller of PNG and JPEG 0.85 is kept, so screenshots and flat logos usually stay PNG and sharp; a file already smaller than both is kept as it is; SVG stays SVG)*
+- [x] Deck file size shown in the status bar *("Deck 3.4 MB", a second after a change; amber above 20 MB, with a tooltip that the file may be too big to email)*
 - [ ] Shapes: rectangle, rounded rectangle, ellipse, line, arrow, chevron, pentagon, callout (CSS or inline SVG)
 - [ ] Shape fill, border (color, width, dash), shadow, transparency
 - [ ] Text inside shapes
 - [ ] **Done when:** a process diagram of chevrons and a logo screenshot can be built on a slide without leaving the editor.
+  - [ ] Pictures: Insert > Pictures, pick a big JPEG photo and a small logo PNG at once (Ctrl+click both): both appear in the middle of the slide (the photo fits inside the slide), one Ctrl+Z removes both. The status bar shows "Deck … MB", growing after an insert. Drag a picture's corner: it keeps its proportions; a side handle stretches it. Save, look at the file's size in Explorer: close to the status bar's
 
 ## Phase 6: Charts (section 5)
 

@@ -139,18 +139,26 @@
         const canvas = document.createElement('canvas');
         canvas.width = size.width;
         canvas.height = size.height;
-        const context = canvas.getContext('2d');
-        context.drawImage(image, 0, 0, size.width, size.height);
+        canvas.getContext('2d').drawImage(image, 0, 0, size.width, size.height);
+        const encoded = App.images.encode(canvas);
+        const unchanged = size.width === original.width && size.height === original.height;
+        let smallest = encoded;
+        if (unchanged && (blob.type === 'image/png' || blob.type === 'image/jpeg')) {
+            const asIs = await App.images.dataUrlOf(blob);
+            if (asIs.length < encoded.src.length) {
+                smallest = { src: asIs, type: blob.type };
+            }
+        }
+        return { src: smallest.src, width: size.width, height: size.height, type: smallest.type };
+    };
+
+    /* A canvas as a data: URI: PNG if it has transparency, else the smaller of PNG and JPEG 0.85. { src, type } */
+    App.images.encode = function encode(canvas) {
         const candidates = [{ src: canvas.toDataURL('image/png'), type: 'image/png' }];
-        if (!hasTransparency(context, size.width, size.height)) {
+        if (!hasTransparency(canvas.getContext('2d'), canvas.width, canvas.height)) {
             candidates.push({ src: canvas.toDataURL('image/jpeg', JPEG_QUALITY), type: 'image/jpeg' });
         }
-        const unchanged = size.width === original.width && size.height === original.height;
-        if (unchanged && (blob.type === 'image/png' || blob.type === 'image/jpeg')) {
-            candidates.push({ src: await App.images.dataUrlOf(blob), type: blob.type });
-        }
-        const smallest = candidates.reduce((best, next) => (next.src.length < best.src.length ? next : best));
-        return { src: smallest.src, width: size.width, height: size.height, type: smallest.type };
+        return candidates.reduce((best, next) => (next.src.length < best.src.length ? next : best));
     };
 
     // ---------------------------------------------------------------

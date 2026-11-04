@@ -93,10 +93,10 @@
             id: 'picture-format', label: 'Picture Format', contextual: () => App.images.isPictureSelected(),
             groups: [
                 { label: 'Adjust', commands: [['changePicture', 'changePicture']] },
-                { label: 'Size', commands: [['resetPictureSize', 'resetPictureSize']] },
+                { label: 'Size', commands: [['cropPicture', 'crop'], ['resetPictureSize', 'resetPictureSize']] },
             ],
-            note: 'Change Picture: the new picture fits inside this one\'s box, centred. Reset Size: the size it came in with. ' +
-                'Width and height are in the Format pane; crop arrives next.',
+            note: 'Crop: drag the black handles, then Enter or click elsewhere; the cut-away part is removed from the file. ' +
+                'Change Picture: the new picture fits inside this one\'s box. Reset Size: the size it came in with.',
         },
         {
             id: 'arrange', label: 'Arrange',
@@ -276,7 +276,7 @@
         });
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
-         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed']
+         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed', 'crop-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 

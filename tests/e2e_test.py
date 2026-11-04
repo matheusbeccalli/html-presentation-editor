@@ -2231,6 +2231,74 @@ def test_picture_format(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_crop_picture(browser):
+    """Picture Format > Crop: black crop handles, the cut-away part dimmed; Enter, Esc, a click elsewhere or Crop again
+    applies it as a true crop (the stored picture keeps only the kept pixels); one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    logo = picture_file(page, "test-logo.png", "logo", 300, 100)
+    run = lambda command: page.click(f".ribbon-button[data-command='{command}']")  # noqa: E731
+    page.evaluate("App.deck.goTo(5)")
+    page.click(".ribbon-tab[data-tab='insert']")
+    with page.expect_file_chooser() as chooser:
+        run("insertPicture")
+    chooser.value.set_files([str(logo)])
+    wait_until(page, "App.history.undoLabel() === 'Insert picture'")
+    picture = page.evaluate("App.selection.selectedId()")
+    check(element_rect(page, picture) == {"left": 490, "top": 310, "width": 300, "height": 100}, "the logo, centred")
+    page.click(".ribbon-tab[data-tab='picture-format']")
+
+    # Crop mode: 8 black handles on the picture's edges, the selection handles gone.
+    run("cropPicture")
+    check(page.locator("#overlay .crop-handle:visible").count() == 8 and page.is_hidden("#overlay .selection-handle[data-handle='e']"),
+          "crop handles instead of the selection handles")
+    check(page.get_attribute(".ribbon-button[data-command='cropPicture']", "aria-pressed") == "true", "Crop shows it is on")
+    handle = lambda name: page.locator(f"#overlay .crop-handle[data-crop-handle='{name}']").bounding_box()  # noqa: E731
+    centre = lambda box: (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)  # noqa: E731
+    zoom = page.evaluate("App.canvas.getZoom()")
+    east = centre(handle("e"))
+    drag(page, east, (east[0] - 200 * zoom, east[1]))   # keep the dark square: the left 100 px
+    north = centre(handle("n"))
+    drag(page, north, (north[0], north[1] + 10 * zoom))
+    check(page.evaluate("App.history.undoLabel()") == "Insert picture", "nothing changes before the crop is applied")
+    page.screenshot(path=str(OUTPUT / "54-crop-mode.png"))
+    page.keyboard.press("Enter")
+    check(page.locator("#overlay .crop-handle:visible").count() == 0, "Enter: crop mode ends")
+    info = page.evaluate(PICTURE_INFO, picture)
+    rect = {k: round(v) for k, v in info["rect"].items()}
+    check(rect == {"left": 490, "top": 320, "width": 100, "height": 90}, f"the kept part, where it was: {info['rect']}")
+    wait_until(page, "id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').naturalWidth === 100", arg=picture)
+    info = page.evaluate(PICTURE_INFO, picture)
+    check(info["natural"] == [100, 90] and info["src"] == "data:image/png;base64,",
+          f"a true crop: the stored picture is only 100 x 90 pixels: {info}")
+    check(page.evaluate("App.history.undoLabel()") == "Crop", "one undo step")
+    page.screenshot(path=str(OUTPUT / "55-cropped.png"))
+    page.keyboard.press("Control+z")
+    wait_until(page, "id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').naturalWidth === 300", arg=picture)
+
+    # A click elsewhere applies it too; Crop with nothing moved changes nothing.
+    run("cropPicture")
+    west = centre(handle("w"))
+    drag(page, west, (west[0] + 50 * zoom, west[1]))
+    page.mouse.click(*slide_to_screen(page, 640, 650))   # empty slide space
+    check(page.locator("#overlay .crop-handle:visible").count() == 0 and page.evaluate("App.history.undoLabel()") == "Crop",
+          "a click on the slide applied the crop")
+    check(round(element_rect(page, picture)["left"]) == 540, f"cropped from the left: {element_rect(page, picture)}")
+    page.evaluate("id => App.selection.select(App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]'))", picture)
+    state = page.evaluate("App.history.stateId()")
+    page.click(".ribbon-tab[data-tab='picture-format']")
+    run("cropPicture")
+    page.keyboard.press("Escape")
+    check(page.locator("#overlay .crop-handle:visible").count() == 0 and page.evaluate("App.selection.selectedId()") == picture,
+          "Esc ends crop mode, the picture stays selected")
+    run("cropPicture")
+    run("cropPicture")
+    check(page.locator("#overlay .crop-handle:visible").count() == 0, "Crop again ends it")
+    check(page.evaluate("App.history.stateId()") == state, "nothing moved: no undo step")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -3286,6 +3354,7 @@ TESTS = [
     test_insert_picture,
     test_paste_and_drop_pictures,
     test_picture_format,
+    test_crop_picture,
 ]
 
 

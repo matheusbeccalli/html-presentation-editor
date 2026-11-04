@@ -113,6 +113,32 @@
 .selection-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
 .selection-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
 
+/* Picture Format > Crop (crop.js): the cut-away part dimmed, black handles on the kept part's edges. */
+#overlay.cropping .selection-box { display: none; }
+.crop-layer[hidden] { display: none; }
+.crop-mask { position: absolute; background: rgba(0, 0, 0, 0.45); pointer-events: none; }
+.crop-frame {
+    position: absolute;
+    outline: calc(1px * var(--inverse-zoom)) solid #fff;
+    pointer-events: none;
+}
+.crop-handle {
+    position: absolute;
+    --thick: calc(5px * var(--inverse-zoom));
+    --long: calc(18px * var(--inverse-zoom));
+    border: 0 solid #000;
+    pointer-events: auto;
+}
+/* Corners: an L inside the corner. Sides: a bar centred on the edge. */
+.crop-handle[data-crop-handle="nw"] { left: 0; top: 0; width: var(--long); height: var(--long); border-left-width: var(--thick); border-top-width: var(--thick); cursor: nwse-resize; }
+.crop-handle[data-crop-handle="ne"] { right: 0; top: 0; width: var(--long); height: var(--long); border-right-width: var(--thick); border-top-width: var(--thick); cursor: nesw-resize; }
+.crop-handle[data-crop-handle="se"] { right: 0; bottom: 0; width: var(--long); height: var(--long); border-right-width: var(--thick); border-bottom-width: var(--thick); cursor: nwse-resize; }
+.crop-handle[data-crop-handle="sw"] { left: 0; bottom: 0; width: var(--long); height: var(--long); border-left-width: var(--thick); border-bottom-width: var(--thick); cursor: nesw-resize; }
+.crop-handle[data-crop-handle="n"] { left: 50%; top: 0; width: var(--long); height: var(--thick); transform: translateX(-50%); background: #000; cursor: ns-resize; }
+.crop-handle[data-crop-handle="s"] { left: 50%; bottom: 0; width: var(--long); height: var(--thick); transform: translateX(-50%); background: #000; cursor: ns-resize; }
+.crop-handle[data-crop-handle="w"] { left: 0; top: 50%; width: var(--thick); height: var(--long); transform: translateY(-50%); background: #000; cursor: ew-resize; }
+.crop-handle[data-crop-handle="e"] { right: 0; top: 50%; width: var(--thick); height: var(--long); transform: translateY(-50%); background: #000; cursor: ew-resize; }
+
 #welcome {
     max-width: 520px; padding: 32px 36px;
     background: var(--surface); border-radius: 8px; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);

@@ -265,6 +265,11 @@
             label: 'Change Picture', isEnabled: () => App.images.isPictureSelected(),
             run: () => App.images.chooseReplacement(),
         });
+        App.commands.define('cropPicture', {
+            label: 'Crop', isEnabled: () => App.images.isPictureSelected(),
+            isChecked: () => App.crop.isCropping(),
+            run: () => App.crop.toggle(),
+        });
         App.commands.define('resetPictureSize', {
             label: 'Reset Size', isEnabled: () => App.images.isPictureSelected(),
             run: () => App.images.resetSize(),

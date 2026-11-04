@@ -6874,6 +6874,11 @@ App.template.newDeckHtml = function newDeckHtml() {
  * A new picture is centred on the slide at its own size, or smaller to fit
  * inside the margins (placeRect).
  *
+ * Picture Format tab (shown while a picture is selected): Change Picture (the
+ * new picture fits inside the old box, centred, keeping its proportions; same
+ * id and stacking order) and Reset size (the size it came in with, around the
+ * same centre, kept inside the slide).
+ *
  * Three ways in, all through insertFiles: Insert > Pictures (the file picker),
  * a picture file dropped on the window (fileio.js) and Ctrl+V of a picture on
  * the clipboard, e.g. a screenshot or an Excel chart (elements.js; text.js
@@ -6914,6 +6919,28 @@ App.template.newDeckHtml = function newDeckHtml() {
         return {
             left: round2((SLIDE.width - shown.width) / 2), top: round2((SLIDE.height - shown.height) / 2),
             width: round2(shown.width), height: round2(shown.height),
+        };
+    };
+
+    /* A picture of width x height px fitted inside `box`, centred, keeping its proportions (Change Picture). */
+    App.images.fitInside = function fitInside(box, width, height) {
+        const scale = Math.min(box.width / width, box.height / height);
+        const shown = { width: width * scale, height: height * scale };
+        return {
+            left: round2(box.left + (box.width - shown.width) / 2), top: round2(box.top + (box.height - shown.height) / 2),
+            width: round2(shown.width), height: round2(shown.height),
+        };
+    };
+
+    /* Reset size: the size a picture of width x height pixels came in with (placeRect), around the centre of `rect`, inside the slide. */
+    App.images.resetRect = function resetRect(rect, width, height) {
+        const size = App.images.placeRect(width, height);
+        const centre = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        const inside = (value, room) => Math.min(Math.max(value, 0), room);
+        return {
+            left: round2(inside(centre.x - size.width / 2, SLIDE.width - size.width)),
+            top: round2(inside(centre.y - size.height / 2, SLIDE.height - size.height)),
+            width: size.width, height: size.height,
         };
     };
 
@@ -7066,19 +7093,87 @@ App.template.newDeckHtml = function newDeckHtml() {
         return added;
     };
 
+    // ---------------------------------------------------------------
+    // Picture Format
+    // ---------------------------------------------------------------
+
+    App.images.isPictureSelected = function isPictureSelected() {
+        const element = App.selection.getElement();
+        return !!element && element.getAttribute('data-type') === 'image';
+    };
+
+    function slideScopeOf(element) {
+        return { slideId: element.closest('section.slide').getAttribute('data-slide-id') };
+    }
+
+    /* Change Picture: `file` in place of the picture `element`, fitted inside its box; one undo step. */
+    App.images.replace = async function replace(element, file) {
+        let picture;
+        try {
+            picture = await App.images.compress(file);
+        } catch (error) {
+            App.ui.setStatus('Not a picture the browser can show: ' + file.name);
+            return;
+        }
+        if (!element.isConnected) {
+            return;
+        }
+        App.history.change('Change picture', slideScopeOf(element), () => {
+            App.transform.writeRect(element, App.images.fitInside(App.transform.readRect(element), picture.width, picture.height));
+            element.setAttribute('src', picture.src);
+        });
+        App.ui.setStatus('');
+    };
+
+    /* Reset size of the selected picture (its pixels as they are now stored). */
+    App.images.resetSize = function resetSize() {
+        const element = App.selection.getElement();
+        if (!App.images.isPictureSelected() || !element.naturalWidth) {
+            return;
+        }
+        App.history.change('Reset size', slideScopeOf(element), () => {
+            App.transform.writeRect(element, App.images.resetRect(App.transform.readRect(element), element.naturalWidth, element.naturalHeight));
+        });
+    };
+
+    // ---------------------------------------------------------------
+    // The file picker
+    // ---------------------------------------------------------------
+
+    let replacing = null;   // the picture Change Picture works on, while its file picker is open
+
     /* Insert > Pictures: the file picker, then the pictures chosen. */
     App.images.choose = function choose() {
+        openPicker(null);
+    };
+
+    /* Picture Format > Change Picture: the file picker, then one picture in place of the selected one. */
+    App.images.chooseReplacement = function chooseReplacement() {
+        if (App.images.isPictureSelected()) {
+            openPicker(App.selection.getElement());
+        }
+    };
+
+    function openPicker(element) {
         const input = document.getElementById('picture-input');
+        replacing = element;
+        input.multiple = !element;
         input.value = '';
         input.click();
-    };
+    }
 
     /* Wiring, called once from App.start(). */
     App.images.init = function init() {
         document.getElementById('picture-input').addEventListener('change', (event) => {
-            if (event.target.files.length > 0) {
-                App.text.exitEdit({ select: false });
-                App.images.insertFiles(event.target.files);
+            const files = event.target.files;
+            if (files.length === 0) {
+                return;
+            }
+            App.text.exitEdit({ select: false });
+            if (replacing) {
+                App.images.replace(replacing, files[0]);
+            } else {
+                App.images.insertFiles(files);
             }
         });
     };
@@ -8829,6 +8924,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
         check: '<path d="M4 10.5l4 4 8-9"/>',
         formatPainter: '<rect x="3" y="2.5" width="12" height="5" rx="1"/><path d="M15 5h2v4.5h-7.5V12"/><rect x="8" y="12" width="3" height="5.5" rx="0.5"/>',
+        changePicture: '<rect x="2.5" y="3.5" width="11" height="10" rx="1"/><circle cx="6.5" cy="7.5" r="1.2"/>' +
+            '<path d="M2.5 12l3.5-3 2.5 2 2-1.5M17.5 11.5a4 4 0 0 1-6.8 2.8M10.7 18v-3.7h3.7"/>',
+        resetPictureSize: '<rect x="5.5" y="5.5" width="9" height="9"/><path d="M2.5 6V2.5H6M17.5 6V2.5H14M2.5 14v3.5H6M17.5 14v3.5H14"/>',
         picture: '<rect x="2.5" y="3.5" width="15" height="13" rx="1"/><circle cx="7" cy="8" r="1.5"/><path d="M2.5 14.5l4.5-4 3 2.5 3.5-3.5 4 4"/>',
         table: '<rect x="2.5" y="3.5" width="15" height="13"/><path d="M2.5 7.5h15M2.5 12h15M7.5 3.5v13M12.5 3.5v13"/>',
         insertRowAbove: '<rect x="3" y="9.5" width="14" height="8"/><path d="M3 13.5h14M10 2v5.5M7.25 4.75h5.5"/>',
@@ -10621,6 +10719,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     const ELEMENT_ITEMS = ['cut', 'copy', 'paste', 'duplicate', 'delete', '-',
         'bringToFront', 'bringForward', 'sendBackward', 'sendToBack'];
+    const PICTURE_ITEMS = ELEMENT_ITEMS.concat(['-', 'changePicture']);
     const EMPTY_SLIDE_ITEMS = ['paste'];
 
     let menu = null;
@@ -10654,7 +10753,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* Open the menu with its top-left corner at screen point (x, y). */
     App.contextMenu.open = function open(x, y) {
-        const commands = App.selection.getElement() ? ELEMENT_ITEMS : EMPTY_SLIDE_ITEMS;
+        const element = App.selection.getElement();
+        const commands = !element ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS;
         menu.innerHTML = '';
         commands.forEach((command) => menu.appendChild(command === '-' ? separator() : item(command)));
         menu.hidden = false;
@@ -13125,6 +13225,15 @@ App.template.newDeckHtml = function newDeckHtml() {
                 App.text.exitEdit({ select: false });
                 App.images.choose();
             },
+        });
+        // Picture Format (images.js): only while a picture is selected.
+        App.commands.define('changePicture', {
+            label: 'Change Picture', isEnabled: () => App.images.isPictureSelected(),
+            run: () => App.images.chooseReplacement(),
+        });
+        App.commands.define('resetPictureSize', {
+            label: 'Reset Size', isEnabled: () => App.images.isPictureSelected(),
+            run: () => App.images.resetSize(),
         });
         // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
         App.commands.define('insertTable', {
@@ -15624,7 +15733,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 /*
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
  *
- * Tabs: Home, Insert, Arrange, Slide Show, Export. In Phase 1 only Home has
+ * Tabs: Home, Insert, Arrange, Slide Show, Export, and contextual tabs shown
+ * only while they apply (Table Design and Layout, Picture Format). In Phase 1 only Home has
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
  *
@@ -15709,6 +15819,16 @@ App.template.newDeckHtml = function newDeckHtml() {
             ],
             note: 'Click in a cell, or drag across cells to select several (Shift+click too). Delete empties the selected cells. ' +
                 'Drag a table by its edge to move it.',
+        },
+        {
+            // Shown only while a picture is selected (PowerPoint's Picture Format tab).
+            id: 'picture-format', label: 'Picture Format', contextual: () => App.images.isPictureSelected(),
+            groups: [
+                { label: 'Adjust', commands: [['changePicture', 'changePicture']] },
+                { label: 'Size', commands: [['resetPictureSize', 'resetPictureSize']] },
+            ],
+            note: 'Change Picture: the new picture fits inside this one\'s box, centred. Reset Size: the size it came in with. ' +
+                'Width and height are in the Format pane; crop arrives next.',
         },
         {
             id: 'arrange', label: 'Arrange',

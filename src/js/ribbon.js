@@ -1,7 +1,8 @@
 /*
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
  *
- * Tabs: Home, Insert, Arrange, Slide Show, Export. In Phase 1 only Home has
+ * Tabs: Home, Insert, Arrange, Slide Show, Export, and contextual tabs shown
+ * only while they apply (Table Design and Layout, Picture Format). In Phase 1 only Home has
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
  *
@@ -86,6 +87,16 @@
             ],
             note: 'Click in a cell, or drag across cells to select several (Shift+click too). Delete empties the selected cells. ' +
                 'Drag a table by its edge to move it.',
+        },
+        {
+            // Shown only while a picture is selected (PowerPoint's Picture Format tab).
+            id: 'picture-format', label: 'Picture Format', contextual: () => App.images.isPictureSelected(),
+            groups: [
+                { label: 'Adjust', commands: [['changePicture', 'changePicture']] },
+                { label: 'Size', commands: [['resetPictureSize', 'resetPictureSize']] },
+            ],
+            note: 'Change Picture: the new picture fits inside this one\'s box, centred. Reset Size: the size it came in with. ' +
+                'Width and height are in the Format pane; crop arrives next.',
         },
         {
             id: 'arrange', label: 'Arrange',

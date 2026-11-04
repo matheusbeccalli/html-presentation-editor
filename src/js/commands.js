@@ -260,6 +260,15 @@
                 App.images.choose();
             },
         });
+        // Picture Format (images.js): only while a picture is selected.
+        App.commands.define('changePicture', {
+            label: 'Change Picture', isEnabled: () => App.images.isPictureSelected(),
+            run: () => App.images.chooseReplacement(),
+        });
+        App.commands.define('resetPictureSize', {
+            label: 'Reset Size', isEnabled: () => App.images.isPictureSelected(),
+            run: () => App.images.resetSize(),
+        });
         // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
         App.commands.define('insertTable', {
             label: 'Table', isEnabled: hasDeck,

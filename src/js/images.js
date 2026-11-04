@@ -15,6 +15,11 @@
  * A new picture is centred on the slide at its own size, or smaller to fit
  * inside the margins (placeRect).
  *
+ * Picture Format tab (shown while a picture is selected): Change Picture (the
+ * new picture fits inside the old box, centred, keeping its proportions; same
+ * id and stacking order) and Reset size (the size it came in with, around the
+ * same centre, kept inside the slide).
+ *
  * Three ways in, all through insertFiles: Insert > Pictures (the file picker),
  * a picture file dropped on the window (fileio.js) and Ctrl+V of a picture on
  * the clipboard, e.g. a screenshot or an Excel chart (elements.js; text.js
@@ -55,6 +60,28 @@
         return {
             left: round2((SLIDE.width - shown.width) / 2), top: round2((SLIDE.height - shown.height) / 2),
             width: round2(shown.width), height: round2(shown.height),
+        };
+    };
+
+    /* A picture of width x height px fitted inside `box`, centred, keeping its proportions (Change Picture). */
+    App.images.fitInside = function fitInside(box, width, height) {
+        const scale = Math.min(box.width / width, box.height / height);
+        const shown = { width: width * scale, height: height * scale };
+        return {
+            left: round2(box.left + (box.width - shown.width) / 2), top: round2(box.top + (box.height - shown.height) / 2),
+            width: round2(shown.width), height: round2(shown.height),
+        };
+    };
+
+    /* Reset size: the size a picture of width x height pixels came in with (placeRect), around the centre of `rect`, inside the slide. */
+    App.images.resetRect = function resetRect(rect, width, height) {
+        const size = App.images.placeRect(width, height);
+        const centre = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+        const inside = (value, room) => Math.min(Math.max(value, 0), room);
+        return {
+            left: round2(inside(centre.x - size.width / 2, SLIDE.width - size.width)),
+            top: round2(inside(centre.y - size.height / 2, SLIDE.height - size.height)),
+            width: size.width, height: size.height,
         };
     };
 
@@ -207,19 +234,87 @@
         return added;
     };
 
+    // ---------------------------------------------------------------
+    // Picture Format
+    // ---------------------------------------------------------------
+
+    App.images.isPictureSelected = function isPictureSelected() {
+        const element = App.selection.getElement();
+        return !!element && element.getAttribute('data-type') === 'image';
+    };
+
+    function slideScopeOf(element) {
+        return { slideId: element.closest('section.slide').getAttribute('data-slide-id') };
+    }
+
+    /* Change Picture: `file` in place of the picture `element`, fitted inside its box; one undo step. */
+    App.images.replace = async function replace(element, file) {
+        let picture;
+        try {
+            picture = await App.images.compress(file);
+        } catch (error) {
+            App.ui.setStatus('Not a picture the browser can show: ' + file.name);
+            return;
+        }
+        if (!element.isConnected) {
+            return;
+        }
+        App.history.change('Change picture', slideScopeOf(element), () => {
+            App.transform.writeRect(element, App.images.fitInside(App.transform.readRect(element), picture.width, picture.height));
+            element.setAttribute('src', picture.src);
+        });
+        App.ui.setStatus('');
+    };
+
+    /* Reset size of the selected picture (its pixels as they are now stored). */
+    App.images.resetSize = function resetSize() {
+        const element = App.selection.getElement();
+        if (!App.images.isPictureSelected() || !element.naturalWidth) {
+            return;
+        }
+        App.history.change('Reset size', slideScopeOf(element), () => {
+            App.transform.writeRect(element, App.images.resetRect(App.transform.readRect(element), element.naturalWidth, element.naturalHeight));
+        });
+    };
+
+    // ---------------------------------------------------------------
+    // The file picker
+    // ---------------------------------------------------------------
+
+    let replacing = null;   // the picture Change Picture works on, while its file picker is open
+
     /* Insert > Pictures: the file picker, then the pictures chosen. */
     App.images.choose = function choose() {
+        openPicker(null);
+    };
+
+    /* Picture Format > Change Picture: the file picker, then one picture in place of the selected one. */
+    App.images.chooseReplacement = function chooseReplacement() {
+        if (App.images.isPictureSelected()) {
+            openPicker(App.selection.getElement());
+        }
+    };
+
+    function openPicker(element) {
         const input = document.getElementById('picture-input');
+        replacing = element;
+        input.multiple = !element;
         input.value = '';
         input.click();
-    };
+    }
 
     /* Wiring, called once from App.start(). */
     App.images.init = function init() {
         document.getElementById('picture-input').addEventListener('change', (event) => {
-            if (event.target.files.length > 0) {
-                App.text.exitEdit({ select: false });
-                App.images.insertFiles(event.target.files);
+            const files = event.target.files;
+            if (files.length === 0) {
+                return;
+            }
+            App.text.exitEdit({ select: false });
+            if (replacing) {
+                App.images.replace(replacing, files[0]);
+            } else {
+                App.images.insertFiles(files);
             }
         });
     };

@@ -19,6 +19,7 @@
 
     const ELEMENT_ITEMS = ['cut', 'copy', 'paste', 'duplicate', 'delete', '-',
         'bringToFront', 'bringForward', 'sendBackward', 'sendToBack'];
+    const PICTURE_ITEMS = ELEMENT_ITEMS.concat(['-', 'changePicture']);
     const EMPTY_SLIDE_ITEMS = ['paste'];
 
     let menu = null;
@@ -52,7 +53,8 @@
 
     /* Open the menu with its top-left corner at screen point (x, y). */
     App.contextMenu.open = function open(x, y) {
-        const commands = App.selection.getElement() ? ELEMENT_ITEMS : EMPTY_SLIDE_ITEMS;
+        const element = App.selection.getElement();
+        const commands = !element ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS;
         menu.innerHTML = '';
         commands.forEach((command) => menu.appendChild(command === '-' ? separator() : item(command)));
         menu.hidden = false;

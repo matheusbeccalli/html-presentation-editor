@@ -142,3 +142,21 @@ test('images: the picture files of a paste or a drop (Excel puts a picture of th
     assertEqual(App.images.picturesIn(new DataTransfer()), []);
     assertEqual(App.images.picturesIn(null), []);
 });
+
+test('images: Change Picture fits the new picture inside the old box, centred, keeping its proportions', () => {
+    const box = { left: 196, top: 64, width: 888, height: 592 };
+    assertEqual(App.images.fitInside(box, 300, 100), { left: 196, top: 212, width: 888, height: 296 });
+    assertEqual(App.images.fitInside(box, 1000, 2000), { left: 492, top: 64, width: 296, height: 592 });
+    assertEqual(App.images.fitInside({ left: 10, top: 20, width: 100, height: 30 }, 300, 100),
+        { left: 15, top: 20, width: 90, height: 30 });
+});
+
+test('images: Reset size gives the picture the size it came in with, keeping its centre, inside the slide', () => {
+    // 1920 x 1280 pixels came in at 888 x 592 (inside the slide's margins); centred on (300, 150) it would stick out.
+    assertEqual(App.images.resetRect({ left: 100, top: 100, width: 400, height: 100 }, 1920, 1280),
+        { left: 0, top: 0, width: 888, height: 592 });
+    assertEqual(App.images.resetRect({ left: 1100, top: 600, width: 400, height: 100 }, 1920, 1280),
+        { left: 392, top: 128, width: 888, height: 592 });
+    assertEqual(App.images.resetRect({ left: 500, top: 300, width: 50, height: 50 }, 300, 100),
+        { left: 375, top: 275, width: 300, height: 100 });
+});

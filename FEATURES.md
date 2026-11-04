@@ -206,9 +206,9 @@ Nested bullets are the top priority of this phase.
 - [x] Insert image from file *(Insert > Pictures; several files at once (one undo step, each 10 px aside); centred at its own size, smaller to fit inside the slide's margins; selected. A picture's corner handles keep its proportions, as in PowerPoint)*
 - [x] Insert image by drag-and-drop *(dropped on the slide or anywhere on the window: centred like Insert > Pictures; the drop zone says "Drop to put the picture on this slide"; an .html file among them still opens as a deck; other files are named in the status bar)*
 - [x] Paste image from clipboard (Win+Shift+S then Ctrl+V) *(screenshots, pictures copied from a web page, Excel charts (the documented fallback until Phase 6 charts); Excel's copied cells stay a table, their picture ignored; a picture pasted while typing becomes its own picture; our own newer copy still wins)*
-- [ ] Replace image (keeps position and size)
+- [x] Replace image (keeps position and size) *(Picture Format > Change Picture, or right-click: as decided in the Phase 5 Q&A the new picture fits inside the old box, centred, keeping its own proportions; same element and stacking order; one undo step)*
 - [ ] Crop with handles, stored as a true crop via `<canvas>`
-- [ ] Reset image size
+- [x] Reset image size *(Picture Format > Reset Size: the size it came in with (inside the slide's margins), around the same centre, kept inside the slide)*
 - [x] Compress on insert: longest side max 1920 px, JPEG quality 0.85 unless the image has transparency (keep PNG) *(decided in the Phase 5 Q&A: the smaller of PNG and JPEG 0.85 is kept, so screenshots and flat logos usually stay PNG and sharp; a file already smaller than both is kept as it is; SVG stays SVG)*
 - [x] Deck file size shown in the status bar *("Deck 3.4 MB", a second after a change; amber above 20 MB, with a tooltip that the file may be too big to email)*
 - [ ] Shapes: rectangle, rounded rectangle, ellipse, line, arrow, chevron, pentagon, callout (CSS or inline SVG)
@@ -217,6 +217,7 @@ Nested bullets are the top priority of this phase.
 - [ ] **Done when:** a process diagram of chevrons and a logo screenshot can be built on a slide without leaving the editor.
   - [ ] Pictures: Insert > Pictures, pick a big JPEG photo and a small logo PNG at once (Ctrl+click both): both appear in the middle of the slide (the photo fits inside the slide), one Ctrl+Z removes both. The status bar shows "Deck … MB", growing after an insert. Drag a picture's corner: it keeps its proportions; a side handle stretches it. Save, look at the file's size in Explorer: close to the status bar's
   - [ ] Drop and paste: drag a PNG from Explorer onto the slide: "Drop to put the picture on this slide", it lands in the middle. Win+Shift+S a part of the screen, click the slide, Ctrl+V: the screenshot appears, Ctrl+Z removes it. Copy a chart in Excel, Ctrl+V: a picture of the chart. Copy cells in Excel, Ctrl+V: a table (not a picture). Typing in a text box, Ctrl+V of a screenshot: typing ends and the screenshot is its own picture. Drag an .html deck in: "Drop the .html deck to open it"
+  - [ ] Picture Format: click a picture: the Picture Format tab appears (it goes away when a text box is selected). Stretch the picture by a side handle, then Reset Size: back to its proportions. Change Picture, pick a wide logo: it fits inside the old picture's box, centred; one Ctrl+Z brings the old picture back. Right-click a picture: Change Picture is in the menu
 
 ## Phase 6: Charts (section 5)
 

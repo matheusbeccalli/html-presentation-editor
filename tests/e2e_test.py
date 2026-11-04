@@ -2164,6 +2164,73 @@ def test_paste_and_drop_pictures(browser):
     editor.close()
 
 
+def test_picture_format(browser):
+    """Picture Format tab (only with a picture selected): Reset size, Change Picture (fits inside the old box, centred,
+    keeps its id and place in the stacking order), also from the right-click menu; each one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    photo = picture_file(page, "test-photo.png", "noise", 3000, 2000)
+    logo = picture_file(page, "test-logo.png", "logo", 300, 100)
+    tab = ".ribbon-tab[data-tab='picture-format']"
+    run = lambda command: page.click(f".ribbon-button[data-command='{command}']")  # noqa: E731
+    page.evaluate("App.deck.goTo(5)")
+    check(page.is_hidden(tab), "no Picture Format tab without a picture")
+    page.click(".ribbon-tab[data-tab='insert']")
+    with page.expect_file_chooser() as chooser:
+        run("insertPicture")
+    chooser.value.set_files([str(photo)])
+    wait_until(page, "App.history.undoLabel() === 'Insert picture'")
+    picture = page.evaluate("App.selection.selectedId()")
+    check(page.is_visible(tab), "a picture selected: the Picture Format tab shows")
+    page.click(tab)
+
+    # Stretched by a side handle, then Reset size: the size it came in with, around the same centre.
+    side = page.locator("#overlay .selection-handle[data-handle='e']").bounding_box()
+    drag(page, (side["x"] + 4, side["y"] + 4), (side["x"] - 300, side["y"] + 4))
+    stretched = element_rect(page, picture)
+    check(stretched["width"] < 600 and stretched["height"] == 592, f"stretched: {stretched}")
+    run("resetPictureSize")
+    centre = (stretched["left"] + stretched["width"] / 2, stretched["top"] + stretched["height"] / 2)
+    check(element_rect(page, picture) == {"left": max(0, round(centre[0] - 444, 2)), "top": 64, "width": 888, "height": 592},
+          f"reset around its centre {centre}, inside the slide: {element_rect(page, picture)}")
+    check(page.evaluate("App.history.undoLabel()") == "Reset size", "one undo step")
+
+    # Change Picture: the logo fits inside the old box, centred; same id, same z-index; one Ctrl+Z gives the photo back.
+    box = element_rect(page, picture)
+    z = page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').style.zIndex", picture)
+    with page.expect_file_chooser() as chooser:
+        run("changePicture")
+    chooser.value.set_files([str(logo)])
+    wait_until(page, "App.history.undoLabel() === 'Change picture'")
+    info = page.evaluate(PICTURE_INFO, picture)
+    check(info["natural"] == [300, 100] and info["src"] == "data:image/png;base64,", f"the logo: {info}")
+    check(info["rect"] == {"left": box["left"], "top": 212, "width": 888, "height": 296}, f"inside the old box: {info['rect']}")
+    check(page.evaluate("App.selection.selectedId()") == picture and
+          page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').style.zIndex", picture) == z,
+          "same element, same place in the stacking order")
+    page.screenshot(path=str(OUTPUT / "53-picture-format.png"))
+    page.keyboard.press("Control+z")
+    check(page.evaluate(PICTURE_INFO, picture)["natural"] == [1920, 1280] and element_rect(page, picture) == box,
+          "one undo: the photo back")
+
+    # The right-click menu has Change Picture; a file the browser cannot show leaves the picture as it was.
+    centre_on_screen = slide_to_screen(page, box["left"] + 100, box["top"] + 100)
+    page.mouse.click(*centre_on_screen, button="right")
+    with page.expect_file_chooser() as chooser:
+        page.click(".context-menu .menu-item:has-text('Change Picture')")
+    broken = OUTPUT / "broken.png"
+    broken.write_bytes(b"not a picture")
+    chooser.value.set_files([str(broken)])
+    wait_until(page, "document.getElementById('status-message').textContent.indexOf('broken.png') !== -1")
+    check(page.evaluate(PICTURE_INFO, picture)["natural"] == [1920, 1280], "the photo kept")
+
+    # Another kind of element: no Picture Format tab.
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e16\"]'))")
+    check(page.is_hidden(tab), "a text box selected: the tab goes away")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -3218,6 +3285,7 @@ TESTS = [
     test_phase4_done_when,
     test_insert_picture,
     test_paste_and_drop_pictures,
+    test_picture_format,
 ]
 
 

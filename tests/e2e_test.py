@@ -1835,6 +1835,80 @@ def test_table_numbers(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+TABLE_TEXTS = """id => { const table = App.deck.getDocument().querySelector('[data-id="' + id + '"] > table');
+    return table ? Array.from(table.rows, (row) => Array.from(row.cells, (cell) => cell.textContent).join('|')) : null; }"""
+
+
+def test_paste_from_excel(browser):
+    """Ctrl+V of a table copied in Excel (real capture, fake text): a new table in the deck's look, paste options,
+    pasting into a table from a cell, and our own copies still winning over an older Excel copy."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    editor.open(CONTRACT)
+    page = editor.page
+    selected = "App.selection.selectedId()"
+    comps = clipboard_fixture("excel-comps")
+    page.evaluate("App.deck.goTo(4)")   # slide 5: room for a table
+    page.mouse.click(*slide_to_screen(page, 640, 500))   # empty slide space
+    put_on_clipboard(page, comps["text/html"], comps["text/plain"])
+    started = time.time()
+    page.keyboard.press("Control+v")
+    new_id = page.evaluate(selected)
+    texts = page.evaluate(TABLE_TEXTS, new_id)
+    check(time.time() - started < 10, "pasted at once")
+    check(texts and texts[1] == "Aaaa Aaaaa|2.450|9,8x|19,50%" and len(texts) == 6, f"a new table with Excel's text: {texts}")
+    options = page.evaluate("""id => { const table = App.deck.getDocument().querySelector('[data-id="' + id + '"] > table');
+        return ['data-header-row', 'data-total-row'].map((name) => table.hasAttribute(name)); }""", new_id)
+    check(options == [True, True], "the deck's style: header row, and Mediana (bold in Excel) as the total row")
+    check(page.evaluate(LINE_ALIGN, [new_id, 1, 1]) == "right" and page.evaluate(LINE_ALIGN, [new_id, 1, 0]) == "left",
+          "numbers on the right")
+    check(page.evaluate("App.history.undoLabel()") == "Paste table", "one undo step")
+    page.screenshot(path=str(OUTPUT / "48-table-pasted.png"))
+
+    # Paste options: Keep source formatting puts Excel's look on it, still one step.
+    check(page.is_visible("#paste-options"), "the paste options button")
+    page.click("#paste-options")
+    page.click(".paste-options-menu .menu-item:has-text('Keep source formatting')")
+    source_id = page.evaluate(selected)
+    fill = page.evaluate("""id => { const doc = App.deck.getDocument();
+        return doc.defaultView.getComputedStyle(doc.querySelector('[data-id="' + id + '"] td')).backgroundColor; }""", source_id)
+    check(fill == "rgb(14, 40, 65)", f"Excel's dark header: {fill}")
+    page.keyboard.press("Control+z")
+    check(page.evaluate(TABLE_TEXTS, source_id) is None and page.evaluate(TABLE_TEXTS, new_id) is None, "one Ctrl+Z: no table")
+
+    # Our own newer copy wins over the Excel table copied before it.
+    page.evaluate("App.deck.goTo(0)")
+    page.mouse.click(*slide_to_screen(page, 300, 290))   # "Projeto Atlas"
+    page.keyboard.press("Control+c")
+    page.keyboard.press("Control+v")
+    pasted = page.evaluate(selected)
+    check(pasted not in (None, "e2") and page.evaluate(
+        "id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').getAttribute('data-type')", pasted) == "text",
+        f"our copy pasted, not Excel's table: {pasted}")
+
+    # Typing in a cell, Ctrl+V of several cells: they fill the table from there, adding rows; the cells are selected.
+    page.evaluate("App.deck.goTo(2)")   # the comps table e9 (rows about 37 px from y = 178)
+    sheet = clipboard_fixture("excel-table")   # 5 rows x 3 columns of 1,1 … 5,5
+    put_on_clipboard(page, sheet["text/html"], sheet["text/plain"])
+    page.mouse.click(*slide_to_screen(page, 200, 307))   # Épsilon Orgânicos
+    page.keyboard.press("Control+v")
+    texts = page.evaluate(TABLE_TEXTS, "e9")
+    check(len(texts) == 9 and texts[4] == "1,1|1,1|1,1|-3,5%" and texts[8] == "5,5|5,5|5,5|",
+          f"from Épsilon on, three rows added: {texts}")
+    check(page.is_visible(".cell-block") and page.evaluate("App.history.undoLabel()") == "Paste", "the pasted cells selected; one step")
+    page.keyboard.press("Control+z")
+    check(len(page.evaluate(TABLE_TEXTS, "e9")) == 6, "undone")
+
+    # Selected cells, Ctrl+V: from their first cell on (here it fits, nothing added).
+    page.keyboard.press("Escape")
+    drag(page, slide_to_screen(page, 480, 196), slide_to_screen(page, 750, 232))   # 2.450 … 8,9x
+    page.keyboard.press("Control+v")
+    texts = page.evaluate(TABLE_TEXTS, "e9")
+    check(texts[1] == "Beta Foods|1,1|1,1|1,1" and texts[5] == "Mediana|5,5|5,5|5,5" and len(texts) == 6, f"from 2.450 on: {texts}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -2885,6 +2959,7 @@ TESTS = [
     test_table_column_borders,
     test_table_design,
     test_table_numbers,
+    test_paste_from_excel,
 ]
 
 

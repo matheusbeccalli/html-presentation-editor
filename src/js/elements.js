@@ -7,13 +7,17 @@
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
  *
  * The clipboard is the editor's own (a string of HTML in memory), so copy and
- * paste work between slides and decks in this tab. Pasting from other programs
- * (tables from Excel, screenshots) arrives in Phases 4 and 5.
+ * paste work between slides and decks in this tab. Ctrl+C / Ctrl+X / Ctrl+V go
+ * through the browser's copy / cut / paste events (they carry the system
+ * clipboard): a copy also puts a mark on the system clipboard, so Ctrl+V knows
+ * whether the newest copy is ours or another program's. A table from Excel
+ * becomes a table (tablepaste.js); screenshots arrive in Phase 5.
  *
  * Insert > Text box and Insert > Table add new elements on top of the slide.
  *
  * Talks to: selection.js (what is selected), transform.js (positions, order),
- *           history.js, deck.js, text.js and tables.js (new elements).
+ *           history.js, deck.js, text.js and tables.js (new elements),
+ *           tablepaste.js (Ctrl+V of a table), commands.js.
  */
 
 (function () {
@@ -66,8 +70,8 @@
         let element = null;
         App.history.change('Insert text box', { slideId: slide.getAttribute('data-slide-id') }, () => {
             element = App.text.createTextElement(doc, { left: left, top: Math.max(0, Math.min(700, spot.top)), width: width },
-                freshId(doc));
-            addOnTop(slide, element);
+                App.elements.freshId(doc));
+            App.elements.addOnTop(slide, element);
         });
         App.selection.select(element);
         App.text.enterEdit(element, { caret: 'start', isNew: true });
@@ -87,24 +91,25 @@
         let element = null;
         App.history.change('Insert table', { slideId: slide.getAttribute('data-slide-id') }, () => {
             element = App.tables.createTable(slide.ownerDocument, rows, cols, App.tables.newTableRect(rows, cols),
-                freshId(slide.ownerDocument));
-            addOnTop(slide, element);
+                App.elements.freshId(slide.ownerDocument));
+            App.elements.addOnTop(slide, element);
             App.tables.fitTable(element);
         });
         App.selection.select(element);
     };
 
-    function freshId(doc) {
+    /* An element id not used in the deck yet. */
+    App.elements.freshId = function freshId(doc) {
         const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
         return App.util.uniqueId('e', used);
-    }
+    };
 
     /* A new element goes in front of everything on the slide (before the speaker notes in the HTML). */
-    function addOnTop(slide, element) {
+    App.elements.addOnTop = function addOnTop(slide, element) {
         const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
         element.style.zIndex = String(top + 1);
         slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
-    }
+    };
 
     /* Give `element` and every element inside it that has a data-id a new, unused id. */
     App.elements.giveFreshIds = function giveFreshIds(element, usedIds) {
@@ -172,7 +177,11 @@
         const element = App.selection.getElement();
         if (element) {
             clipboardHtml = element.outerHTML;
+            copyMark = 'deck-editor-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
             App.events.emit('clipboard-changed');   // Paste buttons become enabled
+            if (!inClipboardEvent) {
+                writeMark(element);   // the ribbon's Copy: no copy event to write it in
+            }
         }
     };
 
@@ -210,6 +219,91 @@
         App.selection.select(element);
         return element;
     }
+
+    // ---- The system clipboard (Ctrl+C / Ctrl+X / Ctrl+V) ----
+
+    let copyMark = null;            // the mark our newest copy put on the system clipboard
+    let inClipboardEvent = false;   // a copy / cut event is writing the clipboard itself
+
+    /* The mark as clipboard HTML, with the element's text (for a paste into another program). */
+    function markData(text) {
+        const holder = document.createElement('div');
+        holder.setAttribute('data-deck-editor', 'element');
+        holder.setAttribute('data-copy', copyMark);
+        holder.textContent = text;
+        return { html: holder.outerHTML, text: text };
+    }
+
+    function textOf(element) {
+        return (element.innerText || element.textContent || '').trim();
+    }
+
+    /* Best effort: if the browser refuses, a table copied earlier in Excel could win over this copy at Ctrl+V. */
+    function writeMark(element) {
+        const data = markData(textOf(element));
+        if (navigator.clipboard && window.ClipboardItem) {
+            navigator.clipboard.write([new ClipboardItem({
+                'text/html': new Blob([data.html], { type: 'text/html' }),
+                'text/plain': new Blob([data.text], { type: 'text/plain' }),
+            })]).catch(() => {});
+        }
+    }
+
+    /* A clipboard event the slide handles: not typing (text.js has those), not in a field or a dialog. */
+    function forTheSlide(event) {
+        const target = event.target;
+        return !event.defaultPrevented && !App.text.isEditing() && !App.shortcuts.isTypingTarget(target) &&
+            !(target && target.closest && target.closest('dialog')) && !!App.deck.getCurrentSlide();
+    }
+
+    /* Ctrl+C / Ctrl+X with an element selected: our copy, and its mark on the system clipboard. */
+    function onCopyEvent(event) {
+        const element = App.selection.getElement();
+        if (!forTheSlide(event) || !element) {
+            return;
+        }
+        event.preventDefault();
+        const text = textOf(element);
+        inClipboardEvent = true;
+        try {
+            App.commands.run(event.type);   // 'copy' or 'cut'
+        } finally {
+            inClipboardEvent = false;
+        }
+        const data = markData(text);
+        event.clipboardData.setData('text/html', data.html);
+        event.clipboardData.setData('text/plain', data.text);
+    }
+
+    /* Ctrl+V: a table from another program (Excel), else our own copy. */
+    function onPasteEvent(event) {
+        if (!forTheSlide(event)) {
+            return;
+        }
+        const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
+        const ours = copyMark !== null && clipboard.html.indexOf(copyMark) !== -1;
+        if (!ours && App.tablePaste.paste(clipboard)) {
+            event.preventDefault();
+        } else if (App.elements.canPaste()) {
+            event.preventDefault();
+            App.elements.paste();
+        }
+    }
+
+    /* Wiring, called once from App.start(): the editor's page and every deck loaded. */
+    App.elements.init = function init() {
+        const wired = new WeakSet();
+        const listen = (doc) => {
+            if (doc && !wired.has(doc)) {
+                wired.add(doc);
+                doc.addEventListener('copy', onCopyEvent);
+                doc.addEventListener('cut', onCopyEvent);
+                doc.addEventListener('paste', onPasteEvent);
+            }
+        };
+        listen(document);
+        App.events.on('deck-loaded', () => listen(App.deck.getDocument()));
+    };
 
     App.elements.paste = function paste() {
         if (App.elements.canPaste()) {

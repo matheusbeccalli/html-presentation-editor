@@ -794,6 +794,11 @@
         return widths;
     }
 
+    /* The widths of a laid-out table's columns, in px (paste from Excel). */
+    App.tables.renderedColumnWidths = function renderedColumnWidths(table) {
+        return columnWidths(App.tables.gridOf(table), 1);
+    };
+
     /* A cell's fill: its own, else the row's, the row group's or the table's (the cell is drawn on top of them). */
     function backgroundOf(sourceCell, table) {
         const view = table.ownerDocument.defaultView;

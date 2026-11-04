@@ -97,6 +97,18 @@ test('shortcuts: blockBrowserDefault keeps the browser away even when the comman
     assertEqual(ran, []);
 });
 
+test('shortcuts: clipboardEvent leaves Ctrl+V to the browser, whose paste event carries the clipboard', () => {
+    const registry = App.shortcuts.createRegistry();
+    registry.register('Ctrl+V', 'paste', { clipboardEvent: true });
+    const event = fakeKey('v', { ctrl: true });
+    const ran = [];
+    assert(!registry.handle(event, (c) => ran.push(c), () => true), 'not handled');
+    assert(!event.wasPrevented(), 'the browser fires its paste event');
+    assertEqual(ran, []);
+    assert(App.shortcuts.DEFAULTS.filter(([, , options]) => options && options.clipboardEvent).map(([combo]) => combo).join() ===
+        'Ctrl+X,Ctrl+C,Ctrl+V', 'cut, copy and paste go through the clipboard events');
+});
+
 test('shortcuts: ignored while a dialog is open (keys belong to the dialog)', () => {
     const registry = App.shortcuts.createRegistry();
     const ran = [];

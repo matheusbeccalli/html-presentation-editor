@@ -423,21 +423,43 @@
         return lineSpacingButton;
     }
 
-    // ---- The paste options button (after a paste, at the end of the pasted text) ----
+    // ---- The paste options button (after a paste: at the end of the pasted text, or at a pasted table's corner) ----
 
     let pasteButton = null;
 
+    /*
+     * What the button offers now: { current, options, choose(mode), at: { x, y }
+     * (slide px) }, for the last paste into text or the table just pasted (tablepaste.js); else null.
+     */
+    function pasteChoices() {
+        const text = App.text.pasteOptions();
+        const doc = App.deck.getDocument();
+        const selection = doc && doc.getSelection();
+        if (text && selection && selection.rangeCount > 0) {
+            // The deck iframe shows the slide at 1:1: the cursor's box is in slide pixels.
+            const range = selection.getRangeAt(0);
+            const box = range.getClientRects()[0] || range.startContainer.parentElement.getBoundingClientRect();
+            return Object.assign({ choose: App.text.repaste, at: { x: box.right, y: box.bottom } }, text);
+        }
+        const table = App.tablePaste.pasteOptions();
+        if (table) {
+            return Object.assign({ choose: App.tablePaste.repaste,
+                at: { x: table.rect.left + table.rect.width, y: table.rect.top + table.rect.height } }, table);
+        }
+        return null;
+    }
+
     function openPasteMenu() {
-        const choices = App.text.pasteOptions();
+        const choices = pasteChoices();
         if (!choices) {
             return;
         }
         const items = choices.options.map((option) => ({ label: option.label, value: option.mode,
             checked: option.mode === choices.current }));
-        openMenu(pasteButton, 'paste-options-menu', items, (mode) => App.text.repaste(mode));
+        openMenu(pasteButton, 'paste-options-menu', items, (mode) => choices.choose(mode));
     }
 
-    /* Show the button where the pasted text ends while the paste can be switched; hide it otherwise. */
+    /* Show the button where the paste ended while it can be switched; hide it otherwise. */
     function refreshPasteButton() {
         if (!pasteButton) {
             pasteButton = keepEdit(el('button', {
@@ -450,28 +472,24 @@
             pasteButton.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
             document.body.appendChild(pasteButton);
         }
-        const doc = App.deck.getDocument();
-        const selection = doc && doc.getSelection();
-        if (!App.text.pasteOptions() || !selection || selection.rangeCount === 0) {
+        const choices = pasteChoices();
+        if (!choices) {
             pasteButton.hidden = true;
             if (menu && menu.classList.contains('paste-options-menu')) {
                 closeMenu();
             }
             return;
         }
-        // The deck iframe shows the slide at 1:1: the cursor's box is in slide pixels.
-        const range = selection.getRangeAt(0);
-        const box = range.getClientRects()[0] || range.startContainer.parentElement.getBoundingClientRect();
         const overlay = document.getElementById('overlay').getBoundingClientRect();
         const zoom = App.canvas.getZoom();
-        pasteButton.style.left = (overlay.left + box.right * zoom + 4) + 'px';
-        pasteButton.style.top = (overlay.top + box.bottom * zoom + 2) + 'px';
+        pasteButton.style.left = (overlay.left + choices.at.x * zoom + 4) + 'px';
+        pasteButton.style.top = (overlay.top + choices.at.y * zoom + 2) + 'px';
         pasteButton.hidden = false;
     }
 
     App.textControls.init = function init() {
-        ['text-pasted', 'history-changed', 'text-selection-changed', 'text-edit-changed', 'zoom-changed', 'slide-changed']
-            .forEach((name) => App.events.on(name, refreshPasteButton));
+        ['text-pasted', 'table-pasted', 'history-changed', 'text-selection-changed', 'text-edit-changed', 'zoom-changed',
+            'slide-changed', 'selection-changed'].forEach((name) => App.events.on(name, refreshPasteButton));
     };
 
     /* The control named in the ribbon's layout. */

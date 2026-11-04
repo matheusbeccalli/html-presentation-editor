@@ -882,6 +882,7 @@ App.start = function start() {
     App.thumbnails.init();
     App.deck.init();
     App.text.init();
+    App.elements.init();
     App.fileio.init();
     App.autosave.init();
     App.drafts.init();
@@ -1085,7 +1086,10 @@ App.createEventBus = function createEventBus() {
  *  - shortcuts are ignored while a dialog is open;
  *  - a shortcut whose command is disabled right now (e.g. Escape with nothing
  *    selected) leaves the key to the browser, unless registered with
- *    { blockBrowserDefault: true } (Ctrl+S must never open "Save page as").
+ *    { blockBrowserDefault: true } (Ctrl+S must never open "Save page as");
+ *  - Ctrl+C / Ctrl+X / Ctrl+V are { clipboardEvent: true }: the key is left to
+ *    the browser, whose copy / cut / paste event (it carries the system
+ *    clipboard, e.g. a table from Excel) runs the command (elements.js).
  *
  * Talks to: commands.js (runs commands), deck.js (listens to the deck iframe,
  * because key presses inside an iframe do not reach the main window).
@@ -1194,6 +1198,7 @@ App.createEventBus = function createEventBus() {
                 combo: key, command: command,
                 whileTyping: !!(options && options.whileTyping),
                 blockBrowserDefault: !!(options && options.blockBrowserDefault),
+                clipboardEvent: !!(options && options.clipboardEvent),
             });
         }
 
@@ -1217,7 +1222,7 @@ App.createEventBus = function createEventBus() {
             if (!entry) {
                 return false;
             }
-            if (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping) {
+            if (entry.clipboardEvent || (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping)) {
                 return false;
             }
             // Enter and Space press a focused button or menu item; they are not shortcuts there.
@@ -1275,9 +1280,9 @@ App.createEventBus = function createEventBus() {
         ['Shift+ArrowDown', 'nudgeDownFar'],
         ['Delete', 'delete'],
         ['Backspace', 'delete'],
-        ['Ctrl+X', 'cut'],
-        ['Ctrl+C', 'copy'],
-        ['Ctrl+V', 'paste'],
+        ['Ctrl+X', 'cut', { clipboardEvent: true }],
+        ['Ctrl+C', 'copy', { clipboardEvent: true }],
+        ['Ctrl+V', 'paste', { clipboardEvent: true }],
         // Ctrl+D is the browser's "bookmark this page"; never let it open with nothing selected.
         ['Ctrl+D', 'duplicate', { blockBrowserDefault: true }],
         // Formatting keys also work while typing (that is where they are used).
@@ -2569,6 +2574,24 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* The text of each line of a container (a line break as "\n"). */
     App.text.lineTexts = function lineTexts(container) {
         return Array.from(container.children).map(lineText);
+    };
+
+    /*
+     * Replace the text of a container by `lines` of plain text, all bold and / or
+     * italic when look.bold / look.italic (cells pasted from Excel).
+     */
+    App.text.writeLines = function writeLines(container, lines, look) {
+        const doc = container.ownerDocument;
+        container.replaceChildren(...lines.map((line) => {
+            const p = doc.createElement('p');
+            let holder = p;
+            ['bold', 'italic'].filter((name) => look && look[name]).forEach((name) => {
+                holder = holder.appendChild(doc.createElement(name === 'bold' ? 'b' : 'i'));
+            });
+            holder.textContent = line;
+            return p;
+        }));
+        App.text.normalizeCell(container);
     };
 
     /* Remove all the text of a container (selected table cells + Delete), leaving one empty line. */
@@ -4872,6 +4895,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         const mode = plainPaste ? 'plain' : 'normal';
         plainPaste = false;
         const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
+        if (mode === 'normal' && isCell(editing.element) && App.tablePaste.pasteIntoCell(editing.element, clipboard)) {
+            return;   // several cells from Excel: they fill the table from this cell on
+        }
         const caret = App.text.getCaret(editing.element);
         const action = caret && App.text.pasteAction(editing.element, caret, clipboard, mode);
         if (action) {
@@ -6646,6 +6672,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         return widths;
     }
+
+    /* The widths of a laid-out table's columns, in px (paste from Excel). */
+    App.tables.renderedColumnWidths = function renderedColumnWidths(table) {
+        return columnWidths(App.tables.gridOf(table), 1);
+    };
 
     /* A cell's fill: its own, else the row's, the row group's or the table's (the cell is drawn on top of them). */
     function backgroundOf(sourceCell, table) {
@@ -9783,13 +9814,17 @@ App.template.newDeckHtml = function newDeckHtml() {
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
  *
  * The clipboard is the editor's own (a string of HTML in memory), so copy and
- * paste work between slides and decks in this tab. Pasting from other programs
- * (tables from Excel, screenshots) arrives in Phases 4 and 5.
+ * paste work between slides and decks in this tab. Ctrl+C / Ctrl+X / Ctrl+V go
+ * through the browser's copy / cut / paste events (they carry the system
+ * clipboard): a copy also puts a mark on the system clipboard, so Ctrl+V knows
+ * whether the newest copy is ours or another program's. A table from Excel
+ * becomes a table (tablepaste.js); screenshots arrive in Phase 5.
  *
  * Insert > Text box and Insert > Table add new elements on top of the slide.
  *
  * Talks to: selection.js (what is selected), transform.js (positions, order),
- *           history.js, deck.js, text.js and tables.js (new elements).
+ *           history.js, deck.js, text.js and tables.js (new elements),
+ *           tablepaste.js (Ctrl+V of a table), commands.js.
  */
 
 (function () {
@@ -9842,8 +9877,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         let element = null;
         App.history.change('Insert text box', { slideId: slide.getAttribute('data-slide-id') }, () => {
             element = App.text.createTextElement(doc, { left: left, top: Math.max(0, Math.min(700, spot.top)), width: width },
-                freshId(doc));
-            addOnTop(slide, element);
+                App.elements.freshId(doc));
+            App.elements.addOnTop(slide, element);
         });
         App.selection.select(element);
         App.text.enterEdit(element, { caret: 'start', isNew: true });
@@ -9863,24 +9898,25 @@ App.template.newDeckHtml = function newDeckHtml() {
         let element = null;
         App.history.change('Insert table', { slideId: slide.getAttribute('data-slide-id') }, () => {
             element = App.tables.createTable(slide.ownerDocument, rows, cols, App.tables.newTableRect(rows, cols),
-                freshId(slide.ownerDocument));
-            addOnTop(slide, element);
+                App.elements.freshId(slide.ownerDocument));
+            App.elements.addOnTop(slide, element);
             App.tables.fitTable(element);
         });
         App.selection.select(element);
     };
 
-    function freshId(doc) {
+    /* An element id not used in the deck yet. */
+    App.elements.freshId = function freshId(doc) {
         const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
         return App.util.uniqueId('e', used);
-    }
+    };
 
     /* A new element goes in front of everything on the slide (before the speaker notes in the HTML). */
-    function addOnTop(slide, element) {
+    App.elements.addOnTop = function addOnTop(slide, element) {
         const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
         element.style.zIndex = String(top + 1);
         slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
-    }
+    };
 
     /* Give `element` and every element inside it that has a data-id a new, unused id. */
     App.elements.giveFreshIds = function giveFreshIds(element, usedIds) {
@@ -9948,7 +9984,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         const element = App.selection.getElement();
         if (element) {
             clipboardHtml = element.outerHTML;
+            copyMark = 'deck-editor-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
             App.events.emit('clipboard-changed');   // Paste buttons become enabled
+            if (!inClipboardEvent) {
+                writeMark(element);   // the ribbon's Copy: no copy event to write it in
+            }
         }
     };
 
@@ -9986,6 +10026,91 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.selection.select(element);
         return element;
     }
+
+    // ---- The system clipboard (Ctrl+C / Ctrl+X / Ctrl+V) ----
+
+    let copyMark = null;            // the mark our newest copy put on the system clipboard
+    let inClipboardEvent = false;   // a copy / cut event is writing the clipboard itself
+
+    /* The mark as clipboard HTML, with the element's text (for a paste into another program). */
+    function markData(text) {
+        const holder = document.createElement('div');
+        holder.setAttribute('data-deck-editor', 'element');
+        holder.setAttribute('data-copy', copyMark);
+        holder.textContent = text;
+        return { html: holder.outerHTML, text: text };
+    }
+
+    function textOf(element) {
+        return (element.innerText || element.textContent || '').trim();
+    }
+
+    /* Best effort: if the browser refuses, a table copied earlier in Excel could win over this copy at Ctrl+V. */
+    function writeMark(element) {
+        const data = markData(textOf(element));
+        if (navigator.clipboard && window.ClipboardItem) {
+            navigator.clipboard.write([new ClipboardItem({
+                'text/html': new Blob([data.html], { type: 'text/html' }),
+                'text/plain': new Blob([data.text], { type: 'text/plain' }),
+            })]).catch(() => {});
+        }
+    }
+
+    /* A clipboard event the slide handles: not typing (text.js has those), not in a field or a dialog. */
+    function forTheSlide(event) {
+        const target = event.target;
+        return !event.defaultPrevented && !App.text.isEditing() && !App.shortcuts.isTypingTarget(target) &&
+            !(target && target.closest && target.closest('dialog')) && !!App.deck.getCurrentSlide();
+    }
+
+    /* Ctrl+C / Ctrl+X with an element selected: our copy, and its mark on the system clipboard. */
+    function onCopyEvent(event) {
+        const element = App.selection.getElement();
+        if (!forTheSlide(event) || !element) {
+            return;
+        }
+        event.preventDefault();
+        const text = textOf(element);
+        inClipboardEvent = true;
+        try {
+            App.commands.run(event.type);   // 'copy' or 'cut'
+        } finally {
+            inClipboardEvent = false;
+        }
+        const data = markData(text);
+        event.clipboardData.setData('text/html', data.html);
+        event.clipboardData.setData('text/plain', data.text);
+    }
+
+    /* Ctrl+V: a table from another program (Excel), else our own copy. */
+    function onPasteEvent(event) {
+        if (!forTheSlide(event)) {
+            return;
+        }
+        const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
+        const ours = copyMark !== null && clipboard.html.indexOf(copyMark) !== -1;
+        if (!ours && App.tablePaste.paste(clipboard)) {
+            event.preventDefault();
+        } else if (App.elements.canPaste()) {
+            event.preventDefault();
+            App.elements.paste();
+        }
+    }
+
+    /* Wiring, called once from App.start(): the editor's page and every deck loaded. */
+    App.elements.init = function init() {
+        const wired = new WeakSet();
+        const listen = (doc) => {
+            if (doc && !wired.has(doc)) {
+                wired.add(doc);
+                doc.addEventListener('copy', onCopyEvent);
+                doc.addEventListener('cut', onCopyEvent);
+                doc.addEventListener('paste', onPasteEvent);
+            }
+        };
+        listen(document);
+        App.events.on('deck-loaded', () => listen(App.deck.getDocument()));
+    };
 
     App.elements.paste = function paste() {
         if (App.elements.canPaste()) {
@@ -13226,21 +13351,43 @@ App.template.newDeckHtml = function newDeckHtml() {
         return lineSpacingButton;
     }
 
-    // ---- The paste options button (after a paste, at the end of the pasted text) ----
+    // ---- The paste options button (after a paste: at the end of the pasted text, or at a pasted table's corner) ----
 
     let pasteButton = null;
 
+    /*
+     * What the button offers now: { current, options, choose(mode), at: { x, y }
+     * (slide px) }, for the last paste into text or the table just pasted (tablepaste.js); else null.
+     */
+    function pasteChoices() {
+        const text = App.text.pasteOptions();
+        const doc = App.deck.getDocument();
+        const selection = doc && doc.getSelection();
+        if (text && selection && selection.rangeCount > 0) {
+            // The deck iframe shows the slide at 1:1: the cursor's box is in slide pixels.
+            const range = selection.getRangeAt(0);
+            const box = range.getClientRects()[0] || range.startContainer.parentElement.getBoundingClientRect();
+            return Object.assign({ choose: App.text.repaste, at: { x: box.right, y: box.bottom } }, text);
+        }
+        const table = App.tablePaste.pasteOptions();
+        if (table) {
+            return Object.assign({ choose: App.tablePaste.repaste,
+                at: { x: table.rect.left + table.rect.width, y: table.rect.top + table.rect.height } }, table);
+        }
+        return null;
+    }
+
     function openPasteMenu() {
-        const choices = App.text.pasteOptions();
+        const choices = pasteChoices();
         if (!choices) {
             return;
         }
         const items = choices.options.map((option) => ({ label: option.label, value: option.mode,
             checked: option.mode === choices.current }));
-        openMenu(pasteButton, 'paste-options-menu', items, (mode) => App.text.repaste(mode));
+        openMenu(pasteButton, 'paste-options-menu', items, (mode) => choices.choose(mode));
     }
 
-    /* Show the button where the pasted text ends while the paste can be switched; hide it otherwise. */
+    /* Show the button where the paste ended while it can be switched; hide it otherwise. */
     function refreshPasteButton() {
         if (!pasteButton) {
             pasteButton = keepEdit(el('button', {
@@ -13253,28 +13400,24 @@ App.template.newDeckHtml = function newDeckHtml() {
             pasteButton.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
             document.body.appendChild(pasteButton);
         }
-        const doc = App.deck.getDocument();
-        const selection = doc && doc.getSelection();
-        if (!App.text.pasteOptions() || !selection || selection.rangeCount === 0) {
+        const choices = pasteChoices();
+        if (!choices) {
             pasteButton.hidden = true;
             if (menu && menu.classList.contains('paste-options-menu')) {
                 closeMenu();
             }
             return;
         }
-        // The deck iframe shows the slide at 1:1: the cursor's box is in slide pixels.
-        const range = selection.getRangeAt(0);
-        const box = range.getClientRects()[0] || range.startContainer.parentElement.getBoundingClientRect();
         const overlay = document.getElementById('overlay').getBoundingClientRect();
         const zoom = App.canvas.getZoom();
-        pasteButton.style.left = (overlay.left + box.right * zoom + 4) + 'px';
-        pasteButton.style.top = (overlay.top + box.bottom * zoom + 2) + 'px';
+        pasteButton.style.left = (overlay.left + choices.at.x * zoom + 4) + 'px';
+        pasteButton.style.top = (overlay.top + choices.at.y * zoom + 2) + 'px';
         pasteButton.hidden = false;
     }
 
     App.textControls.init = function init() {
-        ['text-pasted', 'history-changed', 'text-selection-changed', 'text-edit-changed', 'zoom-changed', 'slide-changed']
-            .forEach((name) => App.events.on(name, refreshPasteButton));
+        ['text-pasted', 'table-pasted', 'history-changed', 'text-selection-changed', 'text-edit-changed', 'zoom-changed',
+            'slide-changed', 'selection-changed'].forEach((name) => App.events.on(name, refreshPasteButton));
     };
 
     /* The control named in the ribbon's layout. */
@@ -13516,6 +13659,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         blockBox.hidden = false;
     }
 
+    /* Select the cells from cell `from` to cell `to` of table element `element` (paste from Excel too). */
+    App.tableControls.selectCells = function selectCellsFromOutside(element, from, to) {
+        selectCells(element, from, to);
+    };
+
     function selectCells(element, from, to) {
         block = { element: element, slideId: element.closest('section.slide').getAttribute('data-slide-id'),
             anchor: slotOf(from), focus: slotOf(to) };
@@ -13753,14 +13901,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         return !!target && (!LAYOUT[action].canRun || LAYOUT[action].canRun(target));
     };
 
-    /* The columns decide the table's width (after inserting or deleting columns). */
-    function widthFromColumns(element) {
+    /* The columns decide the table's width (after inserting or deleting columns, or a paste). */
+    App.tableControls.widthFromColumns = function widthFromColumns(element) {
         const widths = App.tables.colWidths(tableOf(element));
         const total = widths.reduce((a, b) => a + b, 0);
         if (total > 0) {
             element.style.setProperty('width', Math.round(total * 100) / 100 + 'px');
         }
-    }
+    };
 
     /* Run a Layout action as one undo step; typing goes on in the same cell if it is still there. */
     App.tableControls.layout = function layout(action) {
@@ -13780,7 +13928,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.history.change(LAYOUT[action].label, slideScope(target.element), () => {
             next = LAYOUT[action].run(target) || null;
             if (target.element.isConnected) {
-                widthFromColumns(target.element);
+                App.tableControls.widthFromColumns(target.element);
                 App.tables.alignNumbers(target.table);   // a deleted row of words may leave a column of numbers
                 App.tables.fitTable(target.element);
             }
@@ -14401,6 +14549,442 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (marginsButton && marginsButton.isConnected) {
             marginsButton.disabled = !App.commands.isEnabled('setCellMargins');
         }
+    };
+})();
+
+</script>
+<script>
+// ---- js/tablepaste.js ----
+/*
+ * tablepaste.js - paste from Excel (SPEC Phase 4): a table on the clipboard
+ * becomes a native, editable table on the slide, or fills the cells of a
+ * table from the cursor on.
+ *
+ * Excel puts a <table> in the clipboard's text/html, its look in a <style>
+ * of classes. It is laid out in a hidden iframe that can neither run nor load
+ * anything, and read as cells: the text each one shows (2.450, 9,8x, 19,5%),
+ * bold, italic, merged cells, column widths. Without HTML, tab-separated
+ * text/plain is read instead (with Excel's quotes around cells of several lines).
+ *
+ *   Ctrl+V on the slide, not typing: a new table, centred, selected.
+ *     'destination' (default): the deck's table style; Excel's text with its
+ *       bold and italic; its columns' proportions, as wide as in Excel at the
+ *       deck's font size; a bold last row turns Total Row on; columns of
+ *       numbers line up on the right.
+ *     'source' (paste options: Keep source formatting): Excel's fills, lines,
+ *       fonts, colours and widths (tables.fromRendered, as for older decks).
+ *   Ctrl+V with cells selected, or typing in a cell (more than one cell
+ *   copied): the cells from there on get the copied text, bold and italic;
+ *   rows and columns are added when it does not fit; the pasted cells end up
+ *   selected.
+ * Each paste is one undo step.
+ *
+ * Talks to: tables.js, text.js (cell text: writeLines), elements.js (new
+ * elements), tablecontrols.js (selected cells), history.js, selection.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.tablePaste = {};
+
+    // The hidden layout iframe may load nothing at all (Word's HTML points at local image files).
+    const MEASURE_CSP = "default-src 'none'; style-src 'unsafe-inline'";
+    const DECK_FONT_SIZE = 14 * 4 / 3;   // px: the deck table stylesheet's 14 pt
+    const MAX_WIDTH = 1152;              // px: the slide less 64 px on each side
+    const MIN_COLUMN = 24;               // px, as when dragging a column border
+
+    let lastPaste = null;   // the last new table pasted: { element, clipboard, mode, state }, for the paste options
+
+    function round2(value) {
+        return Math.round(value * 100) / 100;
+    }
+
+    // ---------------------------------------------------------------
+    // Reading the clipboard
+    // ---------------------------------------------------------------
+
+    function hasTable(html) {
+        return /<table[\s>]/i.test(html || '');
+    }
+
+    /*
+     * Lay `html` out in a hidden iframe and return fn(its document). The frame
+     * is sandboxed without scripts and its policy loads nothing; it is removed
+     * afterwards.
+     */
+    function withRendered(html, fn) {
+        const frame = document.createElement('iframe');
+        frame.setAttribute('sandbox', 'allow-same-origin');
+        frame.setAttribute('aria-hidden', 'true');
+        frame.setAttribute('tabindex', '-1');
+        frame.style.cssText = 'position:fixed; left:-30000px; top:0; width:2400px; height:1600px; border:0; pointer-events:none';
+        document.body.appendChild(frame);
+        try {
+            const doc = frame.contentDocument;
+            doc.open();
+            doc.write('<!DOCTYPE html><meta http-equiv="Content-Security-Policy" content="' + MEASURE_CSP + '">' + html);
+            doc.close();
+            return fn(doc);
+        } finally {
+            frame.remove();
+        }
+    }
+
+    /* The first table that is not inside another one. */
+    function sourceTable(doc) {
+        return Array.from(doc.querySelectorAll('table')).find((table) => !table.parentElement.closest('table')) || null;
+    }
+
+    /* A cell's text as lines, without the empty lines and spaces around it ([''] when empty). */
+    function linesOf(text) {
+        const lines = text.replace(/\r\n?/g, '\n').split('\n').map((line) => line.trim());
+        while (lines.length > 1 && lines[0] === '') {
+            lines.shift();
+        }
+        while (lines.length > 1 && lines[lines.length - 1] === '') {
+            lines.pop();
+        }
+        return lines;
+    }
+
+    function item(lines, look) {
+        return Object.assign({ lines: lines, bold: false, italic: false, rowSpan: 1, colSpan: 1 }, look);
+    }
+
+    /* Whether every piece of text in `cell` passes test(its computed style); false for a cell without text. */
+    function allText(cell, test) {
+        const view = cell.ownerDocument.defaultView;
+        const walker = cell.ownerDocument.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+        let found = false;
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (node.data.trim() === '') {
+                continue;
+            }
+            found = true;
+            if (!test(view.getComputedStyle(node.parentElement))) {
+                return false;
+            }
+        }
+        return found;
+    }
+
+    const isBold = (style) => parseInt(style.fontWeight, 10) >= 600;
+    const isItalic = (style) => style.fontStyle === 'italic' || style.fontStyle === 'oblique';
+
+    const PX_PER = { px: 1, pt: 4 / 3, in: 96, cm: 96 / 2.54, mm: 96 / 25.4 };
+
+    /* "144pt" -> 192 (px); 0 when it is no length. */
+    function lengthInPx(value) {
+        const found = /^([\d.]+)(px|pt|in|cm|mm)$/.exec((value || '').trim());
+        return found ? parseFloat(found[1]) * PX_PER[found[2]] : 0;
+    }
+
+    /* The widths Excel gives its columns (<col width>), in px, when every column has one; else null. */
+    function declaredWidths(table, count) {
+        const widths = [];
+        table.querySelectorAll('col').forEach((col) => {
+            const width = parseFloat(col.getAttribute('width')) || lengthInPx(col.style.width);
+            for (let k = 0; k < Math.max(1, col.span); k++) {
+                widths.push(round2(width));
+            }
+        });
+        return widths.length === count && widths.every((width) => width > 0) ? widths : null;
+    }
+
+    function readHtml(html) {
+        return withRendered(html, (doc) => {
+            const table = sourceTable(doc);
+            const boxes = table ? App.tables.cellBoxes(table) : [];
+            if (boxes.length === 0) {
+                return null;
+            }
+            const grid = App.tables.gridOf(table);
+            // A slot a merged cell covers stays null; a hole in a short row is an empty cell.
+            const cells = grid.cells.map((row) => row.map((cell) => (cell ? null : item(['']))));
+            boxes.forEach((box) => {
+                cells[box.row][box.col] = item(linesOf(box.cell.innerText), {
+                    bold: allText(box.cell, isBold), italic: allText(box.cell, isItalic),
+                    rowSpan: box.rowSpan, colSpan: box.colSpan,
+                });
+            });
+            const fontSize = parseFloat(doc.defaultView.getComputedStyle(boxes[0].cell).fontSize);
+            return { cells: cells, widths: declaredWidths(table, grid.cols) || App.tables.renderedColumnWidths(table), fontSize: fontSize };
+        });
+    }
+
+    /* Tab-separated text, as Excel writes it: a cell holding a line break or a quote is in quotes. */
+    function readTabbed(text) {
+        const rows = [[]];
+        let cell = '';
+        let quoted = false;
+        const chars = text.replace(/\r\n?/g, '\n');
+        for (let i = 0; i < chars.length; i++) {
+            const ch = chars[i];
+            if (quoted) {
+                if (ch === '"' && chars[i + 1] === '"') {
+                    cell += '"';
+                    i += 1;
+                } else if (ch === '"') {
+                    quoted = false;
+                } else {
+                    cell += ch;
+                }
+            } else if (ch === '"' && cell === '') {
+                quoted = true;
+            } else if (ch === '\t' || ch === '\n') {
+                rows[rows.length - 1].push(cell);
+                cell = '';
+                if (ch === '\n') {
+                    rows.push([]);
+                }
+            } else {
+                cell += ch;
+            }
+        }
+        rows[rows.length - 1].push(cell);
+        while (rows.length > 1 && rows[rows.length - 1].every((text) => text === '')) {
+            rows.pop();   // the line break Excel ends with
+        }
+        const cols = Math.max(...rows.map((row) => row.length));
+        return {
+            cells: rows.map((row) => Array.from({ length: cols }, (unused, c) => item(linesOf(row[c] || '')))),
+            widths: null, fontSize: null,
+        };
+    }
+
+    /*
+     * The clipboard's table ({ html, text }) as { cells, widths, fontSize }:
+     * cells[row][col] = { lines, bold, italic, rowSpan, colSpan } at the slot a
+     * cell starts in (null where a merged cell covers it); widths in px (null for
+     * text). null when there is no table of two cells or more.
+     */
+    App.tablePaste.readCells = function readCells(clipboard) {
+        let grid = hasTable(clipboard.html) ? readHtml(clipboard.html) : null;
+        if (!grid && !hasTable(clipboard.html) && !clipboard.html && /\t/.test(clipboard.text || '')) {
+            grid = readTabbed(clipboard.text);
+        }
+        const count = grid ? grid.cells.reduce((sum, row) => sum + row.filter(Boolean).length, 0) : 0;
+        return count > 1 ? grid : null;
+    };
+
+    // ---------------------------------------------------------------
+    // Building a new table
+    // ---------------------------------------------------------------
+
+    /* The new table's width: as wide as in Excel at the deck's font size, within the slide. */
+    function deckWidth(grid) {
+        const cols = grid.cells[0].length;
+        if (!grid.widths) {
+            return App.tables.newTableRect(1, cols).width;
+        }
+        const source = grid.widths.reduce((a, b) => a + b, 0) * DECK_FONT_SIZE / (grid.fontSize || DECK_FONT_SIZE);
+        return round2(Math.min(MAX_WIDTH, Math.max(MIN_COLUMN * cols, source)));
+    }
+
+    /* `widths` scaled to add up to `total` exactly (the last column takes the rest of the rounding). */
+    function scaleWidths(widths, total) {
+        const sum = widths.reduce((a, b) => a + b, 0) || 1;
+        const scaled = widths.map((width) => round2(width * total / sum));
+        scaled[scaled.length - 1] = round2(total - scaled.slice(0, -1).reduce((a, b) => a + b, 0));
+        return scaled;
+    }
+
+    function inDeckLook(doc, grid, id) {
+        const rows = grid.cells.length;
+        const cols = grid.cells[0].length;
+        const width = deckWidth(grid);
+        const rect = Object.assign(App.tables.newTableRect(rows, cols), { width: width, left: round2((1280 - width) / 2) });
+        const element = App.tables.createTable(doc, rows, cols, rect, id);
+        const table = element.querySelector(':scope > table');
+        if (grid.widths) {
+            App.tables.setColumnWidths(table, scaleWidths(grid.widths, width));
+        }
+        grid.cells.forEach((row, r) => row.forEach((cell, c) => {
+            if (cell) {
+                App.text.writeLines(table.rows[r].cells[c], cell.lines, cell);
+            }
+        }));
+        // Merge from the last one back: the slots of the ones before do not move.
+        grid.cells.flatMap((row, r) => row.map((cell, c) => ({ cell: cell, r: r, c: c })))
+            .filter((slot) => slot.cell && (slot.cell.rowSpan > 1 || slot.cell.colSpan > 1)).reverse()
+            .forEach((slot) => App.tables.mergeCells(table, { top: slot.r, left: slot.c,
+                bottom: slot.r + slot.cell.rowSpan - 1, right: slot.c + slot.cell.colSpan - 1 }));
+        // A bold last row (Excel's "Total" or "Mediana") is the table style's Total Row.
+        const last = grid.cells[rows - 1].filter((cell) => cell && cell.lines.join('') !== '');
+        if (rows >= 3 && last.length > 0 && last.every((cell) => cell.bold)) {
+            table.setAttribute('data-total-row', '');
+        }
+        return element;
+    }
+
+    function inSourceLook(doc, html, id) {
+        return withRendered(html, (source) => {
+            const sourceGrid = sourceTable(source);
+            const width = sourceGrid.getBoundingClientRect().width;
+            const element = doc.createElement('div');
+            element.setAttribute('class', 'el');
+            element.setAttribute('data-type', 'table');
+            element.setAttribute('data-id', id);
+            App.tables.fromRendered(sourceGrid, element, { scale: width > MAX_WIDTH ? MAX_WIDTH / width : 1 });
+            const table = element.querySelector(':scope > table');
+            const total = round2(App.tables.colWidths(table).reduce((a, b) => a + b, 0));
+            const rect = App.tables.newTableRect(table.rows.length, 1);
+            element.style.setProperty('left', round2((1280 - total) / 2) + 'px');
+            element.style.setProperty('top', rect.top + 'px');
+            element.style.setProperty('width', total + 'px');
+            element.style.setProperty('height', rect.height + 'px');
+            return element;
+        });
+    }
+
+    /*
+     * A new table element (not yet on a slide) from the clipboard, with id `id`:
+     * mode 'destination' (the deck's look) or 'source' (Excel's look). Its numbers
+     * line up on the right. null when the clipboard holds no table.
+     */
+    App.tablePaste.buildTable = function buildTable(doc, clipboard, mode, id) {
+        const grid = App.tablePaste.readCells(clipboard);
+        if (!grid) {
+            return null;
+        }
+        const element = mode === 'source' && hasTable(clipboard.html) ? inSourceLook(doc, clipboard.html, id) : inDeckLook(doc, grid, id);
+        App.tables.alignNumbers(element.querySelector(':scope > table'));
+        return element;
+    };
+
+    // ---------------------------------------------------------------
+    // Filling a table on the slide
+    // ---------------------------------------------------------------
+
+    /*
+     * Write the grid's text into `table` from slot { row, col } on, adding rows
+     * and columns (like the last ones) where it does not fit. A destination cell
+     * merged over several slots gets the first text that lands in it. Returns
+     * the block of cells written.
+     */
+    App.tablePaste.fillCells = function fillCells(table, slot, grid) {
+        const rows = grid.cells.length;
+        const cols = grid.cells[0].length;
+        const before = App.tables.gridOf(table);
+        if (slot.row + rows > before.rows) {
+            App.tables.insertRows(table, before.rows, slot.row + rows - before.rows, before.rows - 1);
+        }
+        if (slot.col + cols > before.cols) {
+            App.tables.insertColumns(table, before.cols, slot.col + cols - before.cols, before.cols - 1);
+        }
+        const after = App.tables.gridOf(table);
+        const written = new Set();
+        grid.cells.forEach((row, r) => row.forEach((cell, c) => {
+            const target = cell && after.cells[slot.row + r][slot.col + c];
+            if (target && !written.has(target)) {
+                written.add(target);
+                App.text.writeLines(target, cell.lines, cell);
+            }
+        }));
+        return { top: slot.row, left: slot.col, bottom: slot.row + rows - 1, right: slot.col + cols - 1 };
+    };
+
+    // ---------------------------------------------------------------
+    // Pasting
+    // ---------------------------------------------------------------
+
+    function slideScope(element) {
+        return { slideId: element.closest('section.slide').getAttribute('data-slide-id') };
+    }
+
+    /* Fill table element `element` from `slot` on, as one undo step; the pasted cells end up selected. */
+    function pasteInto(element, slot, grid) {
+        const table = element.querySelector(':scope > table');
+        App.text.exitEdit({ select: false });
+        let block = null;
+        App.history.change('Paste', slideScope(element), () => {
+            block = App.tablePaste.fillCells(table, slot, grid);
+            App.tableControls.widthFromColumns(element);
+            App.tables.alignNumbers(table);
+            App.tables.fitTable(element);
+        });
+        App.selection.select(element);
+        const cells = App.tables.gridOf(table).cells;
+        App.tableControls.selectCells(element, cells[block.top][block.left], cells[block.bottom][block.right]);
+        App.selection.refresh();
+    }
+
+    /* Put a new table from the clipboard on the current slide, as one undo step, and select it. */
+    function insertTable(clipboard, mode) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        App.text.exitEdit({ select: false });
+        let element = null;
+        App.history.change('Paste table', { slideId: slide.getAttribute('data-slide-id') }, () => {
+            element = App.tablePaste.buildTable(slide.ownerDocument, clipboard, mode, App.elements.freshId(slide.ownerDocument));
+            App.elements.addOnTop(slide, element);
+            App.tables.fitTable(element);
+            const height = parseFloat(element.style.height) || 0;
+            element.style.setProperty('top', Math.max(0, Math.round((720 - height) / 2)) + 'px');
+        });
+        App.selection.select(element);
+        lastPaste = { element: element, clipboard: clipboard, mode: mode, state: App.history.stateId() };
+        App.events.emit('table-pasted');
+    }
+
+    /*
+     * Ctrl+V, not typing ({ html, text } from the paste event): into the selected
+     * cells, else a new table. false when the clipboard holds no table.
+     */
+    App.tablePaste.paste = function paste(clipboard) {
+        const grid = App.tablePaste.readCells(clipboard);
+        if (!grid) {
+            return false;
+        }
+        const target = App.tableControls.cellTarget();
+        if (target) {
+            pasteInto(target.element, { row: target.cells.top, col: target.cells.left }, grid);
+        } else {
+            insertTable(clipboard, 'destination');
+        }
+        return true;
+    };
+
+    /* Ctrl+V while typing in `cell` (text.js): several copied cells fill the table from it; one cell is text (false). */
+    App.tablePaste.pasteIntoCell = function pasteIntoCell(cell, clipboard) {
+        const grid = App.tablePaste.readCells(clipboard);
+        if (!grid) {
+            return false;
+        }
+        const box = App.tables.blockOf(cell);
+        pasteInto(cell.closest('.el'), { row: box.top, col: box.left }, grid);
+        return true;
+    };
+
+    /*
+     * The paste options of the table just pasted, while it is still the last
+     * step and selected: { current, options: [{ mode, label }], rect } (rect in
+     * slide px, where the button goes), else null.
+     */
+    App.tablePaste.pasteOptions = function pasteOptions() {
+        if (!lastPaste || !lastPaste.element.isConnected || App.history.isPending() ||
+            App.history.stateId() !== lastPaste.state || App.selection.getElement() !== lastPaste.element ||
+            !hasTable(lastPaste.clipboard.html)) {
+            return null;
+        }
+        return {
+            current: lastPaste.mode,
+            options: [{ mode: 'destination', label: 'Use destination theme' }, { mode: 'source', label: 'Keep source formatting' }],
+            rect: App.transform.readRect(lastPaste.element),
+        };
+    };
+
+    /* Paste the last table again the other way: its step is undone and replaced. */
+    App.tablePaste.repaste = function repaste(mode) {
+        if (!App.tablePaste.pasteOptions() || mode === lastPaste.mode) {
+            return;
+        }
+        const clipboard = lastPaste.clipboard;
+        App.history.undo();
+        insertTable(clipboard, mode);
     };
 })();
 

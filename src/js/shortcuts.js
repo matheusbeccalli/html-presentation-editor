@@ -12,7 +12,10 @@
  *  - shortcuts are ignored while a dialog is open;
  *  - a shortcut whose command is disabled right now (e.g. Escape with nothing
  *    selected) leaves the key to the browser, unless registered with
- *    { blockBrowserDefault: true } (Ctrl+S must never open "Save page as").
+ *    { blockBrowserDefault: true } (Ctrl+S must never open "Save page as");
+ *  - Ctrl+C / Ctrl+X / Ctrl+V are { clipboardEvent: true }: the key is left to
+ *    the browser, whose copy / cut / paste event (it carries the system
+ *    clipboard, e.g. a table from Excel) runs the command (elements.js).
  *
  * Talks to: commands.js (runs commands), deck.js (listens to the deck iframe,
  * because key presses inside an iframe do not reach the main window).
@@ -121,6 +124,7 @@
                 combo: key, command: command,
                 whileTyping: !!(options && options.whileTyping),
                 blockBrowserDefault: !!(options && options.blockBrowserDefault),
+                clipboardEvent: !!(options && options.clipboardEvent),
             });
         }
 
@@ -144,7 +148,7 @@
             if (!entry) {
                 return false;
             }
-            if (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping) {
+            if (entry.clipboardEvent || (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping)) {
                 return false;
             }
             // Enter and Space press a focused button or menu item; they are not shortcuts there.
@@ -202,9 +206,9 @@
         ['Shift+ArrowDown', 'nudgeDownFar'],
         ['Delete', 'delete'],
         ['Backspace', 'delete'],
-        ['Ctrl+X', 'cut'],
-        ['Ctrl+C', 'copy'],
-        ['Ctrl+V', 'paste'],
+        ['Ctrl+X', 'cut', { clipboardEvent: true }],
+        ['Ctrl+C', 'copy', { clipboardEvent: true }],
+        ['Ctrl+V', 'paste', { clipboardEvent: true }],
         // Ctrl+D is the browser's "bookmark this page"; never let it open with nothing selected.
         ['Ctrl+D', 'duplicate', { blockBrowserDefault: true }],
         // Formatting keys also work while typing (that is where they are used).

@@ -184,6 +184,11 @@
         blockBox.hidden = false;
     }
 
+    /* Select the cells from cell `from` to cell `to` of table element `element` (paste from Excel too). */
+    App.tableControls.selectCells = function selectCellsFromOutside(element, from, to) {
+        selectCells(element, from, to);
+    };
+
     function selectCells(element, from, to) {
         block = { element: element, slideId: element.closest('section.slide').getAttribute('data-slide-id'),
             anchor: slotOf(from), focus: slotOf(to) };
@@ -421,14 +426,14 @@
         return !!target && (!LAYOUT[action].canRun || LAYOUT[action].canRun(target));
     };
 
-    /* The columns decide the table's width (after inserting or deleting columns). */
-    function widthFromColumns(element) {
+    /* The columns decide the table's width (after inserting or deleting columns, or a paste). */
+    App.tableControls.widthFromColumns = function widthFromColumns(element) {
         const widths = App.tables.colWidths(tableOf(element));
         const total = widths.reduce((a, b) => a + b, 0);
         if (total > 0) {
             element.style.setProperty('width', Math.round(total * 100) / 100 + 'px');
         }
-    }
+    };
 
     /* Run a Layout action as one undo step; typing goes on in the same cell if it is still there. */
     App.tableControls.layout = function layout(action) {
@@ -448,7 +453,7 @@
         App.history.change(LAYOUT[action].label, slideScope(target.element), () => {
             next = LAYOUT[action].run(target) || null;
             if (target.element.isConnected) {
-                widthFromColumns(target.element);
+                App.tableControls.widthFromColumns(target.element);
                 App.tables.alignNumbers(target.table);   // a deleted row of words may leave a column of numbers
                 App.tables.fitTable(target.element);
             }

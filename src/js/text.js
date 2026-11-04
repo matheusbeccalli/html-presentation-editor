@@ -826,6 +826,24 @@
         return Array.from(container.children).map(lineText);
     };
 
+    /*
+     * Replace the text of a container by `lines` of plain text, all bold and / or
+     * italic when look.bold / look.italic (cells pasted from Excel).
+     */
+    App.text.writeLines = function writeLines(container, lines, look) {
+        const doc = container.ownerDocument;
+        container.replaceChildren(...lines.map((line) => {
+            const p = doc.createElement('p');
+            let holder = p;
+            ['bold', 'italic'].filter((name) => look && look[name]).forEach((name) => {
+                holder = holder.appendChild(doc.createElement(name === 'bold' ? 'b' : 'i'));
+            });
+            holder.textContent = line;
+            return p;
+        }));
+        App.text.normalizeCell(container);
+    };
+
     /* Remove all the text of a container (selected table cells + Delete), leaving one empty line. */
     App.text.clearText = function clearText(container) {
         container.replaceChildren();
@@ -3127,6 +3145,9 @@
         const mode = plainPaste ? 'plain' : 'normal';
         plainPaste = false;
         const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
+        if (mode === 'normal' && isCell(editing.element) && App.tablePaste.pasteIntoCell(editing.element, clipboard)) {
+            return;   // several cells from Excel: they fill the table from this cell on
+        }
         const caret = App.text.getCaret(editing.element);
         const action = caret && App.text.pasteAction(editing.element, caret, clipboard, mode);
         if (action) {

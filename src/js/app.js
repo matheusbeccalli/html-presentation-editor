@@ -54,6 +54,7 @@ App.start = function start() {
     App.thumbnails.init();
     App.deck.init();
     App.text.init();
+    App.elements.init();
     App.fileio.init();
     App.autosave.init();
     App.drafts.init();

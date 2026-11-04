@@ -1756,6 +1756,80 @@ def test_table_design(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+CELL_CENTER = """([id, r, c]) => { const cell = App.deck.getDocument().querySelector('[data-id="' + id + '"] > table').rows[r].cells[c];
+    const rect = cell.getBoundingClientRect(); return [rect.left + rect.width / 2, rect.top + rect.height / 2]; }"""
+LINE_ALIGN = """([id, r, c]) => { const doc = App.deck.getDocument();
+    const line = doc.querySelector('[data-id="' + id + '"] > table').rows[r].cells[c].firstElementChild;
+    return doc.defaultView.getComputedStyle(line).textAlign; }"""
+
+
+def test_table_numbers(browser):
+    """Number buttons (pt-BR / en-US, decimals, percent, negatives in parentheses); a column of numbers lines up on the right."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(2)")   # the comps table e9 (rows about 37 px from y = 178; Margem EBITDA from x = 915)
+    design_tab = ".ribbon-tab[data-tab='table-design']"
+    button = lambda name: f".ribbon-button[data-command='{name}']"  # noqa: E731
+    pressed = lambda name: page.get_attribute(button(name), "aria-pressed") == "true"  # noqa: E731
+    grid = lambda: page.evaluate(E9_GRID)  # noqa: E731
+    margins = lambda: [row.split("|")[3] for row in grid()[1:5]]  # noqa: E731
+    key = lambda: page.evaluate(EDITING_KEY)  # noqa: E731
+
+    # A cell of words: the number buttons are off. A cell with a number: they work on it, typing goes on.
+    page.mouse.click(*slide_to_screen(page, 200, 196))   # Beta Foods
+    page.click(design_tab)
+    check(page.is_disabled(button("increaseDecimals")), "no number in Beta Foods")
+    check(page.text_content(".number-locale").strip() == "1.234,5 ▾", "a pt-BR deck: numbers written 1.234,5")
+    page.mouse.click(*slide_to_screen(page, 480, 196))   # 2.450
+    check(pressed("numberThousands"), "2.450 has a thousands separator")
+    page.click(button("increaseDecimals"))
+    check(grid()[1] == "Beta Foods|2.450,0|9,8x|19,5%" and key() == "e9/1/1", f"one more decimal, typing goes on: {grid()[1]} {key()}")
+    check(page.evaluate("App.history.undoLabel()") == "Increase Decimal", "one undo step")
+
+    # Selected cells: negatives in parentheses, percent off (0,195: no digit lost), undo.
+    page.keyboard.press("Escape")
+    drag(page, slide_to_screen(page, 1000, 196), slide_to_screen(page, 1000, 306))   # Margem EBITDA, Beta … Épsilon
+    page.click(design_tab)
+    check(pressed("numberPercent") and not pressed("negativeParens"), "percentages; -3,5% has a minus")
+    page.click(button("negativeParens"))
+    check(margins() == ["19,5%", "17,2%", "21,0%", "(3,5%)"], f"negatives in parentheses: {margins()}")
+    page.click(button("numberPercent"))
+    check(margins() == ["0,195", "0,172", "0,210", "(0,035)"] and page.is_visible(".cell-block"), f"percent off: {margins()}")
+    page.keyboard.press("Control+Z")
+    check(margins() == ["19,5%", "17,2%", "21,0%", "(3,5%)"], f"undone: {margins()}")
+
+    # en-US, remembered in the settings: the numbers are written 1,234.5 from then on.
+    page.click(".number-locale")
+    page.click(".number-locale-menu .menu-item:has-text('en-US')")
+    check(page.text_content(".number-locale").strip() == "1,234.5 ▾", "the button shows en-US")
+    check(page.evaluate("JSON.parse(localStorage.getItem('deck-editor-settings')).numberLocale") == "en-US", "remembered")
+    page.click(button("increaseDecimals"))
+    check(margins() == ["19.50%", "17.20%", "21.00%", "(3.50%)"], f"written the en-US way: {margins()}")
+    page.screenshot(path=str(OUTPUT / "47-table-numbers.png"))
+
+    # A new table: a column of numbers lines up on the right once its cell is left, header too; undo takes it back.
+    page.evaluate("App.deck.goTo(4)")
+    page.evaluate("App.commands.run('insertTable', { rows: 3, cols: 2 })")
+    new_id = page.evaluate("App.selection.selectedId()")
+    align = lambda r, c: page.evaluate(LINE_ALIGN, [new_id, r, c])  # noqa: E731
+    page.mouse.click(*slide_to_screen(page, *page.evaluate(CELL_CENTER, [new_id, 0, 1])))
+    for text in ["Valor", "Tab", "Alfa", "Tab", "1.234"]:
+        page.keyboard.press(text) if text == "Tab" else page.keyboard.type(text)
+    check(align(1, 1) == "left", "not while typing")
+    page.keyboard.press("Tab")
+    page.keyboard.type("Beta")
+    check([align(0, 1), align(1, 1), align(1, 0)] == ["right", "right", "left"], "the number column on the right, its header too")
+    page.keyboard.press("Tab")
+    page.keyboard.type("n.a.")
+    page.keyboard.press("Escape")
+    check(align(2, 1) == "right", "n.a. keeps it a number column")
+    for _ in range(3):
+        page.keyboard.press("Control+Z")
+    check(align(1, 1) == "left" and align(0, 1) == "left", "undo before 1.234: left again")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -2615,7 +2689,7 @@ def test_settings_recent_files_and_status(browser):
     page.fill("#settings-retention", "45")
     editor.click_dialog_button("OK")
     saved = page.evaluate("JSON.parse(localStorage.getItem('deck-editor-settings'))")
-    check(saved == {"keepDrafts": True, "retentionDays": 30, "rememberRecent": True}, f"saved settings: {saved}")
+    check(saved == {"keepDrafts": True, "retentionDays": 30, "rememberRecent": True, "numberLocale": None}, f"saved settings: {saved}")
 
     # Recent files: an opened file is remembered; choosing it opens the Open window in its folder.
     page.evaluate("""() => App.events.emit('file-opened',
@@ -2805,6 +2879,7 @@ TESTS = [
     test_table_layout,
     test_table_column_borders,
     test_table_design,
+    test_table_numbers,
 ]
 
 

@@ -2566,6 +2566,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     };
 
+    /* The text of each line of a container (a line break as "\n"). */
+    App.text.lineTexts = function lineTexts(container) {
+        return Array.from(container.children).map(lineText);
+    };
+
     /* Remove all the text of a container (selected table cells + Delete), leaving one empty line. */
     App.text.clearText = function clearText(container) {
         container.replaceChildren();
@@ -4551,7 +4556,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     // before and after it (history meta), so undo/redo put the cursor back.
 
     const TYPING_PAUSE_MS = 1000;
-    let editing = null;   // { element, id, slideId, isNew, doc }
+    let editing = null;   // { element, id, slideId, isNew, doc, textBefore (a cell's text when editing began) }
     let typing = null;    // { meta, timer } while a typing step is open
     let applying = false; // a key action is changing the text: its own input events are not typing
     let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
@@ -4611,6 +4616,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         editing = {
             element: element, id: App.text.containerKey(element), doc: doc, isNew: !!settings.isNew || stillNew,
             slideId: element.closest('section.slide').getAttribute('data-slide-id'),
+            textBefore: isCell(element) ? App.text.lineTexts(element).join('\n') : null,
         };
         if (!doc.documentElement.getAttribute('lang')) {
             doc.documentElement.setAttribute('lang', 'pt-BR');   // spell check in Portuguese (SPEC Phase 3)
@@ -4670,8 +4676,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (!editing) {
             return;
         }
-        App.text.commitTyping();
         const state = editing;
+        if (state.textBefore !== null && state.element.isConnected &&
+            App.text.lineTexts(state.element).join('\n') !== state.textBefore) {
+            // As in Excel, a column of numbers lines up on the right once its cell is left
+            // (before the typing step closes, so the step holds it).
+            App.tables.alignNumbers(state.element.closest('table'));
+        }
+        App.text.commitTyping();
         editing = null;
         pending = null;
         state.doc.removeEventListener('keydown', onKeyDown, true);
@@ -5633,6 +5645,176 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/numbers.js ----
+/*
+ * numbers.js - numbers written as text (SPEC Phase 4: table cells; Phase 6
+ * will reuse it for chart labels).
+ *
+ * A cell holds text, not a value: "2.450", "(1,2x)", "-3,5%", "R$ 1.234 mn".
+ * parse() reads such a text into its parts, the format buttons change the
+ * parts, and format() writes them back with the separators of a locale:
+ *
+ *   pt-BR  1.234,5      en-US  1,234.5
+ *
+ * The digits are kept as text, never as a JavaScript number, so nothing is
+ * lost to rounding: 0,195 -> 19,5% -> 0,195.
+ *
+ * A number's parts: { sign: '' | '+' | '-' | '−', negative, parens,
+ * prefix ('R$ '), int ('1234'), frac ('5'), grouped (thousands separator
+ * shown), suffix ('%', 'x', ' mn') }.
+ *
+ * Talks to: nothing (tables.js and tabledesign.js use it).
+ */
+
+(function () {
+    'use strict';
+
+    App.numbers = {};
+
+    App.numbers.LOCALES = Object.freeze({
+        'pt-BR': Object.freeze({ group: '.', decimal: ',', sample: '1.234,5' }),
+        'en-US': Object.freeze({ group: ',', decimal: '.', sample: '1,234.5' }),
+    });
+
+    // sign, currency, sign again ("R$ -1.234"), the digits, a unit; all optional but the digits.
+    const NUMBER = new RegExp('^([-+−]?)((?:R\\$|US\\$|\\$|€|£)\\s?)?([-+−]?)(\\d[\\d.,]*|[.,]\\d+)' +
+        '(\\s?(?:%|x|×|pp|p\\.p\\.|bps|bp|k|mn|mm|mi|bi|bn))?$', 'i');
+
+    // Shown in finance tables where a number is missing: they do not make a column text.
+    const BLANK = /^(?:|[-–—]|n\.?\s?[adm]\.?|n\/[ad])$/i;
+
+    /* Empty, or a dash / n.a. / n.m. standing in for a number. */
+    App.numbers.isBlank = function isBlank(text) {
+        return BLANK.test(String(text).trim());
+    };
+
+    /* The locale numbers are written in for a deck in language `lang` ("en-…" or anything else). */
+    App.numbers.localeFor = function localeFor(lang) {
+        return /^en\b/i.test(lang || '') ? 'en-US' : 'pt-BR';
+    };
+
+    /*
+     * Which character of `body` ("1.234,5") is its decimal separator, or ''.
+     * Both kinds: the last one. One separator used twice: a thousands separator.
+     * One separator once: a decimal unless exactly three digits follow it; then
+     * (as in "2.450") the locale decides.
+     */
+    function decimalOf(body, locale) {
+        const dot = body.lastIndexOf('.');
+        const comma = body.lastIndexOf(',');
+        if (dot !== -1 && comma !== -1) {
+            return dot > comma ? '.' : ',';
+        }
+        const separator = dot !== -1 ? '.' : (comma !== -1 ? ',' : '');
+        if (!separator || body.indexOf(separator) !== body.lastIndexOf(separator)) {
+            return '';
+        }
+        const at = body.indexOf(separator);
+        const looksGrouped = body.length - at - 1 === 3 && at >= 1 && at <= 3 && body[0] !== '0';
+        if (!looksGrouped) {
+            return separator;
+        }
+        return App.numbers.LOCALES[locale].decimal === separator ? separator : '';
+    }
+
+    /* "1.234,5" -> { int: '1234', frac: '5', grouped: true }, or null if the separators make no sense. */
+    function readDigits(body, locale) {
+        const decimal = decimalOf(body, locale);
+        const parts = decimal ? body.split(decimal) : [body];
+        if (parts.length > 2 || (decimal && parts[1] === '') || !/^\d*$/.test(parts[1] || '')) {
+            return null;
+        }
+        const whole = parts[0] || '0';
+        if (/^\d+$/.test(whole)) {
+            return { int: whole, frac: parts[1] || '', grouped: false };
+        }
+        // Thousands separators: the one that is not the decimal, between groups of three digits.
+        const group = whole.replace(/\d/g, '')[0];
+        if (group === decimal || !/^\d{1,3}(?:([.,])\d{3})*$/.test(whole) || whole.split(group).some((part) => /\D/.test(part))) {
+            return null;
+        }
+        return { int: whole.split(group).join(''), frac: parts[1] || '', grouped: true };
+    }
+
+    /* The parts of a number written as `text`, read the `locale`'s way where it is ambiguous; null when it is not one number. */
+    App.numbers.parse = function parse(text, locale) {
+        let rest = String(text).trim();
+        const parens = /^\(.*\)$/.test(rest);
+        if (parens) {
+            rest = rest.slice(1, -1).trim();
+        }
+        const found = NUMBER.exec(rest);
+        if (!found || (found[1] && found[3]) || (parens && (found[1] || found[3]))) {
+            return null;
+        }
+        const digits = readDigits(found[4], locale || 'pt-BR');
+        if (!digits) {
+            return null;
+        }
+        const sign = found[1] || found[3];
+        return {
+            sign: sign, negative: parens || sign === '-' || sign === '−', parens: parens,
+            prefix: found[2] || '', int: digits.int, frac: digits.frac, grouped: digits.grouped, suffix: found[5] || '',
+        };
+    };
+
+    function isZero(number) {
+        return !/[1-9]/.test(number.int + number.frac);
+    }
+
+    /* Write a number's parts with the separators of `locale`. */
+    App.numbers.format = function format(number, locale) {
+        const separators = App.numbers.LOCALES[locale] || App.numbers.LOCALES['pt-BR'];
+        let int = number.int.replace(/^0+(?=\d)/, '') || '0';
+        if (number.grouped) {
+            int = int.replace(/\B(?=(\d{3})+$)/g, separators.group);
+        }
+        const body = number.prefix + int + (number.frac ? separators.decimal + number.frac : '') + number.suffix;
+        if (number.negative && !isZero(number)) {
+            return number.parens ? '(' + body + ')' : (number.sign === '−' ? '−' : '-') + body;
+        }
+        return (number.sign === '+' ? '+' : '') + body;
+    };
+
+    /* Digits `int` + `frac` as one string with `places` of them after the point, and back. */
+    function split(digits, places) {
+        const padded = digits.padStart(places + 1, '0');
+        const int = padded.slice(0, padded.length - places).replace(/^0+(?=\d)/, '');
+        return { int: int, frac: padded.slice(padded.length - places) };
+    }
+
+    /* The number with `places` decimals: rounded half up, or padded with zeros. A zero loses its minus. */
+    App.numbers.withDecimals = function withDecimals(number, places) {
+        if (places >= number.frac.length) {
+            return Object.assign({}, number, { frac: number.frac.padEnd(places, '0') });
+        }
+        let digits = number.int + number.frac.slice(0, places);
+        if (number.frac[places] >= '5') {
+            digits = (BigInt(digits) + 1n).toString().padStart(digits.length, '0');
+        }
+        const result = Object.assign({}, number, split(digits, places));
+        if (isZero(result) && result.sign !== '+') {
+            Object.assign(result, { sign: '', negative: false, parens: false });
+        }
+        return result;
+    };
+
+    /* 0,195 -> 19,5%: the point moves two places right, no digit is lost. */
+    App.numbers.toPercent = function toPercent(number) {
+        const digits = number.int + number.frac;
+        const places = number.frac.length - 2;
+        const moved = places >= 0 ? split(digits, places) : split(digits + '0'.repeat(-places), 0);
+        return Object.assign({}, number, moved, { suffix: '%' });
+    };
+
+    /* 19,5% -> 0,195. */
+    App.numbers.fromPercent = function fromPercent(number) {
+        return Object.assign({}, number, split(number.int + number.frac, number.frac.length + 2), { suffix: '' });
+    };
+})();
+
+</script>
+<script>
 // ---- js/tables.js ----
 /*
  * tables.js - tables on slides (SPEC Phase 4).
@@ -5724,6 +5906,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             rows('[data-total-row]') + ':last-child:not(:first-child) > td { font-weight: bold; background: none;' +
             ' border-top: 2px solid var(--table-total-line-color, var(--color-text, #222222)); }',
             rows('[data-first-column]') + ' > td:first-child { font-weight: bold; }',
+            // A column of numbers (alignNumbers); an alignment set on the cell or its lines wins.
+            cell + '[data-numeric] { text-align: right; }',
         ].join('\n') + '\n';
     };
 
@@ -6312,6 +6496,77 @@ App.template.newDeckHtml = function newDeckHtml() {
             table.style.setProperty(variable, value);
         }
         table.querySelectorAll(':scope > tbody > tr > td').forEach((cell) => setCellStyle(cell, property, null));
+    };
+
+    // ---------------------------------------------------------------
+    // Numbers in cells
+    // ---------------------------------------------------------------
+    //
+    // A column of numbers is right-aligned, as in Excel: alignNumbers marks
+    // its cells data-numeric (header included, so it lines up with them) and
+    // the deck's stylesheet aligns them. An alignment chosen on the cell or
+    // its lines wins. The number buttons rewrite the text (numbers.js).
+
+    /* A cell's text when it is one line (without the spaces around it), or null. */
+    function oneLine(cell) {
+        const lines = App.text.lineTexts(cell).map((line) => line.trim()).filter((line) => line !== '');
+        return lines.length <= 1 ? (lines[0] || '') : null;
+    }
+
+    /*
+     * Mark the cells of the number columns: a column (cells merged across
+     * columns aside) whose cells under the first row hold a number, and
+     * otherwise nothing, a dash or n.a. (App.numbers.isBlank). Returns
+     * whether a mark changed.
+     */
+    App.tables.alignNumbers = function alignNumbers(table) {
+        const boxes = App.tables.cellBoxes(table);
+        const numeric = new Map();
+        const isNumberColumn = (col) => {
+            if (!numeric.has(col)) {
+                const texts = boxes.filter((box) => box.col === col && box.colSpan === 1 && box.row > 0).map((box) => oneLine(box.cell));
+                const counts = (text) => text !== null && !App.numbers.isBlank(text);
+                numeric.set(col, texts.some(counts) &&
+                    texts.every((text) => !counts(text) ? text !== null : App.numbers.parse(text) !== null));
+            }
+            return numeric.get(col);
+        };
+        let changed = false;
+        boxes.forEach((box) => {
+            const on = box.colSpan === 1 && isNumberColumn(box.col);
+            if (box.cell.hasAttribute('data-numeric') !== on) {
+                box.cell.toggleAttribute('data-numeric', on);
+                changed = true;
+            }
+        });
+        return changed;
+    };
+
+    /* The cells of `cells` that hold one number: [{ cell, number }] (number: App.numbers.parse, read in `locale`). */
+    App.tables.numbersIn = function numbersIn(cells, locale) {
+        return cells.map((cell) => {
+            const text = oneLine(cell);
+            return { cell: cell, number: text ? App.numbers.parse(text, locale) : null };
+        }).filter((found) => found.number !== null);
+    };
+
+    /*
+     * Rewrite the number in each of `cells` as change(number) returns it
+     * (null: leave it), written in `locale`. The new text takes the look of
+     * the old one's first character.
+     */
+    App.tables.formatNumbers = function formatNumbers(cells, locale, change) {
+        App.tables.numbersIn(cells, locale).forEach((found) => {
+            const next = change(found.number);
+            if (!next) {
+                return;
+            }
+            const lines = App.text.lineTexts(found.cell);
+            const p = lines.findIndex((line) => line.trim() !== '');
+            const start = lines[p].indexOf(lines[p].trim());
+            App.text.replaceAll(found.cell, [{ p: p, start: start, end: start + lines[p].trim().length }],
+                App.numbers.format(next, locale));
+        });
     };
 
     /* The cell of a table element under slide point (x, y), or null (the slide must be shown). */
@@ -8338,6 +8593,19 @@ App.template.newDeckHtml = function newDeckHtml() {
             ? '<path d="' + GRID_LINES[line] + '" stroke-dasharray="1 2" stroke-width="1"/>'
             : '<path d="' + GRID_LINES[line] + '" stroke-width="2"/>')).join('');
     });
+
+    /* Characters drawn as an icon (the number buttons): filled, in the UI font. */
+    function glyphs(x, y, size, text, anchor) {
+        return '<text x="' + x + '" y="' + y + '" font-size="' + size + '" text-anchor="' + (anchor || 'start') + '"' +
+            ' fill="currentColor" stroke="none" font-family="Segoe UI, Arial, sans-serif" font-weight="600">' + text + '</text>';
+    }
+
+    // Table Design > Number (tabledesign.js), drawn as Excel draws them.
+    PATHS.numberThousands = glyphs(10, 13.5, 8.5, '000', 'middle');
+    PATHS.increaseDecimals = '<path d="M7 5H2.5M4.5 3L2.5 5l2 2"/>' + glyphs(8, 8, 7.5, '.0') + glyphs(5, 17.5, 7.5, '.00');
+    PATHS.decreaseDecimals = glyphs(2, 8, 7.5, '.00') + '<path d="M2.5 14.5H7M5 12.5l2 2-2 2"/>' + glyphs(8.5, 17.5, 7.5, '.0');
+    PATHS.numberPercent = glyphs(10, 15, 13, '%', 'middle');
+    PATHS.negativeParens = glyphs(10, 14.5, 10.5, '(1)', 'middle');
 
     App.icons.get = function get(name) {
         const path = PATHS[name];
@@ -11348,12 +11616,14 @@ App.template.newDeckHtml = function newDeckHtml() {
 <script>
 // ---- js/settings.js ----
 /*
- * settings.js - the editor's privacy settings and the File > Settings dialog (SPEC 6.3).
+ * settings.js - the editor's privacy settings (and the number locale) and the File > Settings dialog (SPEC 6.3).
  *
  *   keepDrafts      keep crash-recovery drafts in this browser      (default on)
  *   retentionDays   delete drafts after this many days, 1 to 30     (default 1)
  *   rememberRecent  keep a Recent files list                        (default off)
  *                   (only possible while drafts are kept)
+ *   numberLocale    how table numbers are written: 'pt-BR' (1.234,5) or 'en-US'
+ *                   (1,234.5); null until chosen: the deck's language decides
  *
  * The settings live in localStorage, not in the IndexedDB database, so
  * "Delete all drafts now" empties that database without resetting them.
@@ -11370,7 +11640,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.settings = {};
 
     const KEY = 'deck-editor-settings';
-    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false });
+    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null });
+    const NUMBER_LOCALES = ['pt-BR', 'en-US'];
 
     let store = null;   // localStorage, or a fake one in the tests
     let current = Object.assign({}, App.settings.DEFAULTS);
@@ -11391,6 +11662,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             keepDrafts: keepDrafts,
             retentionDays: Math.min(30, days),
             rememberRecent: keepDrafts && !!value.rememberRecent,   // no drafts means no recent files either
+            numberLocale: NUMBER_LOCALES.indexOf(value.numberLocale) !== -1 ? value.numberLocale : null,
         };
     };
 
@@ -13344,6 +13616,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const cells = selectedCellsOf(element, currentBlock());
         App.tableControls.keepCells(() => App.history.change('Clear cells', slideScope(element), () => {
             cells.forEach((cell) => App.text.clearText(cell));
+            App.tables.alignNumbers(tableOf(element));
             App.tables.fitTable(element);
         }));
     }
@@ -13468,6 +13741,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             next = LAYOUT[action].run(target) || null;
             if (target.element.isConnected) {
                 widthFromColumns(target.element);
+                App.tables.alignNumbers(target.table);   // a deleted row of words may leave a column of numbers
                 App.tables.fitTable(target.element);
             }
         });
@@ -13652,6 +13926,11 @@ App.template.newDeckHtml = function newDeckHtml() {
  *     the style's header / band fill.
  *   - Borders: the Borders list (All, Outside, Inside, Top, …, No Border) draws
  *     with the pen (weight and colour, chosen beside it).
+ *   - Number (as Excel's): Thousands Separator, Increase / Decrease Decimal,
+ *     Percent Style, Negatives in Parentheses. They rewrite the numbers in the
+ *     cells (numbers.js), written as pt-BR (1.234,5) or en-US (1,234.5): the
+ *     locale chosen beside them (remembered in the settings), else the deck's
+ *     language.
  * Layout > Alignment: align the text to the top / middle / bottom of its cells;
  * Cell Margins (Normal, None, Narrow, Wide).
  *
@@ -13659,7 +13938,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * selected and nothing typed in, all its cells (the margins and the alignment
  * then go once onto the table). Each is one undo step; typing goes on.
  *
- * Talks to: tables.js (the cell look), tablecontrols.js (which cells),
+ * Talks to: tables.js (the cell look), numbers.js, settings.js (the number locale), tablecontrols.js (which cells),
  * textcontrols.js (colour split buttons, lists), commands.js, ribbon.js, history.js.
  */
 
@@ -13697,6 +13976,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     const pen = { weight: 1, color: null };   // null: the theme's text colour
 
     let styleBoxes = [];      // the Table Style Options checkboxes shown
+    let localeButton = null;
     let penWeightButton = null;
     let marginsButton = null;
     let bordersMain = null;
@@ -13726,16 +14006,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         return element ? element.querySelector(':scope > table') : null;
     }
 
-    /* One undo step on the target's table; the rows then follow their text; typing and the selected cells stay. */
-    function change(label, run) {
-        const t = target();
-        if (!t) {
+    /* One undo step on the target's table (`t`, by default the current one); the rows then follow their text; typing and the selected cells stay. */
+    function change(label, run, t) {
+        const on = t || target();
+        if (!on) {
             return;
         }
-        const scope = { slideId: t.element.closest('section.slide').getAttribute('data-slide-id') };
+        const scope = { slideId: on.element.closest('section.slide').getAttribute('data-slide-id') };
         App.tableControls.keepCells(() => App.history.change(label, scope, () => {
-            run(t);
-            App.tables.fitTable(t.element);
+            run(on);
+            App.tables.fitTable(on.element);
         }));
         App.selection.refresh();
     }
@@ -13802,6 +14082,85 @@ App.template.newDeckHtml = function newDeckHtml() {
         return preset ? preset[0] : null;
     }
 
+    // ---------------------------------------------------------------
+    // Number formats
+    // ---------------------------------------------------------------
+
+    /* The locale numbers are read and written in: the one chosen, else the deck's language. */
+    App.tableDesign.numberLocale = function numberLocale() {
+        const doc = App.deck.getDocument();
+        return App.settings.get().numberLocale || App.numbers.localeFor(doc ? doc.documentElement.getAttribute('lang') : '');
+    };
+
+    /* The numbers in the cells the buttons work on. */
+    function targetNumbers() {
+        const t = target();
+        return t ? App.tables.numbersIn(t.cells, App.tableDesign.numberLocale()).map((found) => found.number) : [];
+    }
+
+    const isBig = (number) => number.int.replace(/^0+/, '').length >= 4;
+
+    /*
+     * The number buttons: change(on) gives what happens to each number (null: it
+     * stays), on = the button was off. A toggle is on when all the numbers it
+     * concerns have it.
+     */
+    const NUMBER_FORMATS = {
+        numberThousands: {
+            label: 'Thousands Separator',
+            isChecked: (numbers) => numbers.some(isBig) && numbers.every((number) => !isBig(number) || number.grouped),
+            change: (on) => (number) => Object.assign({}, number, { grouped: on }),
+        },
+        increaseDecimals: {
+            label: 'Increase Decimal',
+            change: () => (number) => App.numbers.withDecimals(number, number.frac.length + 1),
+        },
+        decreaseDecimals: {
+            label: 'Decrease Decimal',
+            change: () => (number) => (number.frac ? App.numbers.withDecimals(number, number.frac.length - 1) : null),
+        },
+        numberPercent: {
+            // As in Excel, 0,195 becomes 19,5% (no digit is lost); a number with another unit (9,8x) stays.
+            label: 'Percent Style',
+            isChecked: (numbers) => numbers.length > 0 && numbers.every((number) => number.suffix === '%'),
+            change: (on) => (number) => {
+                if (on) {
+                    return number.suffix ? null : App.numbers.toPercent(number);
+                }
+                return number.suffix === '%' ? App.numbers.fromPercent(number) : null;
+            },
+        },
+        negativeParens: {
+            label: 'Negatives in Parentheses',
+            isChecked: (numbers) => numbers.some((number) => number.negative) &&
+                numbers.every((number) => !number.negative || number.parens),
+            change: (on) => (number) => (number.negative ? Object.assign({}, number, { parens: on }) : null),
+        },
+    };
+
+    /*
+     * Rewrite the numbers of the target's cells as one undo step. Typing in a
+     * cell stops for it (its text is rewritten) and goes on after it.
+     */
+    function formatNumbers(label, rewrite) {
+        const t = target();
+        if (!t || targetNumbers().length === 0) {
+            return;
+        }
+        const typing = App.text.editingElement();
+        if (typing) {
+            App.text.exitEdit({ select: false });
+        }
+        change(label, (on) => {
+            App.tables.formatNumbers(on.cells, App.tableDesign.numberLocale(), rewrite);
+            App.tables.alignNumbers(on.table);
+        }, t);
+        if (typing && typing.isConnected) {
+            App.selection.select(t.element);
+            App.text.enterEdit(typing, { caret: 'end' });
+        }
+    }
+
     /* The commands of this module (commands.js defines them). */
     App.tableDesign.commands = function commands() {
         const definitions = {};
@@ -13830,6 +14189,22 @@ App.template.newDeckHtml = function newDeckHtml() {
         definitions.setCellMargins = {
             label: 'Cell Margins', keepsEdit: true, isEnabled: canRun,
             run: (name) => setBox('Cell margins', 'padding', MARGINS.find(([key]) => key === name)[2]),
+        };
+        const hasNumbers = () => targetNumbers().length > 0;
+        Object.keys(NUMBER_FORMATS).forEach((name) => {
+            const format = NUMBER_FORMATS[name];
+            const isOn = () => !!format.isChecked && format.isChecked(targetNumbers());
+            definitions[name] = {
+                label: format.label, keepsEdit: true, isEnabled: hasNumbers, isChecked: format.isChecked ? isOn : undefined,
+                run: () => formatNumbers(format.label, format.change(!isOn())),
+            };
+        });
+        definitions.setNumberLocale = {
+            label: 'Number format', keepsEdit: true,
+            run: (locale) => {
+                App.settings.update({ numberLocale: locale });
+                App.ribbon.refresh();
+            },
         };
         return definitions;
     };
@@ -13873,6 +14248,17 @@ App.template.newDeckHtml = function newDeckHtml() {
                 App.ribbon.refresh();
             }));
         return penWeightButton;
+    }
+
+    /* How numbers are written: "1.234,5 ▾" opens pt-BR / en-US. */
+    function createLocale() {
+        localeButton = listButton('number-locale', 'Numbers are written as …', () => {
+            const current = App.tableDesign.numberLocale();
+            App.textControls.openMenu(localeButton, 'number-locale-menu', Object.keys(App.numbers.LOCALES).map((locale) => ({
+                label: App.numbers.LOCALES[locale].sample + '  (' + locale + ')', value: locale, checked: locale === current,
+            })), (locale) => App.commands.run('setNumberLocale', locale));
+        });
+        return localeButton;
     }
 
     function createMargins() {
@@ -13934,6 +14320,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (name === 'penWeight') {
             return createPenWeight();
         }
+        if (name === 'numberLocale') {
+            return createLocale();
+        }
         return name === 'cellMargins' ? createMargins() : null;
     };
 
@@ -13954,6 +14343,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (penWeightButton && penWeightButton.isConnected) {
             penWeightButton.textContent = weightLabel(pen.weight) + ' ▾';
             penWeightButton.disabled = !App.commands.isEnabled('cellBorders');
+        }
+        if (localeButton && localeButton.isConnected) {
+            const locale = App.tableDesign.numberLocale();
+            localeButton.textContent = App.numbers.LOCALES[locale].sample + ' ▾';
+            localeButton.title = 'Numbers are written as ' + App.numbers.LOCALES[locale].sample + ' (' + locale + ')';
         }
         if (marginsButton && marginsButton.isConnected) {
             marginsButton.disabled = !App.commands.isEnabled('setCellMargins');
@@ -14390,9 +14784,12 @@ App.template.newDeckHtml = function newDeckHtml() {
                 { label: 'Table Style Options', commands: [{ control: 'tableStyleOptions' }] },
                 { label: 'Shading & Borders', rows: [[{ control: 'cellFill' }, { control: 'cellBorders' }],
                     [{ control: 'penWeight' }, { control: 'penColor' }]] },
+                { label: 'Number', rows: [[{ control: 'numberLocale' }],
+                    [['numberThousands', 'numberThousands'], ['increaseDecimals', 'increaseDecimals'],
+                        ['decreaseDecimals', 'decreaseDecimals'], ['numberPercent', 'numberPercent'], ['negativeParens', 'negativeParens']]] },
             ],
-            note: 'Shading and Borders change the selected cells, the cell you type in, or (table selected, Esc after typing) ' +
-                'all its cells. Borders draw with the pen weight and colour.',
+            note: 'These change the selected cells, the cell you type in, or (table selected, Esc after typing) all its cells. ' +
+                'Borders draw with the pen. Number buttons rewrite the numbers as 1.234,5 or 1,234.5 (chosen above them).',
         },
         {
             // Shown only while a table is selected (PowerPoint's Table Layout tab).

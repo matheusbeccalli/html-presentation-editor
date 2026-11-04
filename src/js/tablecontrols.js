@@ -324,6 +324,7 @@
         const cells = selectedCellsOf(element, currentBlock());
         App.tableControls.keepCells(() => App.history.change('Clear cells', slideScope(element), () => {
             cells.forEach((cell) => App.text.clearText(cell));
+            App.tables.alignNumbers(tableOf(element));
             App.tables.fitTable(element);
         }));
     }
@@ -448,6 +449,7 @@
             next = LAYOUT[action].run(target) || null;
             if (target.element.isConnected) {
                 widthFromColumns(target.element);
+                App.tables.alignNumbers(target.table);   // a deleted row of words may leave a column of numbers
                 App.tables.fitTable(target.element);
             }
         });

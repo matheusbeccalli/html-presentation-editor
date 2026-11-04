@@ -1,10 +1,12 @@
 /*
- * settings.js - the editor's privacy settings and the File > Settings dialog (SPEC 6.3).
+ * settings.js - the editor's privacy settings (and the number locale) and the File > Settings dialog (SPEC 6.3).
  *
  *   keepDrafts      keep crash-recovery drafts in this browser      (default on)
  *   retentionDays   delete drafts after this many days, 1 to 30     (default 1)
  *   rememberRecent  keep a Recent files list                        (default off)
  *                   (only possible while drafts are kept)
+ *   numberLocale    how table numbers are written: 'pt-BR' (1.234,5) or 'en-US'
+ *                   (1,234.5); null until chosen: the deck's language decides
  *
  * The settings live in localStorage, not in the IndexedDB database, so
  * "Delete all drafts now" empties that database without resetting them.
@@ -21,7 +23,8 @@
     App.settings = {};
 
     const KEY = 'deck-editor-settings';
-    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false });
+    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null });
+    const NUMBER_LOCALES = ['pt-BR', 'en-US'];
 
     let store = null;   // localStorage, or a fake one in the tests
     let current = Object.assign({}, App.settings.DEFAULTS);
@@ -42,6 +45,7 @@
             keepDrafts: keepDrafts,
             retentionDays: Math.min(30, days),
             rememberRecent: keepDrafts && !!value.rememberRecent,   // no drafts means no recent files either
+            numberLocale: NUMBER_LOCALES.indexOf(value.numberLocale) !== -1 ? value.numberLocale : null,
         };
     };
 

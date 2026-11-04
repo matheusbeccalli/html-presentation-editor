@@ -105,6 +105,19 @@
             : '<path d="' + GRID_LINES[line] + '" stroke-width="2"/>')).join('');
     });
 
+    /* Characters drawn as an icon (the number buttons): filled, in the UI font. */
+    function glyphs(x, y, size, text, anchor) {
+        return '<text x="' + x + '" y="' + y + '" font-size="' + size + '" text-anchor="' + (anchor || 'start') + '"' +
+            ' fill="currentColor" stroke="none" font-family="Segoe UI, Arial, sans-serif" font-weight="600">' + text + '</text>';
+    }
+
+    // Table Design > Number (tabledesign.js), drawn as Excel draws them.
+    PATHS.numberThousands = glyphs(10, 13.5, 8.5, '000', 'middle');
+    PATHS.increaseDecimals = '<path d="M7 5H2.5M4.5 3L2.5 5l2 2"/>' + glyphs(8, 8, 7.5, '.0') + glyphs(5, 17.5, 7.5, '.00');
+    PATHS.decreaseDecimals = glyphs(2, 8, 7.5, '.00') + '<path d="M2.5 14.5H7M5 12.5l2 2-2 2"/>' + glyphs(8.5, 17.5, 7.5, '.0');
+    PATHS.numberPercent = glyphs(10, 15, 13, '%', 'middle');
+    PATHS.negativeParens = glyphs(10, 14.5, 10.5, '(1)', 'middle');
+
     App.icons.get = function get(name) {
         const path = PATHS[name];
         if (!path) {

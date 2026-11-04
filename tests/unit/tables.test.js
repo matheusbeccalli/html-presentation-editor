@@ -594,3 +594,70 @@ test('tables: setFill fills cells or gives them back to the table style', () => 
     App.tables.setFill(cells, null);
     assert(!cells[0].hasAttribute('style'), 'the table style again');
 });
+
+/* A model table from rows of cell HTML ('' = an empty cell); '>2' before the text makes a cell span two columns. */
+function textTable(rows) {
+    const cellHtml = (text) => (text.startsWith('>2') ? '<td colspan="2">' + text.slice(2) : '<td>' + text) + '</td>';
+    const table = tableFrom(rows.map((row) => '<tr>' + row.map(cellHtml).join('') + '</tr>').join(''));
+    table.querySelectorAll('td').forEach((cell) => App.text.normalizeCell(cell));
+    return table;
+}
+
+/* n: a cell of a number column (data-numeric), .: not. */
+function numericMap(table) {
+    return Array.from(table.rows).map((row) => Array.from(row.cells).map((cell) => (cell.hasAttribute('data-numeric') ? 'n' : '.')).join('')).join('|');
+}
+
+test('tables: alignNumbers marks every cell of a number column, its header too', () => {
+    const table = textTable([['Empresa', 'EV', 'EV/EBITDA', 'Var.'], ['Beta', '2.450', '9,8x', 'n.a.'],
+        ['Gama', '1.120', '(1,2x)', '-3,5%'], ['Mediana', '', '9,4x', '']]);
+    assert(App.tables.alignNumbers(table), 'changed');
+    assertEqual(numericMap(table), '.nnn|.nnn|.nnn|.nnn');
+    assert(!App.tables.alignNumbers(table), 'nothing more to change');
+});
+
+test('tables: a word under the header, or no number at all, makes a column text again', () => {
+    const table = textTable([['A', 'B', 'C'], ['1', 'x', ''], ['2', '3', 'n.a.']]);
+    table.rows[1].cells[1].setAttribute('data-numeric', '');   // a number column before "x" was typed
+    App.tables.alignNumbers(table);
+    assertEqual(numericMap(table), 'n..|n..|n..');
+});
+
+test('tables: a cell merged across columns is neither counted nor marked', () => {
+    const table = textTable([['A', 'B', 'C'], ['1', '2', '3'], ['>2Total', '9']]);
+    App.tables.alignNumbers(table);
+    assertEqual(numericMap(table), 'nnn|nnn|.n');
+    const words = textTable([['A', 'B'], ['>2Subtotal'], ['1', 'x']]);
+    App.tables.alignNumbers(words);
+    assertEqual(numericMap(words), 'n.|.|n.');
+});
+
+test('tables: a number column is right-aligned unless the cell or its line says otherwise', () => {
+    const { frame, table } = tableFrame((doc) => App.tables.createTable(doc, 3, 3, { left: 0, top: 0, width: 600, height: 120 }, 'e1'));
+    try {
+        const cells = Array.from(table.querySelectorAll('td'));
+        ['Name', 'EV', 'Note', 'Beta', '2.450', 'ok', 'Gama', '780', ''].forEach((text, index) => {
+            cells[index].firstElementChild.textContent = text;
+        });
+        App.tables.alignNumbers(table);
+        const align = (cell) => getComputedStyle(cell.firstElementChild).textAlign;
+        assertEqual(cells.slice(0, 6).map(align), ['left', 'right', 'left', 'left', 'right', 'left']);
+        cells[4].style.textAlign = 'left';
+        cells[7].firstElementChild.style.textAlign = 'center';
+        assertEqual([align(cells[4]), align(cells[7]), align(cells[1])], ['left', 'center', 'right']);
+    } finally {
+        frame.remove();
+    }
+});
+
+test('tables: formatNumbers rewrites the number in each cell and keeps its look', () => {
+    const table = textTable([['<b>2.450</b>', 'Beta', '9,8x', '<p>1</p><p>2</p>', '']]);
+    const cells = Array.from(table.rows[0].cells);
+    assertEqual(App.tables.numbersIn(cells, 'pt-BR').map((found) => found.cell.textContent), ['2.450', '9,8x'],
+        'a cell of two lines is not one number');
+    App.tables.formatNumbers(cells, 'pt-BR', (number) => App.numbers.withDecimals(number, 2));
+    assertEqual(cells.map((cell) => cell.textContent), ['2.450,00', 'Beta', '9,80x', '12', '']);
+    assert(cells[0].querySelector('b'), 'still bold: ' + cells[0].innerHTML);
+    App.tables.formatNumbers(cells, 'en-US', (number) => (number.suffix === 'x' ? null : number));
+    assertEqual(cells.map((cell) => cell.textContent).slice(0, 3), ['2,450.00', 'Beta', '9,80x'], 'null leaves a number as it is');
+});

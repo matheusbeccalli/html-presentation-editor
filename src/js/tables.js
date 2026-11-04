@@ -88,6 +88,8 @@
             rows('[data-total-row]') + ':last-child:not(:first-child) > td { font-weight: bold; background: none;' +
             ' border-top: 2px solid var(--table-total-line-color, var(--color-text, #222222)); }',
             rows('[data-first-column]') + ' > td:first-child { font-weight: bold; }',
+            // A column of numbers (alignNumbers); an alignment set on the cell or its lines wins.
+            cell + '[data-numeric] { text-align: right; }',
         ].join('\n') + '\n';
     };
 
@@ -676,6 +678,77 @@
             table.style.setProperty(variable, value);
         }
         table.querySelectorAll(':scope > tbody > tr > td').forEach((cell) => setCellStyle(cell, property, null));
+    };
+
+    // ---------------------------------------------------------------
+    // Numbers in cells
+    // ---------------------------------------------------------------
+    //
+    // A column of numbers is right-aligned, as in Excel: alignNumbers marks
+    // its cells data-numeric (header included, so it lines up with them) and
+    // the deck's stylesheet aligns them. An alignment chosen on the cell or
+    // its lines wins. The number buttons rewrite the text (numbers.js).
+
+    /* A cell's text when it is one line (without the spaces around it), or null. */
+    function oneLine(cell) {
+        const lines = App.text.lineTexts(cell).map((line) => line.trim()).filter((line) => line !== '');
+        return lines.length <= 1 ? (lines[0] || '') : null;
+    }
+
+    /*
+     * Mark the cells of the number columns: a column (cells merged across
+     * columns aside) whose cells under the first row hold a number, and
+     * otherwise nothing, a dash or n.a. (App.numbers.isBlank). Returns
+     * whether a mark changed.
+     */
+    App.tables.alignNumbers = function alignNumbers(table) {
+        const boxes = App.tables.cellBoxes(table);
+        const numeric = new Map();
+        const isNumberColumn = (col) => {
+            if (!numeric.has(col)) {
+                const texts = boxes.filter((box) => box.col === col && box.colSpan === 1 && box.row > 0).map((box) => oneLine(box.cell));
+                const counts = (text) => text !== null && !App.numbers.isBlank(text);
+                numeric.set(col, texts.some(counts) &&
+                    texts.every((text) => !counts(text) ? text !== null : App.numbers.parse(text) !== null));
+            }
+            return numeric.get(col);
+        };
+        let changed = false;
+        boxes.forEach((box) => {
+            const on = box.colSpan === 1 && isNumberColumn(box.col);
+            if (box.cell.hasAttribute('data-numeric') !== on) {
+                box.cell.toggleAttribute('data-numeric', on);
+                changed = true;
+            }
+        });
+        return changed;
+    };
+
+    /* The cells of `cells` that hold one number: [{ cell, number }] (number: App.numbers.parse, read in `locale`). */
+    App.tables.numbersIn = function numbersIn(cells, locale) {
+        return cells.map((cell) => {
+            const text = oneLine(cell);
+            return { cell: cell, number: text ? App.numbers.parse(text, locale) : null };
+        }).filter((found) => found.number !== null);
+    };
+
+    /*
+     * Rewrite the number in each of `cells` as change(number) returns it
+     * (null: leave it), written in `locale`. The new text takes the look of
+     * the old one's first character.
+     */
+    App.tables.formatNumbers = function formatNumbers(cells, locale, change) {
+        App.tables.numbersIn(cells, locale).forEach((found) => {
+            const next = change(found.number);
+            if (!next) {
+                return;
+            }
+            const lines = App.text.lineTexts(found.cell);
+            const p = lines.findIndex((line) => line.trim() !== '');
+            const start = lines[p].indexOf(lines[p].trim());
+            App.text.replaceAll(found.cell, [{ p: p, start: start, end: start + lines[p].trim().length }],
+                App.numbers.format(next, locale));
+        });
     };
 
     /* The cell of a table element under slide point (x, y), or null (the slide must be shown). */

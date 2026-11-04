@@ -1,8 +1,13 @@
 /* Tests for src/js/settings.js (SPEC 6.3) and the status-bar text in ui.js (SPEC 6.4). */
 
-test('settings: defaults are drafts on, 1 day, recent files off', () => {
-    assertEqual(App.settings.normalize({}), { keepDrafts: true, retentionDays: 1, rememberRecent: false });
-    assertEqual(App.settings.normalize(null), { keepDrafts: true, retentionDays: 1, rememberRecent: false });
+test('settings: defaults are drafts on, 1 day, recent files off, numbers as the deck\'s language', () => {
+    assertEqual(App.settings.normalize({}), { keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null });
+    assertEqual(App.settings.normalize(null), { keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null });
+});
+
+test('settings: the number locale is pt-BR, en-US or not chosen', () => {
+    const locale = (value) => App.settings.normalize({ numberLocale: value }).numberLocale;
+    assertEqual([locale('pt-BR'), locale('en-US'), locale('fr-FR'), locale(undefined)], ['pt-BR', 'en-US', null, null]);
 });
 
 test('settings: retention is a whole number of days from 1 to 30', () => {
@@ -13,7 +18,7 @@ test('settings: retention is a whole number of days from 1 to 30', () => {
 
 test('settings: no drafts means no recent files either', () => {
     assertEqual(App.settings.normalize({ keepDrafts: false, rememberRecent: true }),
-        { keepDrafts: false, retentionDays: 1, rememberRecent: false });
+        { keepDrafts: false, retentionDays: 1, rememberRecent: false, numberLocale: null });
     assertEqual(App.settings.normalize({ keepDrafts: true, rememberRecent: true }).rememberRecent, true);
 });
 
@@ -29,9 +34,9 @@ function fakeLocalStorage(initial) {
 test('settings: load reads saved values, and update saves them', () => {
     const store = fakeLocalStorage({ 'deck-editor-settings': JSON.stringify({ retentionDays: 5, rememberRecent: true }) });
     App.settings.load(store);
-    assertEqual(App.settings.get(), { keepDrafts: true, retentionDays: 5, rememberRecent: true });
+    assertEqual(App.settings.get(), { keepDrafts: true, retentionDays: 5, rememberRecent: true, numberLocale: null });
     App.settings.update({ keepDrafts: false });
-    assertEqual(JSON.parse(store.data['deck-editor-settings']), { keepDrafts: false, retentionDays: 5, rememberRecent: false });
+    assertEqual(JSON.parse(store.data['deck-editor-settings']), { keepDrafts: false, retentionDays: 5, rememberRecent: false, numberLocale: null });
 });
 
 test('settings: unreadable or blocked storage gives the defaults, and saving does not throw', () => {

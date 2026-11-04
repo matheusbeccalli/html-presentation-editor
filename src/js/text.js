@@ -821,6 +821,11 @@
         }
     };
 
+    /* The text of each line of a container (a line break as "\n"). */
+    App.text.lineTexts = function lineTexts(container) {
+        return Array.from(container.children).map(lineText);
+    };
+
     /* Remove all the text of a container (selected table cells + Delete), leaving one empty line. */
     App.text.clearText = function clearText(container) {
         container.replaceChildren();
@@ -2806,7 +2811,7 @@
     // before and after it (history meta), so undo/redo put the cursor back.
 
     const TYPING_PAUSE_MS = 1000;
-    let editing = null;   // { element, id, slideId, isNew, doc }
+    let editing = null;   // { element, id, slideId, isNew, doc, textBefore (a cell's text when editing began) }
     let typing = null;    // { meta, timer } while a typing step is open
     let applying = false; // a key action is changing the text: its own input events are not typing
     let pending = null;   // { caret, styles: [] }: formatting chosen at a cursor, for the text typed next
@@ -2866,6 +2871,7 @@
         editing = {
             element: element, id: App.text.containerKey(element), doc: doc, isNew: !!settings.isNew || stillNew,
             slideId: element.closest('section.slide').getAttribute('data-slide-id'),
+            textBefore: isCell(element) ? App.text.lineTexts(element).join('\n') : null,
         };
         if (!doc.documentElement.getAttribute('lang')) {
             doc.documentElement.setAttribute('lang', 'pt-BR');   // spell check in Portuguese (SPEC Phase 3)
@@ -2925,8 +2931,14 @@
         if (!editing) {
             return;
         }
-        App.text.commitTyping();
         const state = editing;
+        if (state.textBefore !== null && state.element.isConnected &&
+            App.text.lineTexts(state.element).join('\n') !== state.textBefore) {
+            // As in Excel, a column of numbers lines up on the right once its cell is left
+            // (before the typing step closes, so the step holds it).
+            App.tables.alignNumbers(state.element.closest('table'));
+        }
+        App.text.commitTyping();
         editing = null;
         pending = null;
         state.doc.removeEventListener('keydown', onKeyDown, true);

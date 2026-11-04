@@ -64,9 +64,12 @@
                 { label: 'Table Style Options', commands: [{ control: 'tableStyleOptions' }] },
                 { label: 'Shading & Borders', rows: [[{ control: 'cellFill' }, { control: 'cellBorders' }],
                     [{ control: 'penWeight' }, { control: 'penColor' }]] },
+                { label: 'Number', rows: [[{ control: 'numberLocale' }],
+                    [['numberThousands', 'numberThousands'], ['increaseDecimals', 'increaseDecimals'],
+                        ['decreaseDecimals', 'decreaseDecimals'], ['numberPercent', 'numberPercent'], ['negativeParens', 'negativeParens']]] },
             ],
-            note: 'Shading and Borders change the selected cells, the cell you type in, or (table selected, Esc after typing) ' +
-                'all its cells. Borders draw with the pen weight and colour.',
+            note: 'These change the selected cells, the cell you type in, or (table selected, Esc after typing) all its cells. ' +
+                'Borders draw with the pen. Number buttons rewrite the numbers as 1.234,5 or 1,234.5 (chosen above them).',
         },
         {
             // Shown only while a table is selected (PowerPoint's Table Layout tab).

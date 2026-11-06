@@ -68,7 +68,8 @@ test('shapes: the shape element follows the deck contract (accent fill, no outli
     assertEqual(element.outerHTML, '<div class="el" data-type="shape" data-shape="pentagon" data-id="e5" ' +
         'style="left: 10px; top: 20px; width: 200px; height: 80px;">' +
         '<svg class="shape-svg" width="100%" height="100%" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible;">' +
-        '<path class="shape-fill" style="fill: var(--color-accent, #1F2A44); stroke: none;" d="M0 0H160L200 40L160 80H0Z"></path></svg></div>');
+        '<path class="shape-fill" style="fill: var(--color-accent, #1F2A44); stroke: none;" d="M0 0H160L200 40L160 80H0Z"></path></svg>' +
+        '<div class="shape-text" style="' + App.shapes.TEXT_STYLE + '"><p data-list="none" data-level="1"><br></p></div></div>');
     const line = App.shapes.createShape(doc, 'arrow', { left: 0, top: 0, width: 200, height: 0 }, 'e6', 'x');
     assertEqual(line.getAttribute('data-flip'), 'x');
     assertEqual(Array.from(line.querySelectorAll('path'), (path) => path.getAttribute('style')),
@@ -147,4 +148,29 @@ test('shapes: a line\'s outline colours its arrow head too; a wider line gets a 
     assertEqual(head.getAttribute('d'), 'M200 0L182 8.1L182 -8.1Z', 'an 18 px head for a 4 px line');
     App.shapes.setLook(arrow, { fill: '#00b050' });
     assertEqual(App.shapes.lookOf(arrow).fill, null, 'a line has no fill');
+});
+
+test('shapes: a box shape holds its text in a centred, white text area; a line has none', () => {
+    const shape = newShape('chevron');
+    const text = App.shapes.textOf(shape);
+    assertEqual(text.className, 'shape-text');
+    assertEqual([text.style.textAlign, text.style.color, text.style.justifyContent, text.style.fontSize],
+        ['center', 'rgb(255, 255, 255)', 'center', '18pt']);
+    assertEqual(App.shapes.textOf(newShape('arrow', { left: 0, top: 0, width: 200, height: 0 })), null);
+    // A shape drawn before text came (Phase 5 step 5) gets its text area when it is first needed.
+    shape.querySelector('.shape-text').remove();
+    assertEqual(App.shapes.textOf(shape), null);
+    assertEqual(App.shapes.textOf(shape, { create: true }).outerHTML, text.outerHTML);
+});
+
+test('text: a shape\'s text is a container like a text box or a cell (find, undo and the ribbon reach it)', () => {
+    const doc = parseDoc('<section class="slide" data-slide-id="s1"></section>');
+    const shape = App.shapes.createShape(doc, 'rect', { left: 0, top: 0, width: 160, height: 120 }, 'e7', '');
+    doc.querySelector('section').appendChild(shape);
+    const text = App.shapes.textOf(shape);
+    assertEqual(App.text.containerKey(text), 'e7/text');
+    assertEqual(App.text.findContainer(doc, 's1', 'e7/text'), text);
+    assertEqual(App.text.findContainer(doc, 's1', 'e7'), shape);
+    assert(App.text.containersIn(doc.querySelector('section')).indexOf(text) !== -1, 'find & replace walks it');
+    assertEqual(App.text.textOf(shape), text, 'the text a selected shape\'s Font buttons change');
 });

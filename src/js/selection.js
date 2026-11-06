@@ -167,8 +167,8 @@
     };
 
     /*
-     * Double-click on a text box: edit its text, with the cursor where the click
-     * was. On empty slide space: a new text box there, ready to type (left
+     * Double-click on a text box or a shape: edit its text, with the cursor where
+     * the click was (a table: the cell under it). On empty slide space: a new text box there, ready to type (left
      * empty, it goes once deselected, see text.js).
      */
     function onDoubleClick(event) {
@@ -182,6 +182,14 @@
         if (element && element.getAttribute('data-type') === 'table') {
             editCellAt(element, point);
             return;
+        }
+        if (App.shapes.canHoldText(element)) {
+            App.selection.select(element);
+            App.text.enterEdit(App.shapes.textOf(element, { create: true }), { point: point });
+            return;
+        }
+        if (element) {
+            return;   // a line, a picture …: nothing to type in
         }
         const slide = App.deck.getCurrentSlide();
         if (!element && slide && point.x >= 0 && point.y >= 0 && point.x < slide.offsetWidth && point.y < slide.offsetHeight) {

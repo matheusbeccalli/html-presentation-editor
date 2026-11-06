@@ -20,10 +20,15 @@
  * "x" / "y" / "xy" says which corners). Optional data-adjust holds the
  * yellow-handle value (Phase 5 step 8); without it the PowerPoint default is used.
  *
+ * Text (step 7): a box shape holds a text area over its drawing,
+ *   <div class="shape-text" style="position: absolute; inset: 0; …; text-align: center; color: #FFFFFF; …">
+ * in the text model, like a table cell: text.js edits it (it is a "container"),
+ * centred both ways and white, as PowerPoint writes in a new shape. Lines hold no text.
+ *
  * Older decks have shapes that are plain coloured boxes (no data-shape):
  * they stay as they are.
  *
- * Talks to: transform.js (the box), util.js (round2).
+ * Talks to: transform.js (the box), util.js (round2), text.js (an empty text area).
  */
 
 (function () {
@@ -58,6 +63,31 @@
 
     App.shapes.isLine = function isLine(kind) {
         return kind === 'line' || kind === 'arrow';
+    };
+
+    // The text area of a box shape: over the whole box, its lines centred both ways, white, 18 pt.
+    App.shapes.TEXT_STYLE = 'position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; ' +
+        'padding: 5px 10px; text-align: center; color: #FFFFFF; font-size: 18pt; line-height: 1.2;';
+    App.shapes.TEXT_SELECTOR = '.el[data-type="shape"] > .shape-text';
+
+    /* A shape drawn by the editor that can hold text (not a line, not an older plain box). */
+    App.shapes.canHoldText = function canHoldText(element) {
+        const kind = element && element.getAttribute('data-type') === 'shape' && element.getAttribute('data-shape');
+        return !!kind && !App.shapes.isLine(kind);
+    };
+
+    /* The text area of a shape, or null; options.create makes an empty one if the shape can hold text. */
+    App.shapes.textOf = function textOf(element, options) {
+        const text = element.querySelector(':scope > .shape-text');
+        if (text || !(options && options.create) || !App.shapes.canHoldText(element)) {
+            return text;
+        }
+        const area = element.ownerDocument.createElement('div');
+        area.setAttribute('class', 'shape-text');
+        area.setAttribute('style', App.shapes.TEXT_STYLE);
+        App.text.normalizeCell(area);   // one empty line, made by text.js
+        element.appendChild(area);
+        return area;
     };
 
     function kindOf(kind) {
@@ -258,6 +288,7 @@
             svg.appendChild(path);
         });
         element.appendChild(svg);
+        App.shapes.textOf(element, { create: true });
         return element;
     };
 

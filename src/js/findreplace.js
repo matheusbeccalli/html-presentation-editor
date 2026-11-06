@@ -237,7 +237,7 @@
         const type = element && element.getAttribute('data-type');
         // A selected table: from its first cell (forward) or its last one (back).
         const cells = type === 'table' ? App.text.containersIn(element) : [];
-        const selected = type === 'text' ? element : cells[forward ? 0 : cells.length - 1];
+        const selected = App.text.textOf(element) || cells[forward ? 0 : cells.length - 1];
         if (selected) {
             return forward ? [slideIndex, boxIndexOf(selected), 0, 0] : [slideIndex, boxIndexOf(selected), Infinity, 0];
         }

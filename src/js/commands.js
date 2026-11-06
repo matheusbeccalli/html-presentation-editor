@@ -144,14 +144,23 @@
         App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
 
         // ---- Text (text.js) ----
-        // Enter / F2: type in the selected text box, or in the first cell of the selected table.
+        // Enter / F2: type in the selected text box or shape, or in the first cell of the selected table.
         const textToEdit = () => {
             const element = App.selection.getElement();
             const type = element && element.getAttribute('data-type');
+            if (type === 'shape') {
+                // A shape drawn before shapes held text gets its text area now.
+                return App.shapes.canHoldText(element) ? App.shapes.textOf(element, { create: true }) : null;
+            }
             return type === 'text' ? element : type === 'table' ? App.tables.firstCell(element) : null;
         };
+        const canEditText = () => {
+            const element = App.selection.getElement();
+            const type = element && element.getAttribute('data-type');
+            return type === 'text' || type === 'table' || App.shapes.canHoldText(element);
+        };
         App.commands.define('editText', {
-            label: 'Edit text', isEnabled: () => !!textToEdit() && !App.text.isEditing(),
+            label: 'Edit text', isEnabled: () => canEditText() && !App.text.isEditing(),
             run: () => App.text.enterEdit(textToEdit(), { caret: 'end' }),
         });
         // Character formatting (Home > Font): the selected text, or all the text of a selected box.

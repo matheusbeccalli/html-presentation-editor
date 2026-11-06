@@ -851,28 +851,47 @@
     };
 
     // ---------------------------------------------------------------
-    // Where text lives: text boxes and table cells ("containers")
+    // Where text lives: text boxes, table cells and shapes' text ("containers")
     // ---------------------------------------------------------------
 
     function isCell(container) {
         return tagOf(container) === 'td';
     }
 
-    /* The slide element around a container: the text box itself, or the table of a cell. */
-    function boxOf(container) {
-        return isCell(container) ? container.closest('.el') : container;
+    function isShapeText(container) {
+        return !!container.classList && container.classList.contains('shape-text');
     }
 
-    /* Every text box and table cell inside `root`, in reading order (find & replace walks them). */
+    /* A container inside its slide element (a cell, a shape's text), not a text box itself. */
+    function isInner(container) {
+        return isCell(container) || isShapeText(container);
+    }
+
+    /* The slide element around a container: the text box itself, the table of a cell, the shape of its text. */
+    function boxOf(container) {
+        return isInner(container) ? container.closest('.el') : container;
+    }
+
+    /* Every text box, table cell and shape text inside `root`, in reading order (find & replace walks them). */
     App.text.containersIn = function containersIn(root) {
-        return Array.from(root.querySelectorAll('.el[data-type="text"], ' + App.tables.CELL_SELECTOR));
+        return Array.from(root.querySelectorAll('.el[data-type="text"], ' + App.tables.CELL_SELECTOR + ', ' +
+            App.shapes.TEXT_SELECTOR));
+    };
+
+    /* The text a selected slide element holds: a text box itself, a shape's text area; else null. */
+    App.text.textOf = function textOf(element) {
+        const type = element && element.getAttribute('data-type');
+        return type === 'text' ? element : type === 'shape' ? App.shapes.textOf(element) : null;
     };
 
     /*
      * A name for a container that survives the slide being rebuilt (undo):
-     * a text box's data-id, or "tableId/row/cell" for a table cell.
+     * a text box's data-id, "tableId/row/cell" for a table cell, "shapeId/text" for a shape's text.
      */
     App.text.containerKey = function containerKey(container) {
+        if (isShapeText(container)) {
+            return boxOf(container).getAttribute('data-id') + '/text';
+        }
         if (!isCell(container)) {
             return container.getAttribute('data-id');
         }
@@ -887,6 +906,9 @@
         if (!element || row === undefined) {
             return element;
         }
+        if (row === 'text') {
+            return element.querySelector(':scope > .shape-text');
+        }
         const table = element.querySelector(':scope > table');
         const tableRow = table && table.rows[Number(row)];
         return (tableRow && tableRow.cells[Number(cell)]) || null;
@@ -897,6 +919,9 @@
      * rows (a row grows with its text). Returns true when the box changed size.
      */
     App.text.fitBox = function fitBox(container) {
+        if (isShapeText(container)) {
+            return false;   // a shape keeps its size; its text may run past it, as in PowerPoint
+        }
         return isCell(container) ? App.tables.fitTable(boxOf(container)) : App.text.fitText(container);
     };
 
@@ -2968,7 +2993,7 @@
         const element = state.element;
         if (element.isConnected) {
             detachFromElement(element);
-            if (isCell(element)) {
+            if (isInner(element)) {
                 App.text.normalizeCell(element);
             } else {
                 App.text.normalize(element);
@@ -3332,14 +3357,14 @@
 
     /*
      * What the list buttons work on: the selected lines of the box being
-     * edited, or every line of a selected text box (caret null).
+     * edited, or every line of a selected text box or shape (caret null).
      */
     function listTarget() {
         if (editing) {
             return { element: editing.element, caret: App.text.getCaret(editing.element) || END_OF_TEXT };
         }
-        const element = App.selection.getElement();
-        return element && element.getAttribute('data-type') === 'text' ? { element: element, caret: null } : null;
+        const text = App.text.textOf(App.selection.getElement());
+        return text ? { element: text, caret: null } : null;
     }
 
     /* Run a list button (see listAction) on the selected lines or the selected box, as one undo step. */

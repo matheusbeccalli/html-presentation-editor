@@ -2474,6 +2474,78 @@ def test_shape_format(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+SHAPE_TEXT = """id => { const text = App.deck.getDocument().querySelector('[data-id="' + id + '"] > .shape-text');
+    const shape = text.parentElement.getBoundingClientRect();
+    const line = text.firstElementChild.getBoundingClientRect();
+    const style = getComputedStyle(text.firstElementChild);
+    return { html: text.innerHTML, align: style.textAlign, color: style.color, weight: style.fontWeight,
+             middle: Math.abs((line.top + line.bottom) / 2 - (shape.top + shape.bottom) / 2) < 2 }; }"""
+
+
+def test_shape_text(browser):
+    """Text inside shapes: double-click (or Enter) to type; centred both ways, white; one undo step; the Font buttons
+    change all of a selected shape's text; lines take no text; saved and reopened."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    editing = lambda: page.evaluate("App.text.isEditing()")  # noqa: E731
+    page.evaluate("App.deck.goTo(4)")
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.shapes-button")
+    page.click(".shape-gallery-item[data-shape='chevron']")
+    page.mouse.click(*slide_to_screen(page, 300, 450))
+    shape = page.evaluate("App.selection.selectedId()")
+
+    # Double-click: typing in it; Esc: the shape is selected again.
+    page.mouse.dblclick(*slide_to_screen(page, 400, 490))
+    check(editing() and page.evaluate("App.text.editingElement().classList.contains('shape-text')"), "typing in the chevron")
+    page.keyboard.type("Diligência")
+    page.keyboard.press("Escape")
+    text = page.evaluate(SHAPE_TEXT, shape)
+    check(not editing() and page.evaluate("App.selection.selectedId()") == shape, "Esc: the shape selected")
+    check(text["html"] == '<p data-list="none" data-level="1">Diligência</p>', f"the text: {text['html']}")
+    check(text["align"] == "center" and text["color"] == "rgb(255, 255, 255)" and text["middle"], f"centred, white: {text}")
+    page.screenshot(path=str(OUTPUT / "59-shape-text.png"))
+
+    # The Font buttons on a selected shape change all its text; Enter types in it again.
+    page.click(".ribbon-tab[data-tab='home']")
+    page.keyboard.press("Control+b")
+    bold = page.evaluate(SHAPE_TEXT, shape)
+    check(bold["weight"] == "700" and "Diligência" in bold["html"], f"all its text bold: {bold}")
+    page.keyboard.press("Enter")
+    page.keyboard.press("End")
+    page.keyboard.type(" 2")
+    page.keyboard.press("Escape")
+    check("Diligência 2" in page.evaluate(SHAPE_TEXT, shape)["html"], f"Enter: typing again: {page.evaluate(SHAPE_TEXT, shape)}")
+    page.keyboard.press("Control+z")
+    check(page.evaluate(SHAPE_TEXT, shape)["html"] == '<p data-list="none" data-level="1">Diligência</p>', "one undo: the typing")
+
+    # Find reaches the shape's text.
+    page.keyboard.press("Control+f")
+    page.keyboard.type("Diligência")
+    page.keyboard.press("Enter")
+    check(page.evaluate("App.text.isEditing() && App.text.editingElement().classList.contains('shape-text')"),
+          "Ctrl+F finds the word in the shape")
+    page.keyboard.press("Escape")
+    page.evaluate("App.text.exitEdit()")
+
+    # A line takes no text.
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.shapes-button")
+    page.click(".shape-gallery-item[data-shape='line']")
+    page.mouse.click(*slide_to_screen(page, 700, 650))
+    page.mouse.dblclick(*slide_to_screen(page, 800, 650))
+    check(not editing(), "no typing in a line")
+
+    # Saved and reopened.
+    saved = editor.save_as_download("shape-text-saved.html")
+    editor.open(saved)
+    page.evaluate("App.deck.goTo(4)")
+    kept = page.evaluate(SHAPE_TEXT, shape)
+    check(kept["html"] == '<p data-list="none" data-level="1">Diligência</p>' and kept["weight"] == "700", f"kept: {kept}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -3538,6 +3610,7 @@ TESTS = [
     test_crop_picture,
     test_insert_shapes,
     test_shape_format,
+    test_shape_text,
 ]
 
 

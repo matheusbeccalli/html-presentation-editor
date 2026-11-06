@@ -403,6 +403,7 @@
      */
     function finishTextModel(doc) {
         doc.querySelectorAll('.el[data-type="text"]').forEach((element) => App.text.normalize(element));
+        doc.querySelectorAll(App.shapes.TEXT_SELECTOR).forEach((text) => App.text.normalizeCell(text));
 
         let lists = doc.head.querySelector('style[data-deck-lists]');
         if (!lists) {

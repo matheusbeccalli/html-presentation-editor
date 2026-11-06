@@ -30,6 +30,9 @@
         formatPainter: '<rect x="3" y="2.5" width="12" height="5" rx="1"/><path d="M15 5h2v4.5h-7.5V12"/><rect x="8" y="12" width="3" height="5.5" rx="0.5"/>',
         changePicture: '<rect x="2.5" y="3.5" width="11" height="10" rx="1"/><circle cx="6.5" cy="7.5" r="1.2"/>' +
             '<path d="M2.5 12l3.5-3 2.5 2 2-1.5M17.5 11.5a4 4 0 0 1-6.8 2.8M10.7 18v-3.7h3.7"/>',
+        shapeFill: '<path d="M4 9.5L9.5 4l6 6-5.5 5.5z"/><path d="M15.5 12.5c0 1.2 1 2 1.6 2s1.4-.8 1.4-2c0-1-1.5-2.8-1.5-2.8s-1.5 1.8-1.5 2.8z"/>',
+        shapeOutline: '<path d="M13 3.5l3.5 3.5-8.5 8.5H4.5V12z"/><path d="M11 5.5l3.5 3.5"/>',
+        shadow: '<rect x="3" y="3" width="10" height="10"/><path d="M15.5 6v9.5H6" stroke-width="2.4"/>',
         shapes: '<rect x="2.5" y="9.5" width="8" height="8"/><circle cx="13" cy="7" r="4.5"/>',
         shapeRect: '<rect x="2.5" y="5.5" width="15" height="9"/>',
         shapeRoundRect: '<rect x="2.5" y="5.5" width="15" height="9" rx="2.5"/>',

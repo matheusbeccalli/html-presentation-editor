@@ -10,8 +10,10 @@
  * The drawing is inline SVG worked out from the kind and the box's size
  * (geometry), in slide px: the SVG has no viewBox, so 1 unit = 1 px and a
  * resize never stretches outlines; render() draws it again at the new size.
- * The look lives in each path's inline style (fill, stroke …), so the saved
- * deck needs no extra CSS and a redraw only changes the "d" of the paths.
+ * The look lives in each path's inline style (fill, stroke, stroke-width,
+ * stroke-dasharray, fill-opacity) and the shadow in the svg's filter, so the
+ * saved deck needs no extra CSS and a redraw only changes the "d" of the
+ * paths. lookOf / setLook read and change it (Shape Format, shapecontrols.js).
  *
  * Kinds: rect, roundRect, ellipse, chevron, pentagon, callout (filled boxes);
  * line and arrow (a stroke from one corner of the box to the other: data-flip
@@ -257,6 +259,101 @@
         });
         element.appendChild(svg);
         return element;
+    };
+
+    // ---------------------------------------------------------------
+    // The look: fill, outline, dashes, transparency, shadow
+    // ---------------------------------------------------------------
+
+    const SHADOW = 'drop-shadow(3px 3px 4px rgba(0, 0, 0, 0.35))';
+    // Dashes as multiples of the outline width, so a wider outline gets longer dashes (as in PowerPoint).
+    const DASHES = { solid: null, dash: [4, 3], dot: [1, 1], dashDot: [4, 3, 1, 3] };
+
+    /* A colour as stored: theme colours stay var(--…); rgb(…) as #rrggbb, as the colour lists name them. */
+    function colorText(value) {
+        const match = /^rgba?\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(value || '');
+        if (!match) {
+            return value || 'none';
+        }
+        return '#' + match.slice(1, 4).map((part) => Number(part).toString(16).padStart(2, '0')).join('');
+    }
+
+    function dashOf(path, width) {
+        const numbers = (path.style.strokeDasharray || '').split(/[\s,]+/).filter(Boolean).map(parseFloat);
+        if (numbers.length === 0 || !width) {
+            return 'solid';
+        }
+        const ratios = numbers.map((value) => App.util.round2(value / width)).join(' ');
+        return Object.keys(DASHES).find((kind) => DASHES[kind] && DASHES[kind].join(' ') === ratios) || 'solid';
+    }
+
+    /*
+     * The look of a shape: { fill (null for lines), outline ('none' or a colour),
+     * width (px), dash ('solid' | 'dash' | 'dot' | 'dashDot'), transparency
+     * (0-100 %, of the fill; of the line for lines), shadow }.
+     */
+    App.shapes.lookOf = function lookOf(element) {
+        const line = App.shapes.isLine(element.getAttribute('data-shape'));
+        const path = element.querySelector('svg.shape-svg > path.shape-' + (line ? 'line' : 'fill'));
+        const width = parseFloat(path.style.strokeWidth) || 0;
+        const opacity = parseFloat(line ? path.style.strokeOpacity : path.style.fillOpacity);
+        return {
+            fill: line ? null : colorText(path.style.fill),
+            outline: colorText(path.style.stroke),
+            width: width,
+            dash: dashOf(path, width),
+            transparency: Number.isFinite(opacity) ? Math.round((1 - opacity) * 100) : 0,
+            shadow: (element.querySelector('svg.shape-svg').style.filter || '').indexOf('drop-shadow') !== -1,
+        };
+    };
+
+    /* Change some of a shape's look (fields as lookOf; a line ignores fill). An outline added to a shape without one is 2 px. */
+    App.shapes.setLook = function setLook(element, changes) {
+        const line = App.shapes.isLine(element.getAttribute('data-shape'));
+        const look = App.shapes.lookOf(element);
+        const svg = element.querySelector('svg.shape-svg');
+        const path = svg.querySelector('path.shape-' + (line ? 'line' : 'fill'));
+        const head = svg.querySelector('path.shape-head');
+        if (!line && changes.fill !== undefined) {
+            path.style.setProperty('fill', changes.fill);
+        }
+        if (changes.outline !== undefined) {
+            path.style.setProperty('stroke', changes.outline);
+            if (head) {
+                head.style.setProperty('fill', changes.outline);
+            }
+        }
+        let width = changes.width !== undefined ? changes.width : look.width;
+        if (changes.outline !== undefined && changes.outline !== 'none' && !width) {
+            width = LINE_WIDTH;
+        }
+        if (width) {
+            path.style.setProperty('stroke-width', width + 'px');
+        }
+        const dash = DASHES[changes.dash !== undefined ? changes.dash : look.dash];
+        if (dash && width) {
+            path.style.setProperty('stroke-dasharray', dash.map((part) => App.util.round2(part * width)).join(' '));
+        } else {
+            path.style.removeProperty('stroke-dasharray');
+        }
+        if (changes.transparency !== undefined) {
+            const opacity = changes.transparency > 0 ? String(App.util.round2(1 - changes.transparency / 100)) : null;
+            [[path, line ? 'stroke-opacity' : 'fill-opacity'], [head, 'fill-opacity']].forEach(([target, property]) => {
+                if (target && opacity) {
+                    target.style.setProperty(property, opacity);
+                } else if (target) {
+                    target.style.removeProperty(property);
+                }
+            });
+        }
+        if (changes.shadow !== undefined) {
+            if (changes.shadow) {
+                svg.style.setProperty('filter', SHADOW);
+            } else {
+                svg.style.removeProperty('filter');
+            }
+        }
+        App.shapes.render(element);   // an arrow's head follows the line's width
     };
 
     /* Draw a shape again for its box's size now (after a resize); its look is kept. Older shapes are left alone. */

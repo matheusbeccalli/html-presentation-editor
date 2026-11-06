@@ -93,6 +93,18 @@
             </div>
             <p class="panel-hint format-tip">Enter or Tab applies a value, Esc cancels. Arrow keys step 1 px (Shift: 10 px).</p>
         </section>
+        <!-- Shapes (shapecontrols.js): the look, as on the Shape Format tab. -->
+        <section id="format-shape" hidden>
+            <h3>Fill &amp; line</h3>
+            <div class="format-grid format-shape-grid">
+                <label class="format-shape-fill-row">Fill</label><div id="format-shape-fill" class="format-shape-fill-row"></div><span class="format-shape-fill-row"></span>
+                <label for="format-shape-transparency">Transparency</label><input id="format-shape-transparency" type="text" inputmode="decimal" autocomplete="off"><span>%</span>
+                <label>Outline</label><div id="format-shape-outline"></div><span></span>
+                <label for="format-shape-width">Width</label><input id="format-shape-width" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-shape-dash">Dashes</label><select id="format-shape-dash"></select><span></span>
+            </div>
+            <label class="format-check"><input type="checkbox" id="format-shape-shadow"> Shadow</label>
+        </section>
         <section id="format-text" hidden>
             <h3>Text box</h3>
             <fieldset id="format-autofit">

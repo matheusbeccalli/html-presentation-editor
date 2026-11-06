@@ -253,6 +253,8 @@
         // Table Design and Layout > Alignment (tabledesign.js): the selected cells, the cell typed in, or the whole table.
         const design = App.tableDesign.commands();
         Object.keys(design).forEach((name) => App.commands.define(name, design[name]));
+        const shapeFormat = App.shapeControls.commands();
+        Object.keys(shapeFormat).forEach((name) => App.commands.define(name, shapeFormat[name]));
         App.commands.define('insertPicture', {
             label: 'Pictures', isEnabled: hasDeck,
             run: () => {

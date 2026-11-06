@@ -94,3 +94,57 @@ test('transform: a line as thin as 0 px can still be clicked (a few px either si
     assertEqual(App.transform.hitTest(items, 200, 297), 'line');
     assertEqual(App.transform.hitTest(items, 200, 310), null);
 });
+
+function newShape(kind, rect) {
+    const doc = parseDoc('<section class="slide"></section>');
+    return App.shapes.createShape(doc, kind, rect || { left: 0, top: 0, width: 200, height: 80 }, 'e5', '');
+}
+
+test('shapes: the look of a new shape: accent fill, no outline, no shadow', () => {
+    assertEqual(App.shapes.lookOf(newShape('chevron')),
+        { fill: 'var(--color-accent, #1F2A44)', outline: 'none', width: 0, dash: 'solid', transparency: 0, shadow: false });
+    assertEqual(App.shapes.lookOf(newShape('arrow', { left: 0, top: 0, width: 200, height: 0 })),
+        { fill: null, outline: 'var(--color-accent, #1F2A44)', width: 2, dash: 'solid', transparency: 0, shadow: false });
+});
+
+test('shapes: fill, outline (an outline on a shape without one gets 2 px), transparency, shadow', () => {
+    const shape = newShape('rect');
+    App.shapes.setLook(shape, { fill: '#c00000' });
+    App.shapes.setLook(shape, { outline: '#002060' });
+    App.shapes.setLook(shape, { transparency: 40 });
+    App.shapes.setLook(shape, { shadow: true });
+    assertEqual(App.shapes.lookOf(shape), { fill: '#c00000', outline: '#002060', width: 2, dash: 'solid', transparency: 40, shadow: true });
+    const path = shape.querySelector('path');
+    assertEqual([path.style.fill, path.style.stroke, path.style.strokeWidth, path.style.fillOpacity],
+        ['rgb(192, 0, 0)', 'rgb(0, 32, 96)', '2px', '0.6']);
+    assertIncludes(shape.querySelector('svg').style.filter, 'drop-shadow');
+    App.shapes.setLook(shape, { shadow: false, transparency: 0, outline: 'none', fill: 'none' });
+    assertEqual(App.shapes.lookOf(shape), { fill: 'none', outline: 'none', width: 2, dash: 'solid', transparency: 0, shadow: false });
+    assertEqual([shape.querySelector('svg').style.filter, path.style.fillOpacity], ['', '']);
+});
+
+test('shapes: dashes follow the outline width', () => {
+    const shape = newShape('rect');
+    App.shapes.setLook(shape, { outline: '#000000', width: 3, dash: 'dash' });
+    assertEqual(shape.querySelector('path').style.strokeDasharray, '12, 9');
+    App.shapes.setLook(shape, { width: 2 });
+    assertEqual(shape.querySelector('path').style.strokeDasharray, '8, 6');
+    assertEqual(App.shapes.lookOf(shape).dash, 'dash');
+    App.shapes.setLook(shape, { dash: 'dashDot' });
+    assertEqual(App.shapes.lookOf(shape).dash, 'dashDot');
+    App.shapes.setLook(shape, { dash: 'dot' });
+    assertEqual([shape.querySelector('path').style.strokeDasharray, App.shapes.lookOf(shape).dash], ['2, 2', 'dot']);
+    App.shapes.setLook(shape, { dash: 'solid' });
+    assertEqual(shape.querySelector('path').style.strokeDasharray, '');
+});
+
+test('shapes: a line\'s outline colours its arrow head too; a wider line gets a bigger head', () => {
+    const arrow = newShape('arrow', { left: 0, top: 0, width: 200, height: 0 });
+    App.shapes.setLook(arrow, { outline: '#c00000', width: 4, transparency: 50 });
+    const [line, head] = arrow.querySelectorAll('path');
+    assertEqual([line.style.stroke, head.style.fill, line.style.strokeOpacity, head.style.fillOpacity],
+        ['rgb(192, 0, 0)', 'rgb(192, 0, 0)', '0.5', '0.5']);
+    assertEqual(head.getAttribute('d'), 'M200 0L182 8.1L182 -8.1Z', 'an 18 px head for a 4 px line');
+    App.shapes.setLook(arrow, { fill: '#00b050' });
+    assertEqual(App.shapes.lookOf(arrow).fill, null, 'a line has no fill');
+});

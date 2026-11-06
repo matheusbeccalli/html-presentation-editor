@@ -207,6 +207,9 @@
 .format-grid input:focus { outline: 2px solid var(--focus); outline-offset: -1px; border-color: transparent; }
 .format-grid span { color: var(--text-muted); }
 .format-tip { margin: 10px 0 0; font-size: 12px; }
+.format-shape-grid [hidden] { display: none; }
+.format-shape-grid select { padding: 3px 4px; font: inherit; }
+.format-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }
 #format-autofit { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
 #format-autofit legend { margin-bottom: 6px; padding: 0; font-weight: 600; }
 #format-autofit label { display: flex; align-items: center; gap: 6px; cursor: pointer; }

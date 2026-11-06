@@ -533,6 +533,9 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .format-grid input:focus { outline: 2px solid var(--focus); outline-offset: -1px; border-color: transparent; }
 .format-grid span { color: var(--text-muted); }
 .format-tip { margin: 10px 0 0; font-size: 12px; }
+.format-shape-grid [hidden] { display: none; }
+.format-shape-grid select { padding: 3px 4px; font: inherit; }
+.format-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }
 #format-autofit { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
 #format-autofit legend { margin-bottom: 6px; padding: 0; font-weight: 600; }
 #format-autofit label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
@@ -704,6 +707,18 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
                 <label for="format-h">Height</label><input id="format-h" data-field="height" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
             </div>
             <p class="panel-hint format-tip">Enter or Tab applies a value, Esc cancels. Arrow keys step 1 px (Shift: 10 px).</p>
+        </section>
+        <!-- Shapes (shapecontrols.js): the look, as on the Shape Format tab. -->
+        <section id="format-shape" hidden>
+            <h3>Fill &amp; line</h3>
+            <div class="format-grid format-shape-grid">
+                <label class="format-shape-fill-row">Fill</label><div id="format-shape-fill" class="format-shape-fill-row"></div><span class="format-shape-fill-row"></span>
+                <label for="format-shape-transparency">Transparency</label><input id="format-shape-transparency" type="text" inputmode="decimal" autocomplete="off"><span>%</span>
+                <label>Outline</label><div id="format-shape-outline"></div><span></span>
+                <label for="format-shape-width">Width</label><input id="format-shape-width" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-shape-dash">Dashes</label><select id="format-shape-dash"></select><span></span>
+            </div>
+            <label class="format-check"><input type="checkbox" id="format-shape-shadow"> Shadow</label>
         </section>
         <section id="format-text" hidden>
             <h3>Text box</h3>
@@ -918,6 +933,7 @@ App.start = function start() {
     App.selection.init();
     App.crop.init();       // after selection: its press listener goes first
     App.formatPane.init();
+    App.shapeControls.init();   // its Format pane section
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
@@ -7238,8 +7254,10 @@ App.template.newDeckHtml = function newDeckHtml() {
  * The drawing is inline SVG worked out from the kind and the box's size
  * (geometry), in slide px: the SVG has no viewBox, so 1 unit = 1 px and a
  * resize never stretches outlines; render() draws it again at the new size.
- * The look lives in each path's inline style (fill, stroke …), so the saved
- * deck needs no extra CSS and a redraw only changes the "d" of the paths.
+ * The look lives in each path's inline style (fill, stroke, stroke-width,
+ * stroke-dasharray, fill-opacity) and the shadow in the svg's filter, so the
+ * saved deck needs no extra CSS and a redraw only changes the "d" of the
+ * paths. lookOf / setLook read and change it (Shape Format, shapecontrols.js).
  *
  * Kinds: rect, roundRect, ellipse, chevron, pentagon, callout (filled boxes);
  * line and arrow (a stroke from one corner of the box to the other: data-flip
@@ -7485,6 +7503,101 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
         element.appendChild(svg);
         return element;
+    };
+
+    // ---------------------------------------------------------------
+    // The look: fill, outline, dashes, transparency, shadow
+    // ---------------------------------------------------------------
+
+    const SHADOW = 'drop-shadow(3px 3px 4px rgba(0, 0, 0, 0.35))';
+    // Dashes as multiples of the outline width, so a wider outline gets longer dashes (as in PowerPoint).
+    const DASHES = { solid: null, dash: [4, 3], dot: [1, 1], dashDot: [4, 3, 1, 3] };
+
+    /* A colour as stored: theme colours stay var(--…); rgb(…) as #rrggbb, as the colour lists name them. */
+    function colorText(value) {
+        const match = /^rgba?\((\d+),\s*(\d+),\s*(\d+)\)$/.exec(value || '');
+        if (!match) {
+            return value || 'none';
+        }
+        return '#' + match.slice(1, 4).map((part) => Number(part).toString(16).padStart(2, '0')).join('');
+    }
+
+    function dashOf(path, width) {
+        const numbers = (path.style.strokeDasharray || '').split(/[\s,]+/).filter(Boolean).map(parseFloat);
+        if (numbers.length === 0 || !width) {
+            return 'solid';
+        }
+        const ratios = numbers.map((value) => App.util.round2(value / width)).join(' ');
+        return Object.keys(DASHES).find((kind) => DASHES[kind] && DASHES[kind].join(' ') === ratios) || 'solid';
+    }
+
+    /*
+     * The look of a shape: { fill (null for lines), outline ('none' or a colour),
+     * width (px), dash ('solid' | 'dash' | 'dot' | 'dashDot'), transparency
+     * (0-100 %, of the fill; of the line for lines), shadow }.
+     */
+    App.shapes.lookOf = function lookOf(element) {
+        const line = App.shapes.isLine(element.getAttribute('data-shape'));
+        const path = element.querySelector('svg.shape-svg > path.shape-' + (line ? 'line' : 'fill'));
+        const width = parseFloat(path.style.strokeWidth) || 0;
+        const opacity = parseFloat(line ? path.style.strokeOpacity : path.style.fillOpacity);
+        return {
+            fill: line ? null : colorText(path.style.fill),
+            outline: colorText(path.style.stroke),
+            width: width,
+            dash: dashOf(path, width),
+            transparency: Number.isFinite(opacity) ? Math.round((1 - opacity) * 100) : 0,
+            shadow: (element.querySelector('svg.shape-svg').style.filter || '').indexOf('drop-shadow') !== -1,
+        };
+    };
+
+    /* Change some of a shape's look (fields as lookOf; a line ignores fill). An outline added to a shape without one is 2 px. */
+    App.shapes.setLook = function setLook(element, changes) {
+        const line = App.shapes.isLine(element.getAttribute('data-shape'));
+        const look = App.shapes.lookOf(element);
+        const svg = element.querySelector('svg.shape-svg');
+        const path = svg.querySelector('path.shape-' + (line ? 'line' : 'fill'));
+        const head = svg.querySelector('path.shape-head');
+        if (!line && changes.fill !== undefined) {
+            path.style.setProperty('fill', changes.fill);
+        }
+        if (changes.outline !== undefined) {
+            path.style.setProperty('stroke', changes.outline);
+            if (head) {
+                head.style.setProperty('fill', changes.outline);
+            }
+        }
+        let width = changes.width !== undefined ? changes.width : look.width;
+        if (changes.outline !== undefined && changes.outline !== 'none' && !width) {
+            width = LINE_WIDTH;
+        }
+        if (width) {
+            path.style.setProperty('stroke-width', width + 'px');
+        }
+        const dash = DASHES[changes.dash !== undefined ? changes.dash : look.dash];
+        if (dash && width) {
+            path.style.setProperty('stroke-dasharray', dash.map((part) => App.util.round2(part * width)).join(' '));
+        } else {
+            path.style.removeProperty('stroke-dasharray');
+        }
+        if (changes.transparency !== undefined) {
+            const opacity = changes.transparency > 0 ? String(App.util.round2(1 - changes.transparency / 100)) : null;
+            [[path, line ? 'stroke-opacity' : 'fill-opacity'], [head, 'fill-opacity']].forEach(([target, property]) => {
+                if (target && opacity) {
+                    target.style.setProperty(property, opacity);
+                } else if (target) {
+                    target.style.removeProperty(property);
+                }
+            });
+        }
+        if (changes.shadow !== undefined) {
+            if (changes.shadow) {
+                svg.style.setProperty('filter', SHADOW);
+            } else {
+                svg.style.removeProperty('filter');
+            }
+        }
+        App.shapes.render(element);   // an arrow's head follows the line's width
     };
 
     /* Draw a shape again for its box's size now (after a resize); its look is kept. Older shapes are left alone. */
@@ -9251,6 +9364,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         formatPainter: '<rect x="3" y="2.5" width="12" height="5" rx="1"/><path d="M15 5h2v4.5h-7.5V12"/><rect x="8" y="12" width="3" height="5.5" rx="0.5"/>',
         changePicture: '<rect x="2.5" y="3.5" width="11" height="10" rx="1"/><circle cx="6.5" cy="7.5" r="1.2"/>' +
             '<path d="M2.5 12l3.5-3 2.5 2 2-1.5M17.5 11.5a4 4 0 0 1-6.8 2.8M10.7 18v-3.7h3.7"/>',
+        shapeFill: '<path d="M4 9.5L9.5 4l6 6-5.5 5.5z"/><path d="M15.5 12.5c0 1.2 1 2 1.6 2s1.4-.8 1.4-2c0-1-1.5-2.8-1.5-2.8s-1.5 1.8-1.5 2.8z"/>',
+        shapeOutline: '<path d="M13 3.5l3.5 3.5-8.5 8.5H4.5V12z"/><path d="M11 5.5l3.5 3.5"/>',
+        shadow: '<rect x="3" y="3" width="10" height="10"/><path d="M15.5 6v9.5H6" stroke-width="2.4"/>',
         shapes: '<rect x="2.5" y="9.5" width="8" height="8"/><circle cx="13" cy="7" r="4.5"/>',
         shapeRect: '<rect x="2.5" y="5.5" width="15" height="9"/>',
         shapeRoundRect: '<rect x="2.5" y="5.5" width="15" height="9" rx="2.5"/>',
@@ -13849,6 +13965,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Table Design and Layout > Alignment (tabledesign.js): the selected cells, the cell typed in, or the whole table.
         const design = App.tableDesign.commands();
         Object.keys(design).forEach((name) => App.commands.define(name, design[name]));
+        const shapeFormat = App.shapeControls.commands();
+        Object.keys(shapeFormat).forEach((name) => App.commands.define(name, shapeFormat[name]));
         App.commands.define('insertPicture', {
             label: 'Pictures', isEnabled: hasDeck,
             run: () => {
@@ -16022,13 +16140,20 @@ App.template.newDeckHtml = function newDeckHtml() {
 <script>
 // ---- js/shapecontrols.js ----
 /*
- * shapecontrols.js - Insert > Shapes: the button and its gallery (SPEC Phase 5).
+ * shapecontrols.js - Insert > Shapes and Shape Format (SPEC Phase 5).
  *
- * The gallery shows the kinds of shapes.js as icons; picking one runs the
- * insertShape command, which waits for a drag (or a click) on the slide
- * (selection.armInsert). Esc or a press outside closes the gallery.
+ * Insert > Shapes: the gallery shows the kinds of shapes.js as icons; picking
+ * one runs the insertShape command, which waits for a drag (or a click) on
+ * the slide (selection.armInsert). Esc or a press outside closes the gallery.
  *
- * Talks to: shapes.js (the kinds), commands.js, icons.js.
+ * Shape Format (a tab shown while a shape is selected, and "Fill & line" in
+ * the Format pane): fill, outline colour, width and dashes, transparency and
+ * shadow, through shapes.setLook; each change is one undo step. A line has no
+ * fill; its outline colour colours its arrow head too. Choosing a width or a
+ * dash for a shape without an outline gives it one (the last outline colour).
+ *
+ * Talks to: shapes.js (the kinds, lookOf / setLook), commands.js, icons.js,
+ *           textcontrols.js (colour split buttons, lists), history.js, selection.js.
  */
 
 (function () {
@@ -16041,6 +16166,147 @@ App.template.newDeckHtml = function newDeckHtml() {
     let shapesButton = null;
     let gallery = null;
 
+    const WEIGHTS = [1, 1.5, 2, 3, 4, 6, 8];
+    const DASH_LABELS = [['solid', 'Solid'], ['dash', 'Dashed'], ['dot', 'Dotted'], ['dashDot', 'Dash dot']];
+    const TRANSPARENCIES = [0, 25, 50, 75];
+    let lastFill = 'var(--color-accent, #1F2A44)';   // what the Fill button's main part applies
+    let lastOutline = '#000000';
+    const listButtons = {};   // name -> the list button on the ribbon
+
+    // ---------------------------------------------------------------
+    // Shape Format: the selected shape and its commands
+    // ---------------------------------------------------------------
+
+    /* The selected shape that Shape Format can change (older plain-box shapes cannot), or null. */
+    function selectedShape() {
+        const element = App.selection.getElement();
+        return element && element.getAttribute('data-type') === 'shape' && element.hasAttribute('data-shape') ? element : null;
+    }
+
+    App.shapeControls.isShapeSelected = function isShapeSelected() {
+        return !!selectedShape();
+    };
+
+    function isLineSelected() {
+        const element = selectedShape();
+        return !!element && App.shapes.isLine(element.getAttribute('data-shape'));
+    }
+
+    App.shapeControls.currentLook = function currentLook() {
+        const element = selectedShape();
+        return element ? App.shapes.lookOf(element) : null;
+    };
+
+    /* One undo step changing the selected shape's look; a width or dash on a shape without outline adds one. */
+    function changeLook(label, changes) {
+        const element = selectedShape();
+        if (!element) {
+            return;
+        }
+        const needsOutline = (changes.width !== undefined || changes.dash !== undefined) && changes.outline === undefined &&
+            App.shapes.lookOf(element).outline === 'none';
+        const all = needsOutline ? Object.assign({ outline: lastOutline }, changes) : changes;
+        App.history.change(label, { slideId: element.closest('section.slide').getAttribute('data-slide-id') },
+            () => App.shapes.setLook(element, all));
+    }
+
+    /* The Shape Format commands, defined in commands.js. */
+    App.shapeControls.commands = function commands() {
+        const isShape = () => App.shapeControls.isShapeSelected();
+        const hasFill = () => isShape() && !isLineSelected();
+        return {
+            shapeFill: { label: 'Shape Fill', isEnabled: hasFill, run: () => changeLook('Shape fill', { fill: lastFill }) },
+            setShapeFill: {
+                label: 'Shape Fill', isEnabled: hasFill,
+                run: (value) => {
+                    if (value !== 'none') {
+                        lastFill = value;
+                    }
+                    changeLook('Shape fill', { fill: value });
+                },
+            },
+            shapeOutline: { label: 'Shape Outline', isEnabled: isShape, run: () => changeLook('Shape outline', { outline: lastOutline }) },
+            setShapeOutline: {
+                label: 'Shape Outline', isEnabled: isShape,
+                run: (value) => {
+                    if (value !== 'none') {
+                        lastOutline = value;
+                    }
+                    changeLook('Shape outline', { outline: value });
+                },
+            },
+            setShapeOutlineWidth: { label: 'Outline width', isEnabled: isShape, run: (px) => changeLook('Shape outline width', { width: px }) },
+            setShapeDash: { label: 'Dashes', isEnabled: isShape, run: (dash) => changeLook('Shape outline dash', { dash: dash }) },
+            setShapeTransparency: {
+                label: 'Transparency', isEnabled: isShape, run: (percent) => changeLook('Shape transparency', { transparency: percent }),
+            },
+            shapeShadow: {
+                label: 'Shadow', isEnabled: isShape,
+                isChecked: () => !!App.shapeControls.currentLook() && App.shapeControls.currentLook().shadow,
+                run: () => changeLook('Shape shadow', { shadow: !App.shapeControls.currentLook().shadow }),
+            },
+        };
+    };
+
+    // ---------------------------------------------------------------
+    // Shape Format: ribbon controls
+    // ---------------------------------------------------------------
+
+    function colorControl(kind, menuClass) {
+        const fill = kind === 'fill';
+        return App.textControls.colorSplit({
+            label: fill ? 'Shape Fill' : 'Shape Outline', icon: fill ? 'shapeFill' : 'shapeOutline',
+            command: fill ? 'shapeFill' : 'shapeOutline', menuClass: menuClass, palette: 'theme',
+            extras: [[fill ? 'No Fill' : 'No Outline', 'none']],
+            current: () => (fill ? lastFill : lastOutline),
+            choose: (value) => App.commands.run(fill ? 'setShapeFill' : 'setShapeOutline', value),
+            isEnabled: () => App.commands.isEnabled(fill ? 'shapeFill' : 'shapeOutline'),
+        });
+    }
+
+    /* A "2 px ▾" style button opening a list (className-menu). */
+    function listControl(name, className, title, items) {
+        const button = el('button', {
+            type: 'button', class: 'ribbon-button small named list-button ' + className, title: title, 'aria-label': title,
+            'aria-haspopup': 'menu',
+            onclick: () => (App.textControls.isMenuOpen(className + '-menu') ? App.textControls.closeMenu()
+                : App.textControls.openMenu(button, className + '-menu', items(), (value) => App.commands.run(name, value))),
+        });
+        listButtons[className] = button;
+        return button;
+    }
+
+    function weightItems() {
+        const look = App.shapeControls.currentLook();
+        return WEIGHTS.map((weight) => ({ label: weight + ' px', value: weight, checked: !!look && look.width === weight }));
+    }
+
+    function dashItems() {
+        const look = App.shapeControls.currentLook();
+        return DASH_LABELS.map(([dash, label]) => ({ label: label, value: dash, checked: !!look && look.dash === dash }));
+    }
+
+    function transparencyItems() {
+        const look = App.shapeControls.currentLook();
+        return TRANSPARENCIES.map((percent) => ({ label: percent + '%', value: percent, checked: !!look && look.transparency === percent }));
+    }
+
+    /* Show the selected shape's width, dash and transparency on the list buttons. */
+    App.shapeControls.refresh = function refresh() {
+        const look = App.shapeControls.currentLook();
+        const labels = {
+            'shape-weight': look && look.outline !== 'none' ? look.width + ' px' : 'Width',
+            'shape-dash': look ? DASH_LABELS.find(([dash]) => dash === look.dash)[1] : 'Dashes',
+            'shape-transparency': look ? 'Transparency ' + look.transparency + '%' : 'Transparency',
+        };
+        Object.keys(listButtons).forEach((className) => {
+            const button = listButtons[className];
+            if (button.isConnected) {
+                button.textContent = labels[className] + ' ▾';
+                button.disabled = !look;
+            }
+        });
+    };
     function iconName(kind) {
         return 'shape' + kind.charAt(0).toUpperCase() + kind.slice(1);
     }
@@ -16106,7 +16372,93 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* The control named in the ribbon's layout, or null when it is not a shape control. */
     App.shapeControls.create = function create(name) {
-        return name === 'insertShape' ? createShapesButton() : null;
+        switch (name) {
+            case 'insertShape': return createShapesButton();
+            case 'shapeFill': return colorControl('fill', 'shape-fill-menu');
+            case 'shapeOutline': return colorControl('outline', 'shape-outline-menu');
+            case 'shapeWeight': return listControl('setShapeOutlineWidth', 'shape-weight', 'Outline width', weightItems);
+            case 'shapeDash': return listControl('setShapeDash', 'shape-dash', 'Dashes', dashItems);
+            case 'shapeTransparency': return listControl('setShapeTransparency', 'shape-transparency', 'Transparency', transparencyItems);
+            default: return null;
+        }
+    };
+
+    // ---------------------------------------------------------------
+    // Shape Format: the Format pane's "Fill & line"
+    // ---------------------------------------------------------------
+
+    let pane = null;   // { section, fillRow: [nodes], transparency, width, dash, shadow }
+
+    /* A typed number between low and high (a decimal comma is fine), else null. */
+    function typedNumber(input, low, high) {
+        const value = App.formatPane.parseNumber(input.value.replace('%', ''));
+        return value !== null && value >= low && value <= high ? value : null;
+    }
+
+    function numberField(input, low, high, command) {
+        const apply = () => {
+            const value = typedNumber(input, low, high);
+            if (value !== null) {
+                App.commands.run(command, value);
+            }
+            refreshPane(true);
+        };
+        input.addEventListener('change', apply);
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                apply();
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                refreshPane(true);
+            }
+        });
+    }
+
+    function refreshPane(force) {
+        const look = App.shapeControls.currentLook();
+        pane.section.hidden = !look;
+        if (!look) {
+            return;
+        }
+        pane.fillRow.forEach((node) => { node.hidden = isLineSelected(); });
+        [[pane.transparency, String(look.transparency)], [pane.width, look.outline === 'none' ? '' : String(look.width)]]
+            .forEach(([input, value]) => {
+                if (force || document.activeElement !== input) {
+                    input.value = value;
+                }
+            });
+        pane.dash.value = look.dash;
+        pane.shadow.checked = look.shadow;
+    }
+
+    /* Wiring, called once from App.start(): the Format pane's section. */
+    App.shapeControls.init = function init() {
+        const section = document.getElementById('format-shape');
+        pane = {
+            section: section,
+            fillRow: Array.from(section.querySelectorAll('.format-shape-fill-row')),
+            transparency: document.getElementById('format-shape-transparency'),
+            width: document.getElementById('format-shape-width'),
+            dash: document.getElementById('format-shape-dash'),
+            shadow: document.getElementById('format-shape-shadow'),
+        };
+        document.getElementById('format-shape-fill').appendChild(colorControl('fill', 'pane-shape-fill-menu'));
+        document.getElementById('format-shape-outline').appendChild(colorControl('outline', 'pane-shape-outline-menu'));
+        DASH_LABELS.forEach(([dash, label]) => pane.dash.appendChild(el('option', { value: dash }, [label])));
+        numberField(pane.transparency, 0, 100, 'setShapeTransparency');
+        numberField(pane.width, 0.25, 100, 'setShapeOutlineWidth');
+        pane.dash.addEventListener('change', () => App.commands.run('setShapeDash', pane.dash.value));
+        pane.shadow.addEventListener('change', () => {
+            const look = App.shapeControls.currentLook();
+            if (look && look.shadow !== pane.shadow.checked) {
+                App.commands.run('shapeShadow');
+            }
+        });
+        ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded', 'selection-dragged'].forEach((name) => {
+            App.events.on(name, () => refreshPane(false));
+        });
+        refreshPane(false);
     };
 })();
 
@@ -16477,7 +16829,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
  *
  * Tabs: Home, Insert, Arrange, Slide Show, Export, and contextual tabs shown
- * only while they apply (Table Design and Layout, Picture Format). In Phase 1 only Home has
+ * only while they apply (Table Design and Layout, Picture Format, Shape Format). In Phase 1 only Home has
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
  *
@@ -16574,6 +16926,17 @@ App.template.newDeckHtml = function newDeckHtml() {
             ],
             note: 'Crop: drag the black handles, then Enter or click elsewhere; the cut-away part is removed from the file. ' +
                 'Change Picture: the new picture fits inside this one\'s box. Reset Size: the size it came in with.',
+        },
+        {
+            // Shown only while a shape is selected (PowerPoint's Shape Format tab).
+            id: 'shape-format', label: 'Shape Format', contextual: () => App.shapeControls.isShapeSelected(),
+            groups: [
+                { label: 'Shape Styles', rows: [[{ control: 'shapeFill' }, { control: 'shapeOutline' }],
+                    [{ control: 'shapeWeight' }, { control: 'shapeDash' }]] },
+                { label: 'Effects', rows: [[{ control: 'shapeTransparency' }], [{ command: 'shapeShadow', icon: 'shadow' }]] },
+            ],
+            note: 'Fill and Outline: the button applies the colour on its bar, ▾ picks another. A width or a dash gives a shape ' +
+                'without an outline one. Transparency is of the fill (of the line for lines). Also in the Format pane.',
         },
         {
             id: 'arrange', label: 'Arrange',
@@ -16788,6 +17151,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.textControls.refresh();
         App.tableControls.refresh();
         App.tableDesign.refresh();
+        App.shapeControls.refresh();
     };
 })();
 

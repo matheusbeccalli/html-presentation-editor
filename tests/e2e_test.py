@@ -2392,6 +2392,88 @@ def test_insert_shapes(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+SHAPE_LOOK = "id => App.shapes.lookOf(App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]'))"
+
+
+def test_shape_format(browser):
+    """Shape Format tab (only with a shape selected) and the Format pane's Fill & line: fill, outline colour, width,
+    dashes, transparency, shadow; each one undo step; a line's colour also colours its arrow head; saved and reopened."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    tab = ".ribbon-tab[data-tab='shape-format']"
+    look = lambda: page.evaluate(SHAPE_LOOK, shape)  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    page.evaluate("App.deck.goTo(4)")
+    check(page.is_hidden(tab), "no Shape Format tab without a shape")
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.shapes-button")
+    page.click(".shape-gallery-item[data-shape='chevron']")
+    page.mouse.click(*slide_to_screen(page, 300, 450))
+    shape = page.evaluate("App.selection.selectedId()")
+    check(page.is_visible(tab) and page.is_visible("#format-shape"), "a shape selected: the tab and the pane's Fill & line")
+    page.click(tab)
+
+    # Fill and outline colours from the lists; width and dash from theirs; each one step.
+    page.click(".shape-fill-menu-button")
+    page.click(".shape-fill-menu .color-swatch[title='Dark Red']")
+    check(look()["fill"] == "#c00000" and label() == "Shape fill", f"filled dark red: {look()}")
+    page.click(".shape-outline-menu-button")
+    page.click(".shape-outline-menu .color-swatch[title='Dark Blue']")
+    check(look()["outline"] == "#002060" and look()["width"] == 2, f"a 2 px dark blue outline: {look()}")
+    page.click(".list-button.shape-weight")
+    page.click(".shape-weight-menu .menu-item:has-text('4 px')")
+    page.click(".list-button.shape-dash")
+    page.click(".shape-dash-menu .menu-item:has-text('Dashed')")
+    check(look()["width"] == 4 and look()["dash"] == "dash" and label() == "Shape outline dash", f"4 px dashes: {look()}")
+    page.click(".list-button.shape-transparency")
+    page.click(".shape-transparency-menu .menu-item:has-text('50%')")
+    run_shadow = ".ribbon-button[data-command='shapeShadow']"
+    page.click(run_shadow)
+    check(look()["transparency"] == 50 and look()["shadow"] is True and page.get_attribute(run_shadow, "aria-pressed") == "true",
+          f"half transparent, with a shadow: {look()}")
+    page.screenshot(path=str(OUTPUT / "58-shape-format.png"))
+    for _ in range(2):
+        page.keyboard.press("Control+z")
+    check(look()["transparency"] == 0 and look()["shadow"] is False and look()["dash"] == "dash", f"two undos: {look()}")
+
+    # The Format pane: transparency and width typed, dash and shadow picked; the ribbon's "No Fill".
+    page.fill("#format-shape-transparency", "25")
+    page.keyboard.press("Enter")
+    page.fill("#format-shape-width", "6")
+    page.keyboard.press("Enter")
+    page.select_option("#format-shape-dash", "dot")
+    page.check("#format-shape-shadow")
+    check(look() == {"fill": "#c00000", "outline": "#002060", "width": 6, "dash": "dot", "transparency": 25, "shadow": True},
+          f"from the pane: {look()}")
+    check(page.input_value("#format-shape-width") == "6" and page.input_value("#format-shape-dash") == "dot", "the pane shows it")
+    page.click(".shape-fill-menu-button")
+    page.click(".shape-fill-menu .menu-item:has-text('No Fill')")
+    check(look()["fill"] == "none", f"no fill: {look()}")
+
+    # An arrow: no fill; its colour goes to the head too.
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.shapes-button")
+    page.click(".shape-gallery-item[data-shape='arrow']")
+    page.mouse.click(*slide_to_screen(page, 700, 650))
+    shape = page.evaluate("App.selection.selectedId()")
+    page.click(tab)
+    check(page.is_disabled("#ribbon-panel .color-main[data-command='shapeFill']"), "a line has no fill")
+    page.click(".shape-outline-menu-button")
+    page.click(".shape-outline-menu .color-swatch[title='Green']")
+    heads = page.evaluate("id => Array.from(App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] path'), (p) => [p.style.stroke, p.style.fill])", shape)
+    check(heads == [["rgb(0, 176, 80)", "none"], ["none", "rgb(0, 176, 80)"]], f"line and head green: {heads}")
+
+    # Saved and reopened: the look is kept.
+    before = page.evaluate("Array.from(App.deck.getCurrentSlide().querySelectorAll('[data-shape]'), (el) => el.outerHTML)")
+    saved = editor.save_as_download("shape-format-saved.html")
+    editor.open(saved)
+    page.evaluate("App.deck.goTo(4)")
+    after = page.evaluate("Array.from(App.deck.getCurrentSlide().querySelectorAll('[data-shape]'), (el) => el.outerHTML)")
+    check(len(before) == 2 and after == before, "the same look after reopening")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -3455,6 +3537,7 @@ TESTS = [
     test_picture_format,
     test_crop_picture,
     test_insert_shapes,
+    test_shape_format,
 ]
 
 

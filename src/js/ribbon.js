@@ -2,7 +2,7 @@
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
  *
  * Tabs: Home, Insert, Arrange, Slide Show, Export, and contextual tabs shown
- * only while they apply (Table Design and Layout, Picture Format). In Phase 1 only Home has
+ * only while they apply (Table Design and Layout, Picture Format, Shape Format). In Phase 1 only Home has
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
  *
@@ -99,6 +99,17 @@
             ],
             note: 'Crop: drag the black handles, then Enter or click elsewhere; the cut-away part is removed from the file. ' +
                 'Change Picture: the new picture fits inside this one\'s box. Reset Size: the size it came in with.',
+        },
+        {
+            // Shown only while a shape is selected (PowerPoint's Shape Format tab).
+            id: 'shape-format', label: 'Shape Format', contextual: () => App.shapeControls.isShapeSelected(),
+            groups: [
+                { label: 'Shape Styles', rows: [[{ control: 'shapeFill' }, { control: 'shapeOutline' }],
+                    [{ control: 'shapeWeight' }, { control: 'shapeDash' }]] },
+                { label: 'Effects', rows: [[{ control: 'shapeTransparency' }], [{ command: 'shapeShadow', icon: 'shadow' }]] },
+            ],
+            note: 'Fill and Outline: the button applies the colour on its bar, ▾ picks another. A width or a dash gives a shape ' +
+                'without an outline one. Transparency is of the fill (of the line for lines). Also in the Format pane.',
         },
         {
             id: 'arrange', label: 'Arrange',
@@ -313,5 +324,6 @@
         App.textControls.refresh();
         App.tableControls.refresh();
         App.tableDesign.refresh();
+        App.shapeControls.refresh();
     };
 })();

@@ -7,7 +7,7 @@
  * fills them. Buttons only name a command; commands.js does the work.
  *
  * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips),
- *           textcontrols.js, tablecontrols.js and tabledesign.js (controls that show a value or open a picker).
+ *           textcontrols.js, tablecontrols.js, tabledesign.js and shapecontrols.js (controls that show a value or open a picker).
  */
 
 (function () {
@@ -54,10 +54,12 @@
             groups: [
                 { label: 'Tables', commands: [{ control: 'insertTable' }] },
                 { label: 'Images', commands: [['insertPicture', 'picture']] },
+                { label: 'Illustrations', commands: [{ control: 'insertShape' }] },
                 { label: 'Text', commands: [['insertTextBox', 'textBox']] },
             ],
             note: 'Table: move over the grid to pick a size, click to insert. Pictures: from a file, made smaller on the way ' +
-                'in. Text box: click it, then click on the slide (or drag to set its width). Shapes and charts arrive in Phases 5 and 6.',
+                'in. Shapes: pick one, then drag on the slide (Shift keeps its proportions) or click. Text box: click it, then click on ' +
+                'the slide (or drag to set its width). Charts arrive in Phase 6.',
         },
         {
             // Shown only while a table is selected (PowerPoint's Table Design tab).
@@ -159,7 +161,8 @@
 
     /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
     function createControl(name) {
-        return App.tableControls.create(name) || App.tableDesign.create(name) || App.textControls.create(name);
+        return App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
+            App.textControls.create(name);
     }
 
     function renderTab(tab) {

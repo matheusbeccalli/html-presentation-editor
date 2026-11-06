@@ -2299,6 +2299,105 @@ def test_crop_picture(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+SHAPE_INFO = """id => { const el = App.deck.getDocument().querySelector('[data-id="' + id + '"]');
+    return { kind: el.getAttribute('data-shape'), flip: el.getAttribute('data-flip') || '', rect: App.transform.readRect(el),
+             paths: Array.from(el.querySelectorAll('svg path'), (p) => p.getAttribute('d')),
+             fill: getComputedStyle(el.querySelector('svg path')).fill }; }"""
+
+
+def test_insert_shapes(browser):
+    """Insert > Shapes: a gallery of 8 kinds; drag to draw (Shift: square, or lines at 45 degrees), a plain click gives
+    the default size; accent fill, no outline; one undo step each; a resize redraws the shape; saved and reopened."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    selected = lambda: page.evaluate("App.selection.selectedId()")  # noqa: E731
+    info = lambda: page.evaluate(SHAPE_INFO, selected())  # noqa: E731
+    page.evaluate("App.deck.goTo(4)")   # slide 5: room under its text
+    page.click(".ribbon-tab[data-tab='insert']")
+
+    def pick(kind):
+        page.click(".ribbon-button.shapes-button")
+        page.click(f".shape-gallery-item[data-shape='{kind}']")
+
+    page.click(".ribbon-button.shapes-button")
+    check(page.locator(".shape-gallery-item").count() == 8, "8 shapes in the gallery")
+    page.screenshot(path=str(OUTPUT / "56-shapes-gallery.png"))
+    page.keyboard.press("Escape")
+    check(page.locator(".shape-gallery").count() == 0, "Esc closes the gallery")
+
+    # Drag to draw a chevron: where the mouse went, accent fill, one undo step, selected.
+    pick("chevron")
+    drag(page, slide_to_screen(page, 200, 450), slide_to_screen(page, 400, 530))
+    chevron = info()
+    rect = {k: round(v) for k, v in chevron["rect"].items()}
+    check(chevron["kind"] == "chevron" and rect == {"left": 200, "top": 450, "width": 200, "height": 80}, f"drawn: {chevron}")
+    accent = page.evaluate("getComputedStyle(App.deck.getDocument().documentElement).getPropertyValue('--color-accent').trim()")
+    check(chevron["fill"] == "rgb(31, 42, 68)" and accent.lower() == "#1f2a44", f"the deck's accent: {chevron['fill']}")
+    check(page.evaluate("App.history.undoLabel()") == "Insert shape", "one undo step")
+    check(page.text_content("#status-message") == "", "the drawing hint is gone")
+    chevron_id = selected()
+
+    # A plain click: the default size, its corner at the click.
+    pick("rect")
+    page.mouse.click(*slide_to_screen(page, 600, 450))
+    check(info()["rect"] == {"left": 600, "top": 450, "width": 160, "height": 120}, f"default rectangle: {info()['rect']}")
+
+    # Shift keeps an oval round.
+    pick("ellipse")
+    page.keyboard.down("Shift")
+    drag(page, slide_to_screen(page, 820, 450), slide_to_screen(page, 920, 480))
+    page.keyboard.up("Shift")
+    oval = {k: round(v) for k, v in info()["rect"].items()}
+    check(oval["width"] == oval["height"] == 100, f"a circle: {oval}")
+
+    # A line drawn up-right keeps its direction; Shift lays an arrow flat, and a 0 px tall arrow can still be clicked.
+    pick("line")
+    drag(page, slide_to_screen(page, 100, 650), slide_to_screen(page, 300, 600))
+    line = info()
+    check(line["flip"] == "y" and line["paths"][0].startswith("M0 ") and line["paths"][0].endswith(" 0"), f"up-right: {line}")
+    pick("arrow")
+    page.keyboard.down("Shift")
+    drag(page, slide_to_screen(page, 400, 650), slide_to_screen(page, 600, 643))
+    page.keyboard.up("Shift")
+    arrow_id = selected()
+    check(info()["rect"]["height"] == 0 and len(info()["paths"]) == 2, f"a flat arrow with its head: {info()}")
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 500, 652))
+    check(selected() == arrow_id, "clicked 2 px beside the arrow: selected")
+    page.screenshot(path=str(OUTPUT / "57-shapes-drawn.png"))
+
+    # Esc cancels a shape picked from the gallery.
+    pick("pentagon")
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 1000, 600))
+    check(selected() is None and page.evaluate("App.deck.getCurrentSlide().querySelectorAll('[data-shape=\"pentagon\"]').length") == 0,
+          "nothing drawn after Esc")
+
+    # A resize redraws the chevron at its new size (its point stays half its height).
+    page.evaluate("id => App.selection.select(App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]'))", chevron_id)
+    side = page.locator("#overlay .selection-handle[data-handle='e']").bounding_box()
+    drag(page, (side["x"] + 4, side["y"] + 4), (side["x"] + 4 + 100 * page.evaluate("App.canvas.getZoom()"), side["y"] + 4))
+    resized = info()
+    width = App_round(resized["rect"]["width"])
+    check(width == 300 and resized["paths"][0].startswith(f"M0 0H{App_round(resized['rect']['width'] - 40)}L"), f"redrawn: {resized}")
+
+    # Saved and reopened: the shapes are still there, drawn the same.
+    before = page.evaluate("Array.from(App.deck.getCurrentSlide().querySelectorAll('[data-shape]'), (el) => el.outerHTML)")
+    saved = editor.save_as_download("shapes-saved.html")
+    editor.open(saved)
+    page.evaluate("App.deck.goTo(4)")
+    after = page.evaluate("Array.from(App.deck.getCurrentSlide().querySelectorAll('[data-shape]'), (el) => el.outerHTML)")
+    check(len(before) == 5 and after == before, f"the same shapes after reopening: {len(after)}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
+def App_round(value):
+    """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
+    rounded = round(value, 2)
+    return int(rounded) if rounded == int(rounded) else rounded
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -3355,6 +3454,7 @@ TESTS = [
     test_paste_and_drop_pictures,
     test_picture_format,
     test_crop_picture,
+    test_insert_shapes,
 ]
 
 

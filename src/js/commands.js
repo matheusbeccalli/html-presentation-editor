@@ -274,6 +274,22 @@
             label: 'Reset Size', isEnabled: () => App.images.isPictureSelected(),
             run: () => App.images.resetSize(),
         });
+        // Insert > Shapes: the gallery (shapecontrols.js) passes the kind it picked.
+        App.commands.define('insertShape', {
+            label: 'Shapes', isEnabled: hasDeck,
+            run: (kind) => {
+                App.text.exitEdit({ select: false });
+                App.selection.clear();
+                App.selection.armInsert((spot) => {
+                    App.ui.setStatus('');
+                    App.elements.insertShape(kind, spot.gesture);
+                }, {
+                    preview: (gesture) => App.shapes.drawnShape(kind, gesture.start, gesture.end, gesture.shiftKey).rect,
+                });
+                App.ui.setStatus('Drag on the slide to draw the shape (Shift keeps its proportions), or click for its ' +
+                    'usual size (Esc cancels)');
+            },
+        });
         // Insert > Table: the grid picker (tablecontrols.js) passes the size it picked.
         App.commands.define('insertTable', {
             label: 'Table', isEnabled: hasDeck,

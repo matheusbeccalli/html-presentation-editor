@@ -211,7 +211,7 @@ Nested bullets are the top priority of this phase.
 - [x] Reset image size *(Picture Format > Reset Size: the size it came in with (inside the slide's margins), around the same centre, kept inside the slide)*
 - [x] Compress on insert: longest side max 1920 px, JPEG quality 0.85 unless the image has transparency (keep PNG) *(decided in the Phase 5 Q&A: the smaller of PNG and JPEG 0.85 is kept, so screenshots and flat logos usually stay PNG and sharp; a file already smaller than both is kept as it is; SVG stays SVG)*
 - [x] Deck file size shown in the status bar *("Deck 3.4 MB", a second after a change; amber above 20 MB, with a tooltip that the file may be too big to email)*
-- [ ] Shapes: rectangle, rounded rectangle, ellipse, line, arrow, chevron, pentagon, callout (CSS or inline SVG)
+- [x] Shapes: rectangle, rounded rectangle, ellipse, line, arrow, chevron, pentagon, callout (CSS or inline SVG) *(Insert > Shapes gallery; inline SVG worked out from the kind and size, redrawn on resize so outlines never stretch; drag to draw (Shift: square / circle, lines at 45°), a plain click gives the usual size; accent fill, no outline (lines: 2 px accent); a 0 px flat line can still be clicked. Formatting, text inside, end-point and yellow handles come in the next steps)*
 - [ ] Shape fill, border (color, width, dash), shadow, transparency
 - [ ] Text inside shapes
 - [ ] **Done when:** a process diagram of chevrons and a logo screenshot can be built on a slide without leaving the editor.
@@ -219,6 +219,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Drop and paste: drag a PNG from Explorer onto the slide: "Drop to put the picture on this slide", it lands in the middle. Win+Shift+S a part of the screen, click the slide, Ctrl+V: the screenshot appears, Ctrl+Z removes it. Copy a chart in Excel, Ctrl+V: a picture of the chart. Copy cells in Excel, Ctrl+V: a table (not a picture). Typing in a text box, Ctrl+V of a screenshot: typing ends and the screenshot is its own picture. Drag an .html deck in: "Drop the .html deck to open it"
   - [ ] Picture Format: click a picture: the Picture Format tab appears (it goes away when a text box is selected). Stretch the picture by a side handle, then Reset Size: back to its proportions. Change Picture, pick a wide logo: it fits inside the old picture's box, centred; one Ctrl+Z brings the old picture back. Right-click a picture: Change Picture is in the menu
   - [ ] Crop: select a picture, Picture Format > Crop: black handles on its edges. Drag the right handle in: the part that goes is dimmed. Press Enter: the picture is now only the kept part. Save and compare the file size with an uncropped copy: smaller (the cut-away pixels are gone). Ctrl+Z: the whole picture is back. Crop again and click on empty slide: applied too
+  - [ ] Shapes: Insert > Shapes shows 8 shapes. Pick Chevron and drag on the slide: a dark-blue chevron where you dragged, selected; one Ctrl+Z removes it. Pick Rectangle and just click: a rectangle at the click. Pick Oval and drag with Shift: a circle. Pick Arrow and drag with Shift: a straight flat arrow, head at the end; click just next to it: it is selected. Drag a side handle of the chevron: it gets longer, its point does not stretch. Save, reopen: all still there
 
 ## Phase 6: Charts (section 5)
 

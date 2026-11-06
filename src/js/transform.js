@@ -87,6 +87,8 @@
         return { left: round(left), top: round(top), width: round(width), height: round(height) };
     };
 
+    const HIT_MIN = 10;   // slide px
+
     /*
      * items: [{ id, rect, z }] in slide order. Returns the id of the element
      * drawn on top at point (x, y), or null. Higher z-index wins; with equal
@@ -96,7 +98,10 @@
         let best = null;
         items.forEach((item, index) => {
             const r = item.rect;
-            const inside = x >= r.left && x <= r.left + r.width && y >= r.top && y <= r.top + r.height;
+            // A line can be 0 px thin: anything thinner than HIT_MIN can still be clicked a few px either side.
+            const padX = Math.max(0, (HIT_MIN - r.width) / 2);
+            const padY = Math.max(0, (HIT_MIN - r.height) / 2);
+            const inside = x >= r.left - padX && x <= r.left + r.width + padX && y >= r.top - padY && y <= r.top + r.height + padY;
             if (inside && (!best || item.z > best.z || (item.z === best.z && index > best.index))) {
                 best = { id: item.id, z: item.z, index: index };
             }

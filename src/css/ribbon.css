@@ -114,6 +114,15 @@
 .table-grid-label { padding: 0 2px 6px; font-size: 12px; }
 .table-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 3px; }
 .table-grid-cell { width: 18px; height: 18px; box-sizing: border-box; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+/* Insert > Shapes gallery (shapecontrols.js). */
+.shape-gallery { min-width: 0; padding: 6px; }
+.shape-gallery:focus { outline: none; }
+.shape-gallery-grid { display: grid; grid-template-columns: repeat(4, 32px); gap: 4px; }
+.shape-gallery-item {
+    width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center;
+    border: 1px solid transparent; border-radius: 4px; background: none; color: var(--text); cursor: pointer;
+}
+.shape-gallery-item:hover, .shape-gallery-item:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }
 .table-grid-cell.picked { border-color: var(--accent); background: var(--accent-soft); }
 .line-spacing-button { flex-direction: row; gap: 1px; }
 .line-spacing-menu { width: 200px; }

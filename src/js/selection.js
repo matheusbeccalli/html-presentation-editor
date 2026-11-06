@@ -43,6 +43,7 @@
     let selectedSlideIndex = -1;
     let dragging = false;
     let insertCallback = null;   // set by armInsert: the next click/drag places something
+    let insertPreview = null;    // armInsert's options.preview: a drag in both directions (shapes)
 
     App.selection.init = function init() {
         overlay = document.getElementById('overlay');
@@ -262,10 +263,13 @@
     /*
      * The next press on the slide places something: a click gives
      * callback({ left, top, width: null }), a drag gives the dragged left/top/width
-     * (slide px). Escape cancels.
+     * (slide px). Escape cancels. With options.preview(gesture) (a shape) the
+     * drag goes both ways: the selection box shows preview's rect while
+     * dragging, and the callback also gets `gesture`: { start, end, shiftKey, dragged }.
      */
-    App.selection.armInsert = function armInsert(callback) {
+    App.selection.armInsert = function armInsert(callback, options) {
         insertCallback = callback;
+        insertPreview = (options && options.preview) || null;
         overlay.classList.add('inserting');
         overlay.style.cursor = '';
         window.addEventListener('keydown', onInsertKey, true);
@@ -277,6 +281,7 @@
 
     function disarmInsert() {
         insertCallback = null;
+        insertPreview = null;
         overlay.classList.remove('inserting');
         window.removeEventListener('keydown', onInsertKey, true);
     }
@@ -293,13 +298,24 @@
 
     function startInsertGesture(downEvent) {
         const callback = insertCallback;
+        const preview = insertPreview;
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
         let spot = { left: start.x, top: start.y, width: null };
+        let gesture = { start: start, end: start, shiftKey: downEvent.shiftKey, dragged: false };
         overlay.setPointerCapture(downEvent.pointerId);
 
         function onMove(event) {
             const point = toSlidePoint(event);
+            const moved = Math.hypot(point.x - start.x, point.y - start.y) * zoom >= DRAG_THRESHOLD;
+            gesture = { start: start, end: point, shiftKey: event.shiftKey, dragged: gesture.dragged || moved };
+            if (preview) {
+                if (gesture.dragged) {
+                    App.transform.writeRect(box, preview(gesture));
+                    box.hidden = false;
+                }
+                return;
+            }
             if (Math.abs(point.x - start.x) * zoom < DRAG_THRESHOLD) {
                 return;
             }
@@ -309,11 +325,13 @@
             box.hidden = false;
         }
 
-        function onUp() {
+        function onUp(event) {
             overlay.removeEventListener('pointermove', onMove);
             overlay.removeEventListener('pointerup', onUp);
             disarmInsert();
-            callback({ left: Math.round(spot.left), top: Math.round(spot.top), width: spot.width === null ? null : Math.round(spot.width) });
+            gesture.shiftKey = event.shiftKey;
+            callback({ left: Math.round(spot.left), top: Math.round(spot.top), width: spot.width === null ? null : Math.round(spot.width),
+                gesture: gesture });
         }
 
         overlay.addEventListener('pointermove', onMove);
@@ -356,6 +374,7 @@
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
                 App.tables.fitTable(element, { resized: true });   // a table's columns and rows follow the box
+                App.shapes.render(element);   // a shape is drawn again at its new size
             }
             App.selection.refresh();
             App.events.emit('selection-dragged');   // the Format pane shows the values live

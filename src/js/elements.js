@@ -80,6 +80,28 @@
     };
 
     /*
+     * Insert > Shapes: a shape of `kind` drawn by `gesture` (selection.armInsert):
+     * as dragged, or its default size at a plain click (or a drag of under 2 px).
+     * One undo step; the shape is selected.
+     */
+    App.elements.insertShape = function insertShape(kind, gesture) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return null;
+        }
+        const drawn = gesture.dragged ? App.shapes.drawnShape(kind, gesture.start, gesture.end, gesture.shiftKey) : null;
+        const placed = drawn && (drawn.rect.width >= 2 || drawn.rect.height >= 2) ? drawn : App.shapes.clickedShape(kind, gesture.start);
+        const doc = slide.ownerDocument;
+        let element = null;
+        App.history.change('Insert shape', { slideId: slide.getAttribute('data-slide-id') }, () => {
+            element = App.shapes.createShape(doc, kind, placed.rect, App.elements.freshId(doc), placed.flip);
+            App.elements.addOnTop(slide, element);
+        });
+        App.selection.select(element);
+        return element;
+    };
+
+    /*
      * Insert > Table: a rows x cols table centred on the slide (one undo step),
      * then selected. Its rows are measured once it is on the slide (fitTable).
      */

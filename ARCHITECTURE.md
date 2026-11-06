@@ -264,3 +264,7 @@ commands.run('save') → fileio.save → serialize.toHtml(deck document, player)
 | All tests from the command line (needs Playwright) | `python tests/run_tests.py` |
 | Generate the 50-slide performance deck | `python samples/make_heavy_deck.py` |
 | Use the editor | double-click `dist/editor.html` (Edge or Chrome) |
+
+In `tests/e2e_test.py`, whether something is really painted (a shape, a flat line) is checked on screenshot pixels
+(`dark_pixels`): the DOM reports sizes and hits for SVG the browser never paints. Each phase's "done when" is one
+test (`test_phase4_done_when`, `test_phase5_done_when`): built on a new deck, saved, reopened, played on its own.

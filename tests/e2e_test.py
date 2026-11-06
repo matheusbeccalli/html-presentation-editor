@@ -2640,6 +2640,95 @@ def test_line_and_adjust_handles(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_phase5_done_when(browser):
+    """
+    Phase 5 "done when", automated: a process diagram of chevrons and a logo screenshot are built on a slide without
+    leaving the editor: shapes drawn from Insert > Shapes, text typed in them, one step coloured from Shape Format, a
+    screenshot pasted with Ctrl+V and placed from the Format pane; saved, reopened and shown by the saved file on its own.
+    """
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    page = editor.page
+    page.evaluate("App.commands.run('newDeck')")   # File > New deck
+    wait_until(page, "App.deck.getSlides().length === 2")
+    started = time.time()
+
+    # Slide 2: the body text box goes; the process takes its place.
+    page.evaluate("App.deck.goTo(1)")
+    page.mouse.click(*slide_to_screen(page, 600, 200))
+    check(page.evaluate("App.selection.selectedId()") == "e6", "the body box selected")
+    page.keyboard.press("Delete")
+    page.click(".ribbon-tab[data-tab='insert']")
+    steps = [("pentagon", "Diligência"), ("chevron", "Negociação"), ("chevron", "Assinatura"), ("chevron", "Fechamento")]
+    ids = []
+    for index, (kind, name) in enumerate(steps):
+        left = 64 + index * 290
+        page.click(".ribbon-button.shapes-button")
+        page.click(f".shape-gallery-item[data-shape='{kind}']")
+        drag(page, slide_to_screen(page, left, 300), slide_to_screen(page, left + 270, 380))
+        ids.append(page.evaluate("App.selection.selectedId()"))
+        page.mouse.dblclick(*slide_to_screen(page, left + 135, 340))
+        page.keyboard.type(name)
+        page.keyboard.press("Escape")
+
+    # The last step stands out: Dark Red from Shape Format.
+    page.click(".ribbon-tab[data-tab='shape-format']")
+    page.click(".shape-fill-menu-button")
+    page.click(".shape-fill-menu .color-swatch[title='Dark Red']")
+
+    # The logo: a screenshot pasted, then placed top right from the Format pane.
+    put_picture_on_clipboard(page, "logo", 300, 100)
+    page.mouse.click(*slide_to_screen(page, 640, 600))   # empty slide space
+    page.keyboard.press("Control+v")
+    wait_until(page, "App.history.undoLabel() === 'Paste picture'")
+    logo = page.evaluate("App.selection.selectedId()")
+    for field, value in [("x", "1016"), ("y", "36"), ("w", "200"), ("h", "66.67")]:
+        page.fill(f"#format-{field}", value)
+        page.keyboard.press("Enter")
+    elapsed = time.time() - started
+    check(elapsed < 60, f"built in under a minute: {elapsed:.1f} s")
+    page.keyboard.press("Escape")
+
+    diagram = """ids => ids.map((id) => { const el = App.deck.getDocument().querySelector('[data-id="' + id + '"]');
+        return [el.getAttribute('data-shape'), el.querySelector('.shape-text').textContent, App.shapes.lookOf(el).fill]; })"""
+    expected = [["pentagon", "Diligência", "var(--color-accent, #1F2A44)"], ["chevron", "Negociação", "var(--color-accent, #1F2A44)"],
+                ["chevron", "Assinatura", "var(--color-accent, #1F2A44)"], ["chevron", "Fechamento", "#c00000"]]
+    check(page.evaluate(diagram, ids) == expected, f"the process: {page.evaluate(diagram, ids)}")
+    check(element_rect(page, logo) == {"left": 1016, "top": 36, "width": 200, "height": 66.67}, f"the logo: {element_rect(page, logo)}")
+    wait_until(page, """() => { const thumb = document.querySelector('.thumb[data-index="1"] iframe').contentDocument;
+        return thumb.querySelectorAll('[data-shape]').length === 4 && !!thumb.querySelector('img.el'); }""")
+    page.screenshot(path=str(OUTPUT / "61-phase5-done-when.png"))
+
+    # Saved and reopened: the same diagram and logo, and the text can still be typed in.
+    saved = editor.save_as_download("phase5-done-when.html")
+    editor.open(saved)
+    check(editor.report_dialog_text() is None, "a deck the editor saved opens without an import report")
+    page.evaluate("App.deck.goTo(1)")
+    check(page.evaluate(diagram, ids) == expected, "the process came back as saved")
+    check(page.evaluate(PICTURE_INFO, logo)["natural"] == [300, 100], "the logo came back")
+    page.mouse.dblclick(*slide_to_screen(page, 64 + 135, 340))
+    page.keyboard.press("End")
+    page.keyboard.type("!")
+    page.keyboard.press("Escape")
+    check(page.evaluate(diagram, ids)[0][1] == "Diligência!", "still editable")
+
+    # The saved file on its own shows the diagram (painted, not only there) and the logo.
+    player, errors = play_saved_deck(browser, saved)
+    player.keyboard.press("ArrowRight")
+    drawn = rendered_text(player, 'section.slide[data-slide-id="s2"]')
+    for name in ["Diligência", "Negociação", "Assinatura", "Fechamento"]:
+        check(name in drawn, f"the saved deck shows {name!r}: {drawn[:300]!r}")
+    box = player.locator('section.slide[data-slide-id="s2"] [data-shape="chevron"]').last.bounding_box()
+    painted = dark_pixels(player, (box["x"], box["y"]), (box["x"] + box["width"], box["y"] + box["height"]))
+    check(painted > box["width"] * box["height"] * 0.3, f"the dark red chevron is painted: {painted} dark pixels")
+    shown = player.evaluate("() => document.querySelector('section.slide[data-slide-id=\"s2\"] img.el').naturalWidth")
+    check(shown == 300, f"the logo is shown: {shown}")
+    check(errors == [] and editor.errors == [], f"no errors: {errors} {editor.errors}")
+    player.context.close()
+    editor.close()
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -3706,6 +3795,7 @@ TESTS = [
     test_shape_format,
     test_shape_text,
     test_line_and_adjust_handles,
+    test_phase5_done_when,
 ]
 
 

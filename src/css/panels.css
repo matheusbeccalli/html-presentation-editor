@@ -112,6 +112,14 @@
 .selection-handle[data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
 .selection-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
 .selection-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
+/* Shapes (selection.js): a line shows a handle at each end and no box; the yellow handle changes a shape's form. */
+.selection-handle[hidden], .selection-box.line .selection-handle:not([data-handle="start"]):not([data-handle="end"]) { display: none; }
+.selection-box.line { outline: none; }
+.selection-handle[data-handle="start"], .selection-handle[data-handle="end"] { cursor: crosshair; }
+.selection-handle[data-handle="adjust"] {
+    background: #FFD600; border-color: #7A6200; cursor: pointer;
+    width: calc(10px * var(--inverse-zoom)); height: calc(10px * var(--inverse-zoom));
+}
 
 /* Picture Format > Crop (crop.js): the cut-away part dimmed, black handles on the kept part's edges. */
 #overlay.cropping .selection-box { display: none; }

@@ -438,6 +438,14 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .selection-handle[data-handle="s"] { left: 50%; top: 100%; cursor: ns-resize; }
 .selection-handle[data-handle="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
 .selection-handle[data-handle="w"] { left: 0; top: 50%; cursor: ew-resize; }
+/* Shapes (selection.js): a line shows a handle at each end and no box; the yellow handle changes a shape's form. */
+.selection-handle[hidden], .selection-box.line .selection-handle:not([data-handle="start"]):not([data-handle="end"]) { display: none; }
+.selection-box.line { outline: none; }
+.selection-handle[data-handle="start"], .selection-handle[data-handle="end"] { cursor: crosshair; }
+.selection-handle[data-handle="adjust"] {
+    background: #FFD600; border-color: #7A6200; cursor: pointer;
+    width: calc(10px * var(--inverse-zoom)); height: calc(10px * var(--inverse-zoom));
+}
 
 /* Picture Format > Crop (crop.js): the cut-away part dimmed, black handles on the kept part's edges. */
 #overlay.cropping .selection-box { display: none; }
@@ -7271,7 +7279,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * shapes.js - the shape model (SPEC Phase 5).
  *
  *   <div class="el" data-type="shape" data-shape="chevron" data-id="e7" style="left; top; width; height; z-index">
- *     <svg class="shape-svg" width="100%" height="100%" aria-hidden="true" style="position: absolute; …; overflow: visible;">
+ *     <svg class="shape-svg" width="100%" height="100%" aria-hidden="true" style="position: absolute; …; overflow: visible; min-width: 1px; …">
  *       <path class="shape-fill" style="fill: var(--color-accent, #1F2A44); stroke: none;" d="M0 0H160L200 40…Z"></path>
  *     </svg>
  *   </div>
@@ -7400,7 +7408,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     /* Where a line or arrow starts and ends inside its w x h box. */
-    function lineEnds(w, h, flip) {
+    function lineEndsInBox(w, h, flip) {
         const flipX = (flip || '').indexOf('x') !== -1;
         const flipY = (flip || '').indexOf('y') !== -1;
         return { x1: flipX ? w : 0, y1: flipY ? h : 0, x2: flipX ? 0 : w, y2: flipY ? 0 : h };
@@ -7441,7 +7449,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 return [{ part: 'fill', d: calloutPath(w, h, adjust) }];
             case 'line':
             case 'arrow': {
-                const ends = lineEnds(w, h, opts.flip);
+                const ends = lineEndsInBox(w, h, opts.flip);
                 if (kind === 'line') {
                     return [{ part: 'line', d: 'M' + n(ends.x1) + ' ' + n(ends.y1) + 'L' + n(ends.x2) + ' ' + n(ends.y2) }];
                 }
@@ -7474,28 +7482,57 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { left: round2(rect.left), top: round2(rect.top), width: round2(rect.width), height: round2(rect.height) };
     }
 
+    /* `point` moved to lie at 0, 45 or 90 degrees from `fixed`, as far along that direction as it was. */
+    function snap45(fixed, point) {
+        const dx = point.x - fixed.x;
+        const dy = point.y - fixed.y;
+        const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
+        const along = dx * Math.cos(angle) + dy * Math.sin(angle);
+        return { x: fixed.x + App.util.round2(along * Math.cos(angle)), y: fixed.y + App.util.round2(along * Math.sin(angle)) };
+    }
+
+    /* The box and flip of a line from `start` to `end` (slide px). */
+    function lineBox(start, end) {
+        return {
+            rect: round2Rect({ left: Math.min(start.x, end.x), top: Math.min(start.y, end.y),
+                width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) }),
+            flip: (end.x < start.x ? 'x' : '') + (end.y < start.y ? 'y' : ''),
+        };
+    }
+
+    /* A line's two ends in slide px, from its box and flip: { start, end }. */
+    App.shapes.lineEnds = function lineEnds(rect, flip) {
+        const ends = lineEndsInBox(rect.width, rect.height, flip);
+        return { start: { x: rect.left + ends.x1, y: rect.top + ends.y1 }, end: { x: rect.left + ends.x2, y: rect.top + ends.y2 } };
+    };
+
+    /* One end ('start' or 'end') of a line dragged to `point`: { rect, flip }. Shift: 45 degrees round the other end. */
+    App.shapes.moveLineEnd = function moveLineEnd(rect, flip, which, point, shiftKey) {
+        const ends = App.shapes.lineEnds(rect, flip);
+        const other = which === 'start' ? ends.end : ends.start;
+        const moved = shiftKey ? snap45(other, point) : point;
+        return which === 'start' ? lineBox(moved, ends.end) : lineBox(ends.start, moved);
+    };
+
     /*
      * A shape dragged from `start` to `end` (slide px): { rect, flip }. Shift:
      * boxes are square; lines snap to 0, 45 or 90 degrees (as long as the drag
      * along that direction).
      */
     App.shapes.drawnShape = function drawnShape(kind, start, end, shiftKey) {
+        if (App.shapes.isLine(kind)) {
+            return lineBox(start, shiftKey ? snap45(start, end) : end);
+        }
         let dx = end.x - start.x;
         let dy = end.y - start.y;
-        if (shiftKey && App.shapes.isLine(kind)) {
-            const angle = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
-            const along = dx * Math.cos(angle) + dy * Math.sin(angle);
-            dx = App.util.round2(along * Math.cos(angle));
-            dy = App.util.round2(along * Math.sin(angle));
-        } else if (shiftKey) {
+        if (shiftKey) {
             const side = Math.max(Math.abs(dx), Math.abs(dy));
             dx = dx < 0 ? -side : side;
             dy = dy < 0 ? -side : side;
         }
         const rect = round2Rect({ left: Math.min(start.x, start.x + dx), top: Math.min(start.y, start.y + dy),
             width: Math.abs(dx), height: Math.abs(dy) });
-        const flip = App.shapes.isLine(kind) ? (dx < 0 ? 'x' : '') + (dy < 0 ? 'y' : '') : '';
-        return { rect: rect, flip: flip };
+        return { rect: rect, flip: '' };
     };
 
     /* A shape placed by a plain click: its default size, its corner at the click, inside the slide. */
@@ -7512,6 +7549,41 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     // ---------------------------------------------------------------
+    // The yellow handle (pure): where it is, and what a drag of it sets
+    // ---------------------------------------------------------------
+
+    function round4(value) {
+        return Math.round(value * 10000) / 10000 + 0;
+    }
+
+    /* The yellow handle of a kind in its w x h box (box px), or null for kinds without one. */
+    App.shapes.adjustHandle = function adjustHandle(kind, w, h, adjust) {
+        const value = adjust === undefined || adjust === null ? DEFAULT_ADJUST[kind] : adjust;
+        const short = Math.min(w, h);
+        const round2 = App.util.round2;
+        switch (kind) {
+            case 'roundRect': return { x: round2(Math.min(value * short, short / 2)), y: 0 };
+            case 'chevron':
+            case 'pentagon': return { x: round2(w - Math.min(value * short, w)), y: 0 };
+            case 'callout': return { x: round2(value[0] * w), y: round2(value[1] * h) };
+            default: return null;
+        }
+    };
+
+    /* The adjust value for the yellow handle dragged to `point` (box px). */
+    App.shapes.adjustFrom = function adjustFrom(kind, w, h, point) {
+        const short = Math.min(w, h) || 1;
+        const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
+        switch (kind) {
+            case 'roundRect': return round4(clamp(point.x / short, 0, 0.5));
+            case 'chevron':
+            case 'pentagon': return round4(clamp((w - point.x) / short, 0, w / short));
+            case 'callout': return [round4(point.x / (w || 1)), round4(point.y / (h || 1))];
+            default: return null;
+        }
+    };
+
+    // ---------------------------------------------------------------
     // The shape element
     // ---------------------------------------------------------------
 
@@ -7521,13 +7593,37 @@ App.template.newDeckHtml = function newDeckHtml() {
         head: 'fill: ' + ACCENT + '; stroke: none;',
     };
 
+    /* A shape's adjust value: its data-adjust, else the kind's default (null for kinds without one). */
+    App.shapes.adjustOf = function adjustOf(element) {
+        const text = element.getAttribute('data-adjust');
+        if (text === null) {
+            const fallback = DEFAULT_ADJUST[element.getAttribute('data-shape')];
+            return fallback === undefined ? null : fallback;
+        }
+        return text.indexOf(' ') !== -1 ? text.split(' ').map(Number) : Number(text);
+    };
+
+    /* Set a shape's adjust value (number, or [x, y] for a callout's tail) and draw it again. */
+    App.shapes.setAdjust = function setAdjust(element, adjust) {
+        element.setAttribute('data-adjust', Array.isArray(adjust) ? adjust.join(' ') : String(adjust));
+        App.shapes.render(element);
+    };
+
+    /* A line's new box and flip (moveLineEnd), drawn again. */
+    App.shapes.setLine = function setLine(element, placed) {
+        App.transform.writeRect(element, placed.rect);
+        if (placed.flip) {
+            element.setAttribute('data-flip', placed.flip);
+        } else {
+            element.removeAttribute('data-flip');
+        }
+        App.shapes.render(element);
+    };
+
     function optionsOf(element) {
-        const adjustText = element.getAttribute('data-adjust');
         const line = element.querySelector('path.shape-line');
-        const adjust = adjustText === null ? null
-            : adjustText.indexOf(' ') !== -1 ? adjustText.split(' ').map(Number) : Number(adjustText);
         return {
-            adjust: adjust, flip: element.getAttribute('data-flip') || '',
+            adjust: App.shapes.adjustOf(element), flip: element.getAttribute('data-flip') || '',
             lineWidth: line ? parseFloat(line.style.strokeWidth) || LINE_WIDTH : LINE_WIDTH,
         };
     }
@@ -7548,7 +7644,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         svg.setAttribute('width', '100%');
         svg.setAttribute('height', '100%');
         svg.setAttribute('aria-hidden', 'true');
-        svg.setAttribute('style', 'position: absolute; left: 0; top: 0; overflow: visible;');
+        // At least 1 px: a browser draws nothing in an svg 0 px tall or wide (a flat line); the line still overflows it.
+        svg.setAttribute('style', 'position: absolute; left: 0; top: 0; overflow: visible; min-width: 1px; min-height: 1px;');
         App.shapes.geometry(kind, rect.width, rect.height, { flip: flip }).forEach((part) => {
             const path = doc.createElementNS(SVG_NS, 'path');
             path.setAttribute('class', 'shape-' + part.part);
@@ -7663,6 +7760,11 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         const rect = App.transform.readRect(element);
+        const svg = element.querySelector('svg.shape-svg');
+        if (svg && !svg.style.minHeight) {
+            svg.style.minWidth = '1px';   // drawn before flat lines showed (Phase 5 step 5)
+            svg.style.minHeight = '1px';
+        }
         const parts = App.shapes.geometry(kind, rect.width, rect.height, optionsOf(element));
         parts.forEach((part) => {
             const path = element.querySelector('svg.shape-svg > path.shape-' + part.part);
@@ -10334,12 +10436,35 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     };
 
+    // Shapes (Phase 5): a line or arrow has a handle at each end instead of the 8; some shapes a yellow one.
+    const SHAPE_HANDLES = ['start', 'end', 'adjust'];
+
     function buildBox() {
         const element = App.util.el('div', { class: 'selection-box', hidden: true });
-        App.transform.HANDLES.forEach((handle) => {
+        App.transform.HANDLES.concat(SHAPE_HANDLES).forEach((handle) => {
             element.appendChild(App.util.el('div', { class: 'selection-handle', 'data-handle': handle }));
         });
         return element;
+    }
+
+    function placeHandle(name, point) {
+        const handle = box.querySelector('[data-handle="' + name + '"]');
+        handle.hidden = !point;
+        if (point) {
+            handle.style.left = point.x + 'px';
+            handle.style.top = point.y + 'px';
+        }
+    }
+
+    /* A line's end handles (the box's own 8 hidden) and a shape's yellow handle, in box px. */
+    function placeShapeHandles(element, rect) {
+        const kind = element.getAttribute('data-type') === 'shape' ? element.getAttribute('data-shape') : null;
+        const line = !!kind && App.shapes.isLine(kind);
+        box.classList.toggle('line', line);
+        const ends = line ? App.shapes.lineEnds(rect, element.getAttribute('data-flip') || '') : null;
+        placeHandle('start', ends && { x: ends.start.x - rect.left, y: ends.start.y - rect.top });
+        placeHandle('end', ends && { x: ends.end.x - rect.left, y: ends.end.y - rect.top });
+        placeHandle('adjust', kind && !line ? App.shapes.adjustHandle(kind, rect.width, rect.height, App.shapes.adjustOf(element)) : null);
     }
 
     // ---------------------------------------------------------------
@@ -10388,7 +10513,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         box.hidden = !element;
         if (element) {
-            App.transform.writeRect(box, App.transform.readRect(element));
+            const rect = App.transform.readRect(element);
+            App.transform.writeRect(box, rect);
+            placeShapeHandles(element, rect);
         }
     };
 
@@ -10499,7 +10626,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const handle = event.target.getAttribute && event.target.getAttribute('data-handle');
         if (handle && event.button === 0) {
-            startDrag(event, 'resize', handle);
+            startDrag(event, handle === 'adjust' ? 'adjust' : handle === 'start' || handle === 'end' ? 'line' : 'resize', handle);
             return;
         }
         const point = toSlidePoint(event);
@@ -10612,9 +10739,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         overlay.addEventListener('pointerup', onUp);
     }
 
+    const DRAG_LABELS = { move: 'Move', resize: 'Resize', line: 'Move line end', adjust: 'Adjust shape' };
+
     /*
-     * Follow the mouse until it is released. kind is 'move' or 'resize';
-     * Shift while resizing keeps the aspect ratio (a picture's corners always do).
+     * Follow the mouse until it is released. kind is 'move', 'resize', 'line'
+     * (a line's end handle: 'start' or 'end') or 'adjust' (a shape's yellow
+     * handle). Shift while resizing keeps the aspect ratio (a picture's corners
+     * always do); on a line's end it snaps to 45 degrees.
      */
     function startDrag(downEvent, kind, handle) {
         const element = App.selection.getElement();
@@ -10623,6 +10754,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         const startRect = App.transform.readRect(element);
+        const startFlip = element.getAttribute('data-flip') || '';
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
         let started = false;
@@ -10638,13 +10770,19 @@ App.template.newDeckHtml = function newDeckHtml() {
                 }
                 started = true;
                 dragging = true;
-                App.history.begin(kind === 'move' ? 'Move' : 'Resize', { slideId: slide.getAttribute('data-slide-id') });
+                App.history.begin(DRAG_LABELS[kind], { slideId: slide.getAttribute('data-slide-id') });
             }
-            const rect = kind === 'move'
-                ? App.transform.moveRect(startRect, dx, dy)
-                : App.transform.resizeRect(startRect, handle, dx, dy,
-                    App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey));
-            App.transform.writeRect(element, rect);
+            if (kind === 'line') {
+                App.shapes.setLine(element, App.shapes.moveLineEnd(startRect, startFlip, handle, point, event.shiftKey));
+            } else if (kind === 'adjust') {
+                App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
+                    startRect.height, { x: point.x - startRect.left, y: point.y - startRect.top }));
+            } else {
+                App.transform.writeRect(element, kind === 'move'
+                    ? App.transform.moveRect(startRect, dx, dy)
+                    : App.transform.resizeRect(startRect, handle, dx, dy,
+                        App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey)));
+            }
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
                 App.tables.fitTable(element, { resized: true });   // a table's columns and rows follow the box

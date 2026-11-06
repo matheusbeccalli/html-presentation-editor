@@ -67,7 +67,7 @@ test('shapes: the shape element follows the deck contract (accent fill, no outli
     const element = App.shapes.createShape(doc, 'pentagon', { left: 10, top: 20, width: 200, height: 80 }, 'e5', '');
     assertEqual(element.outerHTML, '<div class="el" data-type="shape" data-shape="pentagon" data-id="e5" ' +
         'style="left: 10px; top: 20px; width: 200px; height: 80px;">' +
-        '<svg class="shape-svg" width="100%" height="100%" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible;">' +
+        '<svg class="shape-svg" width="100%" height="100%" aria-hidden="true" style="position: absolute; left: 0; top: 0; overflow: visible; min-width: 1px; min-height: 1px;">' +
         '<path class="shape-fill" style="fill: var(--color-accent, #1F2A44); stroke: none;" d="M0 0H160L200 40L160 80H0Z"></path></svg>' +
         '<div class="shape-text" style="' + App.shapes.TEXT_STYLE + '"><p data-list="none" data-level="1"><br></p></div></div>');
     const line = App.shapes.createShape(doc, 'arrow', { left: 0, top: 0, width: 200, height: 0 }, 'e6', 'x');
@@ -173,4 +173,47 @@ test('text: a shape\'s text is a container like a text box or a cell (find, undo
     assertEqual(App.text.findContainer(doc, 's1', 'e7'), shape);
     assert(App.text.containersIn(doc.querySelector('section')).indexOf(text) !== -1, 'find & replace walks it');
     assertEqual(App.text.textOf(shape), text, 'the text a selected shape\'s Font buttons change');
+});
+
+test('shapes: a line\'s two ends in slide px, from its box and flip', () => {
+    assertEqual(App.shapes.lineEnds({ left: 100, top: 600, width: 200, height: 50 }, 'y'),
+        { start: { x: 100, y: 650 }, end: { x: 300, y: 600 } });
+    assertEqual(App.shapes.lineEnds({ left: 100, top: 600, width: 200, height: 0 }, 'x'),
+        { start: { x: 300, y: 600 }, end: { x: 100, y: 600 } });
+});
+
+test('shapes: dragging one end of a line moves only that end; Shift snaps it to 45 degrees round the other', () => {
+    const rect = { left: 100, top: 600, width: 200, height: 50 };   // from (100, 650) up to (300, 600)
+    assertEqual(App.shapes.moveLineEnd(rect, 'y', 'end', { x: 50, y: 700 }, false),
+        { rect: { left: 50, top: 650, width: 50, height: 50 }, flip: 'x' }, 'the end dragged past the start, down');
+    assertEqual(App.shapes.moveLineEnd(rect, 'y', 'start', { x: 100, y: 610 }, true),
+        { rect: { left: 100, top: 600, width: 200, height: 0 }, flip: '' }, 'Shift: flat, the end kept');
+    assertEqual(App.shapes.moveLineEnd(rect, 'y', 'start', { x: 400, y: 600 }, false),
+        { rect: { left: 300, top: 600, width: 100, height: 0 }, flip: 'x' }, 'the start dragged past the end: it still points to the end');
+});
+
+test('shapes: the yellow handle of each kind, and what a drag of it sets', () => {
+    assertEqual(App.shapes.adjustHandle('chevron', 200, 80, null), { x: 160, y: 0 }, 'at the start of the point');
+    assertEqual(App.shapes.adjustFrom('chevron', 200, 80, { x: 120, y: 5 }), 1, 'a point 80 px deep: the whole height');
+    assertEqual(App.shapes.adjustFrom('chevron', 200, 80, { x: 250, y: 0 }), 0, 'no point');
+    assertEqual(App.shapes.adjustFrom('pentagon', 200, 80, { x: -50, y: 0 }), 2.5, 'at most all of it');
+    assertEqual(App.shapes.adjustHandle('roundRect', 120, 60, null), { x: 10, y: 0 });
+    assertEqual(App.shapes.adjustFrom('roundRect', 120, 60, { x: 20, y: 3 }), 0.3333);
+    assertEqual(App.shapes.adjustFrom('roundRect', 120, 60, { x: 40, y: 0 }), 0.5, 'at most a half circle');
+    assertEqual(App.shapes.adjustHandle('callout', 160, 120, null), { x: 33.33, y: 150 }, 'the tail\'s tip');
+    assertEqual(App.shapes.adjustFrom('callout', 160, 120, { x: 80, y: -40 }), [0.5, -0.3333]);
+    assertEqual([App.shapes.adjustHandle('rect', 100, 100, null), App.shapes.adjustHandle('line', 100, 0, null)], [null, null]);
+});
+
+test('shapes: data-adjust changes the drawing', () => {
+    const chevron = newShape('chevron');
+    App.shapes.setAdjust(chevron, 1);
+    assertEqual(chevron.getAttribute('data-adjust'), '1');
+    assertEqual(chevron.querySelector('path').getAttribute('d'), 'M0 0H120L200 40L120 80H0L80 40Z');
+    assertEqual(App.shapes.adjustOf(chevron), 1);
+    const callout = newShape('callout', { left: 0, top: 0, width: 160, height: 120 });
+    assertEqual(App.shapes.adjustOf(callout), [0.2083, 1.25], 'the default');
+    App.shapes.setAdjust(callout, [0.5, -0.3333]);
+    assertEqual(callout.getAttribute('data-adjust'), '0.5 -0.3333');
+    assertEqual(callout.querySelector('path').getAttribute('d'), 'M0 0H26.67L80 -40L53.33 0H160V120H0Z', 'the tail on top');
 });

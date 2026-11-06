@@ -68,12 +68,35 @@
         });
     };
 
+    // Shapes (Phase 5): a line or arrow has a handle at each end instead of the 8; some shapes a yellow one.
+    const SHAPE_HANDLES = ['start', 'end', 'adjust'];
+
     function buildBox() {
         const element = App.util.el('div', { class: 'selection-box', hidden: true });
-        App.transform.HANDLES.forEach((handle) => {
+        App.transform.HANDLES.concat(SHAPE_HANDLES).forEach((handle) => {
             element.appendChild(App.util.el('div', { class: 'selection-handle', 'data-handle': handle }));
         });
         return element;
+    }
+
+    function placeHandle(name, point) {
+        const handle = box.querySelector('[data-handle="' + name + '"]');
+        handle.hidden = !point;
+        if (point) {
+            handle.style.left = point.x + 'px';
+            handle.style.top = point.y + 'px';
+        }
+    }
+
+    /* A line's end handles (the box's own 8 hidden) and a shape's yellow handle, in box px. */
+    function placeShapeHandles(element, rect) {
+        const kind = element.getAttribute('data-type') === 'shape' ? element.getAttribute('data-shape') : null;
+        const line = !!kind && App.shapes.isLine(kind);
+        box.classList.toggle('line', line);
+        const ends = line ? App.shapes.lineEnds(rect, element.getAttribute('data-flip') || '') : null;
+        placeHandle('start', ends && { x: ends.start.x - rect.left, y: ends.start.y - rect.top });
+        placeHandle('end', ends && { x: ends.end.x - rect.left, y: ends.end.y - rect.top });
+        placeHandle('adjust', kind && !line ? App.shapes.adjustHandle(kind, rect.width, rect.height, App.shapes.adjustOf(element)) : null);
     }
 
     // ---------------------------------------------------------------
@@ -122,7 +145,9 @@
         }
         box.hidden = !element;
         if (element) {
-            App.transform.writeRect(box, App.transform.readRect(element));
+            const rect = App.transform.readRect(element);
+            App.transform.writeRect(box, rect);
+            placeShapeHandles(element, rect);
         }
     };
 
@@ -233,7 +258,7 @@
         }
         const handle = event.target.getAttribute && event.target.getAttribute('data-handle');
         if (handle && event.button === 0) {
-            startDrag(event, 'resize', handle);
+            startDrag(event, handle === 'adjust' ? 'adjust' : handle === 'start' || handle === 'end' ? 'line' : 'resize', handle);
             return;
         }
         const point = toSlidePoint(event);
@@ -346,9 +371,13 @@
         overlay.addEventListener('pointerup', onUp);
     }
 
+    const DRAG_LABELS = { move: 'Move', resize: 'Resize', line: 'Move line end', adjust: 'Adjust shape' };
+
     /*
-     * Follow the mouse until it is released. kind is 'move' or 'resize';
-     * Shift while resizing keeps the aspect ratio (a picture's corners always do).
+     * Follow the mouse until it is released. kind is 'move', 'resize', 'line'
+     * (a line's end handle: 'start' or 'end') or 'adjust' (a shape's yellow
+     * handle). Shift while resizing keeps the aspect ratio (a picture's corners
+     * always do); on a line's end it snaps to 45 degrees.
      */
     function startDrag(downEvent, kind, handle) {
         const element = App.selection.getElement();
@@ -357,6 +386,7 @@
             return;
         }
         const startRect = App.transform.readRect(element);
+        const startFlip = element.getAttribute('data-flip') || '';
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
         let started = false;
@@ -372,13 +402,19 @@
                 }
                 started = true;
                 dragging = true;
-                App.history.begin(kind === 'move' ? 'Move' : 'Resize', { slideId: slide.getAttribute('data-slide-id') });
+                App.history.begin(DRAG_LABELS[kind], { slideId: slide.getAttribute('data-slide-id') });
             }
-            const rect = kind === 'move'
-                ? App.transform.moveRect(startRect, dx, dy)
-                : App.transform.resizeRect(startRect, handle, dx, dy,
-                    App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey));
-            App.transform.writeRect(element, rect);
+            if (kind === 'line') {
+                App.shapes.setLine(element, App.shapes.moveLineEnd(startRect, startFlip, handle, point, event.shiftKey));
+            } else if (kind === 'adjust') {
+                App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
+                    startRect.height, { x: point.x - startRect.left, y: point.y - startRect.top }));
+            } else {
+                App.transform.writeRect(element, kind === 'move'
+                    ? App.transform.moveRect(startRect, dx, dy)
+                    : App.transform.resizeRect(startRect, handle, dx, dy,
+                        App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey)));
+            }
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
                 App.tables.fitTable(element, { resized: true });   // a table's columns and rows follow the box

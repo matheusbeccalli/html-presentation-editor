@@ -2546,6 +2546,100 @@ def test_shape_text(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def dark_pixels(page, top_left, bottom_right):
+    """How many pixels in that part of the window are dark (painted), counted from a real screenshot."""
+    clip = {"x": top_left[0], "y": top_left[1], "width": bottom_right[0] - top_left[0], "height": bottom_right[1] - top_left[1]}
+    png = base64.b64encode(page.screenshot(clip=clip)).decode()
+    return page.evaluate("""(png) => new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width; canvas.height = image.height;
+            const context = canvas.getContext('2d');
+            context.drawImage(image, 0, 0);
+            const data = context.getImageData(0, 0, image.width, image.height).data;
+            let dark = 0;
+            for (let i = 0; i < data.length; i += 4) if (data[i] + data[i + 1] + data[i + 2] < 300) dark++;
+            resolve(dark);
+        };
+        image.src = 'data:image/png;base64,' + png;
+    })""", png)
+
+
+def handle_centre(page, name):
+    box = page.locator(f"#overlay .selection-handle[data-handle='{name}']").bounding_box()
+    return (box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+
+
+def test_line_and_adjust_handles(browser):
+    """A line or arrow has a handle at each end (Shift: 45 degrees round the other end), the yellow handle changes a
+    chevron's point or a callout's tail; each drag is one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    selected = lambda: page.evaluate("App.selection.selectedId()")  # noqa: E731
+    info = lambda: page.evaluate(SHAPE_INFO, selected())  # noqa: E731
+    rounded = lambda rect: {k: round(v) for k, v in rect.items()}  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    page.evaluate("App.deck.goTo(4)")
+    page.click(".ribbon-tab[data-tab='insert']")
+
+    def insert(kind, start, end=None):
+        page.click(".ribbon-button.shapes-button")
+        page.click(f".shape-gallery-item[data-shape='{kind}']")
+        if end:
+            drag(page, slide_to_screen(page, *start), slide_to_screen(page, *end))
+        else:
+            page.mouse.click(*slide_to_screen(page, *start))
+
+    # A line: two end handles, not the eight box handles.
+    insert("arrow", (100, 650), (300, 600))
+    check(page.is_visible("#overlay .selection-handle[data-handle='start']") and
+          page.is_visible("#overlay .selection-handle[data-handle='end']") and
+          page.is_hidden("#overlay .selection-handle[data-handle='e']"), "end handles instead of box handles")
+    near = lambda a, b: abs(a[0] - b[0]) < 2 and abs(a[1] - b[1]) < 2  # noqa: E731
+    check(near(handle_centre(page, "start"), slide_to_screen(page, 100, 650)) and
+          near(handle_centre(page, "end"), slide_to_screen(page, 300, 600)), "on the line's ends")
+
+    # The end dragged left past the start: the head goes with it; one undo step.
+    drag(page, handle_centre(page, "end"), slide_to_screen(page, 50, 700))
+    arrow = info()
+    check(rounded(arrow["rect"]) == {"left": 50, "top": 650, "width": 50, "height": 50} and arrow["flip"] == "x",
+          f"the end moved: {arrow}")
+    check(arrow["paths"][1].startswith("M0 50L"), f"the head at the new end (bottom left): {arrow['paths']}")
+    check(label() == "Move line end", f"one undo step: {label()}")
+    page.keyboard.press("Control+z")
+    check(rounded(info()["rect"]) == {"left": 100, "top": 600, "width": 200, "height": 50}, "undone")
+
+    # Shift: the start snaps flat round the end.
+    page.keyboard.down("Shift")
+    drag(page, handle_centre(page, "start"), slide_to_screen(page, 100, 610))
+    page.keyboard.up("Shift")
+    check(rounded(info()["rect"]) == {"left": 100, "top": 600, "width": 200, "height": 0}, f"flat: {info()['rect']}")
+    page.keyboard.press("Escape")   # no selection drawn over it
+    drawn = dark_pixels(page, slide_to_screen(page, 150, 590), slide_to_screen(page, 250, 610))
+    check(drawn > 50, f"a flat arrow is still drawn (an svg 0 px tall draws nothing): {drawn} dark pixels")
+    page.mouse.click(*slide_to_screen(page, 200, 601))
+
+    # A chevron's yellow handle: a deeper point.
+    insert("chevron", (300, 450))
+    check(near(handle_centre(page, "adjust"), slide_to_screen(page, 460, 450)), "the yellow handle at the start of the point")
+    color = page.evaluate("getComputedStyle(document.querySelector(\"#overlay .selection-handle[data-handle='adjust']\")).backgroundColor")
+    check(color == "rgb(255, 214, 0)", f"yellow: {color}")
+    drag(page, handle_centre(page, "adjust"), slide_to_screen(page, 420, 450))
+    check(info()["paths"][0] == "M0 0H120L200 40L120 80H0L80 40Z" and label() == "Adjust shape", f"a deeper point: {info()}")
+    page.keyboard.press("Control+z")
+    check(info()["paths"][0] == "M0 0H160L200 40L160 80H0L40 40Z", "undone")
+
+    # A callout's yellow handle moves its tail's tip, even above the box.
+    insert("callout", (700, 300))
+    drag(page, handle_centre(page, "adjust"), slide_to_screen(page, 780, 260))
+    callout = page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').getAttribute('data-adjust')", selected())
+    check(callout == "0.5 -0.3333", f"the tail points up: {callout}")
+    page.screenshot(path=str(OUTPUT / "60-shape-handles.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -2787,7 +2881,7 @@ def test_select_move_resize(browser):
     # Click selects; the box with 8 handles sits exactly on the element.
     page.mouse.click(*slide_to_screen(page, 300, 290))
     check(page.evaluate(selected) == "e2", "click selects the text box e2")
-    check(page.locator("#overlay .selection-handle").count() == 8, "8 resize handles")
+    check(page.locator("#overlay .selection-handle:visible").count() == 8, "8 resize handles")
     check(page.is_visible("#overlay .selection-box"), "selection box visible")
     box = page.evaluate("App.transform.readRect(document.querySelector('#overlay .selection-box'))")
     check(box == element_rect(page, "e2"), f"box matches the element: {box}")
@@ -3611,6 +3705,7 @@ TESTS = [
     test_insert_shapes,
     test_shape_format,
     test_shape_text,
+    test_line_and_adjust_handles,
 ]
 
 

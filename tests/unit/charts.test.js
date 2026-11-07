@@ -186,7 +186,7 @@ test('charts: redraw after a resize draws at the new size; a type not drawn yet 
     const doc = parseDoc('<figure class="el" data-type="chart" style="width: 400px; height: 200px">' +
         '<script type="application/json" class="chart-data">' + JSON.stringify(COLUMNS) + '</script><svg></svg></figure>' +
         '<figure class="el" data-type="chart" style="width: 400px; height: 200px">' +
-        '<script type="application/json" class="chart-data">{"type":"waterfall"}</script><svg id="hand-drawn"></svg></figure>');
+        '<script type="application/json" class="chart-data">{"type":"radar"}</script><svg id="hand-drawn"></svg></figure>');
     const [figure, combo] = doc.querySelectorAll('figure');
     figure.style.width = '500px';
     App.charts.redraw(figure);
@@ -293,4 +293,50 @@ test('charts: pie: wedges from the centre; empty and negative values are left ou
     assertEqual(texts(pie, '.chart-data-label'), ['75%', '25%']);
     const whole = drawn({ version: 1, type: 'pie', categories: ['A'], series: [{ name: 'S', values: [5] }] });
     assertEqual(whole.querySelectorAll('path.chart-slice').length, 1, 'drawn even at 100%');
+});
+
+// ---------------------------------------------------------------------------
+// Waterfall (Phase 6 step 3)
+// ---------------------------------------------------------------------------
+
+const BRIDGE = {
+    version: 1, type: 'waterfall',
+    categories: ['EBITDA 2024', 'Novos parques', 'Eficiência', 'Custos corporativos', 'EBITDA 2026E'],
+    series: [{ name: 'R$ mn', values: [240, 95, 30, -25, 340] }], options: { title: 'Ponte do EBITDA (R$ mn)' },
+};
+
+test('charts: waterfall steps: without roles the first bar is the start and the last the end (as Copilot writes them)', () => {
+    const steps = App.charts.waterfallSteps(App.charts.modelOf(BRIDGE));
+    assertEqual(steps.map((step) => [step.role, step.from, step.to]),
+        [['start', 0, 240], ['delta', 240, 335], ['delta', 335, 365], ['delta', 365, 340], ['end', 0, 340]]);
+    assertEqual(steps.map((step) => step.kind), ['total', 'increase', 'increase', 'decrease', 'total']);
+});
+
+test('charts: waterfall roles: a subtotal; a total left empty is the running total', () => {
+    const steps = App.charts.waterfallSteps(App.charts.modelOf({
+        type: 'waterfall', categories: ['A', 'B', 'Sub', 'C', 'Fim'], roles: ['start', 'delta', 'subtotal', 'delta', 'end'],
+        series: [{ name: 'x', values: [100, -30, null, 50, null] }],
+    }));
+    assertEqual(steps.map((step) => [step.from, step.to]), [[0, 100], [100, 70], [0, 70], [70, 120], [0, 120]]);
+});
+
+test('charts: a waterfall draws floating bars, green up, red down, totals in the accent, with connectors', () => {
+    const svg = drawn(Object.assign({}, BRIDGE, { estimates: [false, false, false, false, true] }), 760, 420);
+    const found = bars(svg);
+    assertEqual(found.length, 5);
+    assert(near(found[1].y + found[1].height, found[0].y), 'the first increase starts at the top of the start bar');
+    assert(near(found[3].y, found[2].y), 'the decrease hangs from the level reached');
+    const fills = Array.from(svg.querySelectorAll('rect.chart-bar'), (rect) => rect.getAttribute('style'));
+    assertIncludes(fills[1], '#3C9D5D');
+    assertIncludes(fills[3], '#D9534F');
+    assertIncludes(fills[0], 'var(--color-accent');
+    assertIncludes(fills[4], 'fill-opacity: 0.5', 'the 2026E end lighter');
+    const connectors = Array.from(svg.querySelectorAll('.chart-connector'), (line) => Number(line.getAttribute('y1')));
+    assertEqual(connectors.length, 4);
+    assert(near(connectors[0], found[0].y) && near(connectors[2], found[2].y), 'at each level reached');
+    assertEqual(texts(svg, '.chart-data-label'), ['240', '+95', '+30', '-25', '340'], 'labelled by default, changes signed');
+    const parens = drawn(Object.assign({}, BRIDGE, { options: { parens: true } }));
+    assert(texts(parens, '.chart-data-label').indexOf('(25)') !== -1, 'negatives in parentheses when asked');
+    const colours = drawn(Object.assign({}, BRIDGE, { options: { waterfall: { increase: '#0070c0' } } }));
+    assertIncludes(colours.querySelectorAll('rect.chart-bar')[1].getAttribute('style'), '#0070c0');
 });

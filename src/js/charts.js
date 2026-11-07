@@ -17,7 +17,8 @@
  *
  * Drawn so far: column, stacked-column, bar, stacked-bar (step 1); line,
  * combo (columns and lines, a second value axis on the right for series with
- * "axis": "secondary"), donut and pie (step 2).
+ * "axis": "secondary"), donut and pie (step 2); waterfall (step 3: a "roles"
+ * list beside "categories": start, delta, subtotal, end).
  * Other types still get the Phase 1 placeholder (a grey frame with the
  * title), marked data-chart-placeholder, which renderMissing draws properly
  * on open once the type can be drawn. A chart drawn by hand (a deck's own
@@ -157,7 +158,7 @@
     // The chart's data, made safe to draw
     // ---------------------------------------------------------------
 
-    const DRAWN = ['column', 'stacked-column', 'bar', 'stacked-bar', 'line', 'combo', 'donut', 'pie'];
+    const DRAWN = ['column', 'stacked-column', 'bar', 'stacked-bar', 'line', 'combo', 'donut', 'pie', 'waterfall'];
     const PALETTE = [
         'var(--color-accent, #1F2A44)', 'var(--color-primary, #CC092F)',
         'color-mix(in srgb, var(--color-accent, #1F2A44) 55%, white)', 'color-mix(in srgb, var(--color-primary, #CC092F) 55%, white)',
@@ -169,7 +170,8 @@
         return DRAWN.indexOf(type) !== -1;
     };
 
-    function modelOf(data) {
+    /* Chart data made safe to draw: { type, categories, series, estimates, roles, options }. */
+    App.charts.modelOf = function modelOf(data) {
         const categories = (Array.isArray(data.categories) ? data.categories : []).map((name) => String(name));
         const series = (Array.isArray(data.series) ? data.series : []).map((item, index) => {
             const values = Array.isArray(item && item.values) ? item.values : [];
@@ -191,8 +193,28 @@
         return {
             type: data.type, categories: categories, series: series,
             estimates: categories.map((name, i) => !!estimates[i]),
+            roles: rolesOf(data.roles, categories.length),
             options: Object.assign({}, data.options),
         };
+    };
+
+    /*
+     * A waterfall's role per category: 'start', 'delta' (an increase or a
+     * decrease, by its sign), 'subtotal' or 'end'. Without roles (as Copilot
+     * writes a bridge): the first is the start, the last the end.
+     */
+    function rolesOf(given, count) {
+        const roles = Array.isArray(given) ? given : [];
+        return Array.from({ length: count }, (unused, i) => {
+            const role = roles[i];
+            if (role === 'start' || role === 'subtotal' || role === 'end') {
+                return role;
+            }
+            if (role === 'delta' || role === 'increase' || role === 'decrease') {
+                return 'delta';
+            }
+            return i === 0 ? 'start' : i === count - 1 && count > 1 ? 'end' : 'delta';
+        });
     }
 
     /*
@@ -611,6 +633,110 @@
     }
 
     // ---------------------------------------------------------------
+    // Waterfall (a bridge)
+    // ---------------------------------------------------------------
+
+    // Decided in the Phase 6 Q&A: totals in the accent, increases green, decreases red (options.waterfall changes them).
+    const WATERFALL_COLORS = { total: PALETTE[0], increase: '#3C9D5D', decrease: '#D9534F' };
+
+    /*
+     * Each bar of a waterfall: { role, kind ('total' | 'increase' | 'decrease'),
+     * from, to, value }. A change floats from the level reached so far; a
+     * start, subtotal or end stands on zero at its own value (as Excel does),
+     * or at the level reached when its value is empty, and the next bars go on from it.
+     */
+    App.charts.waterfallSteps = function waterfallSteps(m) {
+        const values = m.series.length > 0 ? m.series[0].values : [];
+        let level = 0;
+        return m.categories.map((name, i) => {
+            const role = m.roles[i];
+            const value = values[i];
+            if (role !== 'delta') {
+                level = value === null || value === undefined ? level : value;
+                return { role: role, kind: 'total', from: 0, to: level, value: level };
+            }
+            const change = value === null || value === undefined ? 0 : value;
+            const from = level;
+            level += change;
+            return { role: role, kind: change >= 0 ? 'increase' : 'decrease', from: from, to: level, value: change };
+        });
+    };
+
+    function drawWaterfall(m, width, height) {
+        const locale = m.options.locale || 'pt-BR';
+        const colors = Object.assign({}, WATERFALL_COLORS, m.options.waterfall);
+        const steps = App.charts.waterfallSteps(m);
+        const parts = [];
+        const area = frame(m, width, height, [], parts);
+        const length = area.bottom - area.top - ROW;
+        const low = Math.min(0, ...steps.map((step) => Math.min(step.from, step.to)));
+        const high = Math.max(0, ...steps.map((step) => Math.max(step.from, step.to)));
+        const ticks = App.charts.niceTicks(low, high, Math.max(2, Math.min(6, Math.floor(length / 45))));
+        const step = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
+        const tickLabels = ticks.map((tick) => App.charts.formatValue(tick, { locale: locale, decimals: App.charts.decimalsOf([step]) }));
+
+        const plot = Object.assign({}, area);
+        plot.bottom -= ROW;
+        plot.left += Math.max(...tickLabels.map((label) => textWidth(label, LABEL_SIZE))) + 6;
+        const first = ticks[0];
+        const last = ticks[ticks.length - 1];
+        const at = (value) => plot.bottom - (value - first) / (last - first) * (plot.bottom - plot.top);
+
+        const grid = [];
+        ticks.forEach((tick, index) => {
+            if (m.options.gridlines !== false) {
+                grid.push(line('chart-gridline', plot.left, at(tick), plot.right, at(tick), GRID_COLOR));
+            }
+            grid.push(text('chart-value-label', plot.left - 6, at(tick) + MIDDLE, tickLabels[index],
+                { 'font-size': LABEL_SIZE, 'text-anchor': 'end', fill: TEXT_COLOR }));
+        });
+        parts.push('<g class="chart-axis">' + grid.join('') + '</g>');
+
+        const count = Math.max(steps.length, 1);
+        const band = (plot.right - plot.left) / count;
+        const gap = (typeof m.options.gapWidth === 'number' ? m.options.gapWidth : 60) / 100;
+        const thick = band / (1 + gap);
+        const values = m.series.length > 0 ? m.series[0].values : [];
+        const format = { locale: locale, parens: !!m.options.parens, decimals: App.charts.decimalsOf(values) };
+        const rects = [];
+        const connectors = [];
+        const labels = [];
+        steps.forEach((bar, i) => {
+            const color = colors[bar.kind];
+            const box = { x: plot.left + band * i + (band - thick) / 2, y: at(Math.max(bar.from, bar.to)),
+                width: thick, height: Math.abs(at(bar.from) - at(bar.to)) };
+            let style = 'fill: ' + color + ';';
+            if (m.estimates[i]) {
+                style += ' fill-opacity: 0.5; stroke: ' + color + '; stroke-width: 1; stroke-dasharray: 3 2;';
+            }
+            rects.push('<rect class="chart-bar" data-role="' + bar.kind + '" x="' + n(box.x) + '" y="' + n(box.y) +
+                '" width="' + n(box.width) + '" height="' + n(box.height) + '" style="' + style + '"/>');
+            if (i < steps.length - 1) {
+                // From this bar's level to the next bar, at the level the next one starts from.
+                const level = at(bar.to);
+                connectors.push(line('chart-connector', box.x + thick, level, box.x + band, level, AXIS_COLOR));
+            }
+            if (m.options.dataLabels !== false) {
+                let content = App.charts.formatValue(bar.value, format);
+                if (bar.kind === 'increase') {
+                    content = '+' + content;
+                }
+                const below = bar.kind === 'decrease' || (bar.kind === 'total' && bar.value < 0);
+                labels.push(text('chart-data-label', box.x + thick / 2, below ? box.y + box.height + 14 : box.y - 4, content,
+                    { 'font-size': 13, fill: TEXT_COLOR, 'text-anchor': 'middle', style: HALO }));
+            }
+        });
+        parts.push('<g class="chart-series" data-series="0">' + rects.join('') + '</g>');
+        parts.push('<g class="chart-connectors">' + connectors.join('') + '</g>');
+        parts.push(line('chart-axis-line', plot.left, at(0), plot.right, at(0), AXIS_COLOR));
+        parts.push('<g class="chart-categories">' + m.categories.map((name, i) => text('chart-category-label',
+            plot.left + band * (i + 0.5), plot.bottom + LABEL_SIZE + 2, name,
+            { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR })).join('') + '</g>');
+        parts.push('<g class="chart-data-labels">' + labels.join('') + '</g>');
+        return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
+    }
+
+    // ---------------------------------------------------------------
     // render, redraw
     // ---------------------------------------------------------------
 
@@ -620,7 +746,10 @@
         if (!App.charts.canDraw(safe.type)) {
             return placeholder(safe, width, height);
         }
-        const model = modelOf(safe);
+        const model = App.charts.modelOf(safe);
+        if (model.type === 'waterfall') {
+            return drawWaterfall(model, width, height);
+        }
         return isRound(model.type) ? drawRound(model, width, height) : drawCartesian(model, width, height);
     };
 

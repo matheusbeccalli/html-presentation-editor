@@ -229,7 +229,7 @@ Nested bullets are the top priority of this phase.
 
 - [x] Chart element stores JSON (`<script type="application/json" class="chart-data">`) plus a static SVG rendering *(a Copilot chart (data, no drawing) is drawn on open; a drawing the deck brought itself is kept until the chart is edited or resized, so opening and saving changes nothing)*
 - [x] Pure renderer `App.charts.render(json, width, height)` → SVG string; deterministic *(no measuring: text widths estimated from their length; types not drawn yet keep the grey placeholder)*
-- [ ] Priority 1 types: clustered column, stacked column, horizontal bar, line, combo (columns + line on secondary axis), waterfall, donut / pie
+- [x] Priority 1 types: clustered column, stacked column, horizontal bar, line, combo (columns + line on secondary axis), waterfall, donut / pie *(clustered and stacked columns, horizontal and stacked bars, line (dashed into estimate years), combo (a second value axis on the right, in % for a margin), waterfall, donut and pie)*
 - [ ] Priority 2 types: 100% stacked column / stacked bar, scatter / bubble, area
 - [x] Resizing re-renders at the new size (never stretches the SVG) *(handles and Format pane; the text keeps its size; one undo step)*
 - [ ] "Nice" axis ticks; label collision handling (shrink, rotate or skip category labels)
@@ -237,7 +237,7 @@ Nested bullets are the top priority of this phase.
 - [ ] Data editor: paste from Excel into the grid; add/remove rows and series; reorder by dragging
 - [ ] Per series: name, color, chart type and axis (primary/secondary) for combo charts
 - [ ] Per category: mark as estimate/projection (lighter fill or hatching, optional "E" suffix)
-- [ ] Waterfall row roles: start, increase/decrease, subtotal, end; automatic (configurable) positive/negative colors; connector lines
+- [x] Waterfall row roles: start, increase/decrease, subtotal, end; automatic (configurable) positive/negative colors; connector lines *(roles stored as "roles" beside the categories; without them (as Copilot writes a bridge) the first bar is the start and the last the end; a total stands at its own value, or the running total when left empty, as in Excel; increases green, decreases red, totals in the accent, changeable in the chart's options (on screen from the Chart Design step); changes labelled +95 / -25; setting roles in the data grid comes with step 7)*
 - [ ] Live preview; every edit undoable
 - [ ] Formatting: title, axis titles, legend (top/bottom/right/hidden), gridlines on/off, axis min/max (auto by default), gap width
 - [ ] Data labels: on/off, position (inside end, outside end, center), number format (decimals, pt-BR/en-US separators, percent, negatives in parentheses, units text)
@@ -248,6 +248,7 @@ Nested bullets are the top priority of this phase.
 - [ ] **Done when:** an EBITDA bridge and a revenue-plus-margin combo chart can be built from data pasted from Excel, edited, saved, reopened, and printed to PDF with sharp lines.
   - [ ] Charts drawn: after `python3 tests/run_tests.py`, open `tests/output/charts-deck.html` (made by the tests, fake numbers): the report says 2 charts were drawn. Slide 4: columns for 2022-2025E with the 2025E pair lighter and dashed, numbers on top as 1.234, a legend at the bottom; a horizontal bar chart beside it. Drag the column chart's right edge: it is drawn again narrower, the text stays the same size; Ctrl+Z
   - [ ] Lines, combo, donut: open `tests/output/charts-step2.html` (made by the tests). Slide 4: a combo with revenue columns (numbers inside their base) and the margin as a red line with % on a right-hand axis, dashed into 2025E; a line chart; a donut with 55% / 30% / 15% and its legend on the right. Open `samples/copilot-appendix-a-deck.html`: its combo chart is drawn (the waterfall is still grey until the next step). Open `samples/contract-deck.html`, slide 4: the chart looks as before; resize it: now the editor draws it
+  - [ ] Waterfall: open `samples/copilot-appendix-a-deck.html`, slide 2: the EBITDA bridge is drawn: EBITDA 2024 and 2026E in the deck's accent, Novos parques and Eficiência green, Custos corporativos red and hanging down, thin connector lines between the bars, labels +95, +30, -25
 
 ## Phase 7: Arrange and slides
 

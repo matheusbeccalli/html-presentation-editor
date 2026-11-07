@@ -2794,8 +2794,8 @@ def test_chart_rendering(browser):
 
 
 def test_chart_lines_combo_donut(browser):
-    """Line, combo (a margin on a second % axis) and donut drawn in the editor; the Copilot sample's combo is drawn on
-    open (its waterfall still waits); a deck's own drawing is kept until the chart is resized."""
+    """Line, combo (a margin on a second % axis) and donut drawn in the editor; the Copilot sample's charts are drawn
+    on open; a deck's own drawing is kept until the chart is resized."""
     margin = {"version": 1, "type": "line", "categories": ["2022", "2023", "2024", "2025E"],
               "estimates": [False, False, False, True],
               "series": [{"name": "Margem EBITDA", "values": [0.18, 0.2, 0.21, 0.23], "format": "percent"}],
@@ -2826,7 +2826,7 @@ def test_chart_lines_combo_donut(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
 
-    # The Copilot sample: its combo drawn on open, the waterfall still a placeholder (drawn in step 3).
+    # The Copilot sample: both its charts drawn on open (the waterfall from step 3).
     editor = Editor(browser)
     editor.open(APPENDIX_A)
     editor.close_dialog_if_open()
@@ -2834,7 +2834,7 @@ def test_chart_lines_combo_donut(browser):
     kinds = page.evaluate("""() => Array.from(App.deck.getDocument().querySelectorAll('[data-type="chart"]'), (figure) =>
         [JSON.parse(figure.querySelector('script.chart-data').textContent).type,
          figure.querySelector('svg').hasAttribute('data-chart-placeholder')])""")
-    check(sorted(kinds) == [["combo", False], ["waterfall", True]], f"combo drawn, waterfall waits: {kinds}")
+    check(sorted(kinds) == [["combo", False], ["waterfall", False]], f"both drawn, no placeholder: {kinds}")
     editor.close()
 
     # The sample deck's hand-drawn combo is kept on open; resized, the editor draws it.
@@ -2848,6 +2848,27 @@ def test_chart_lines_combo_donut(browser):
     side = page.locator("#overlay .selection-handle[data-handle='e']").bounding_box()
     drag(page, (side["x"] + 4, side["y"] + 4), (side["x"] - 40, side["y"] + 4))
     check(page.evaluate(own) == "chart-svg", "resized: drawn by the editor")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
+def test_chart_waterfall(browser):
+    """The Copilot sample's EBITDA bridge (data, no roles): drawn on open as a waterfall, start and end in the accent,
+    increases green, the decrease red, connectors between the bars, changes labelled +95 / -25."""
+    editor = Editor(browser)
+    editor.open(APPENDIX_A)
+    editor.close_dialog_if_open()
+    page = editor.page
+    index = page.evaluate("""() => App.deck.getSlides().findIndex((slide) => Array.from(slide.querySelectorAll('script.chart-data'))
+        .some((script) => JSON.parse(script.textContent).type === 'waterfall'))""")
+    page.evaluate(f"App.deck.goTo({index})")
+    bridge = page.evaluate("""() => { const svg = Array.from(App.deck.getCurrentSlide().querySelectorAll('[data-type="chart"]'))
+            .find((figure) => /waterfall/.test(figure.querySelector('script.chart-data').textContent)).querySelector('svg');
+        return { roles: Array.from(svg.querySelectorAll('rect.chart-bar'), (rect) => rect.getAttribute('data-role')),
+                 connectors: svg.querySelectorAll('.chart-connector').length,
+                 labels: Array.from(svg.querySelectorAll('.chart-data-label'), (label) => label.textContent) }; }""")
+    check(bridge["roles"] == ["total", "increase", "increase", "decrease", "total"], f"start, changes, end: {bridge}")
+    check(bridge["connectors"] == 4 and bridge["labels"] == ["240", "+95", "+30", "-25", "340"], f"connectors, labels: {bridge}")
+    page.screenshot(path=str(OUTPUT / "64-waterfall.png"))
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
@@ -3920,6 +3941,7 @@ TESTS = [
     test_phase5_done_when,
     test_chart_rendering,
     test_chart_lines_combo_donut,
+    test_chart_waterfall,
 ]
 
 

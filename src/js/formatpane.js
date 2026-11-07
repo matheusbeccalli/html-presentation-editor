@@ -139,6 +139,7 @@
             App.text.fitText(element);   // autofit follows a new size
             App.tables.fitTable(element, { resized: true });   // so do a table's columns and rows
             App.shapes.render(element);   // and a shape's drawing
+            App.charts.redraw(element);   // and a chart
         });
         // history-changed redraws the selection box and this pane.
     }

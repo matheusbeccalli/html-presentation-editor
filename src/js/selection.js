@@ -419,6 +419,7 @@
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
                 App.tables.fitTable(element, { resized: true });   // a table's columns and rows follow the box
                 App.shapes.render(element);   // a shape is drawn again at its new size
+                App.charts.redraw(element);   // so is a chart: its text keeps its size
             }
             App.selection.refresh();
             App.events.emit('selection-dragged');   // the Format pane shows the values live

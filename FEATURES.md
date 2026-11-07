@@ -227,11 +227,11 @@ Nested bullets are the top priority of this phase.
 
 ## Phase 6: Charts (section 5)
 
-- [ ] Chart element stores JSON (`<script type="application/json" class="chart-data">`) plus a static SVG rendering
-- [ ] Pure renderer `App.charts.render(json, width, height)` → SVG string; deterministic
+- [x] Chart element stores JSON (`<script type="application/json" class="chart-data">`) plus a static SVG rendering *(a Copilot chart (data, no drawing) is drawn on open; a drawing the deck brought itself is kept until the chart is edited or resized, so opening and saving changes nothing)*
+- [x] Pure renderer `App.charts.render(json, width, height)` → SVG string; deterministic *(no measuring: text widths estimated from their length; types not drawn yet keep the grey placeholder)*
 - [ ] Priority 1 types: clustered column, stacked column, horizontal bar, line, combo (columns + line on secondary axis), waterfall, donut / pie
 - [ ] Priority 2 types: 100% stacked column / stacked bar, scatter / bubble, area
-- [ ] Resizing re-renders at the new size (never stretches the SVG)
+- [x] Resizing re-renders at the new size (never stretches the SVG) *(handles and Format pane; the text keeps its size; one undo step)*
 - [ ] "Nice" axis ticks; label collision handling (shrink, rotate or skip category labels)
 - [ ] Data editor: double-click opens a data grid in the Format pane (rows = categories, columns = series)
 - [ ] Data editor: paste from Excel into the grid; add/remove rows and series; reorder by dragging
@@ -241,11 +241,12 @@ Nested bullets are the top priority of this phase.
 - [ ] Live preview; every edit undoable
 - [ ] Formatting: title, axis titles, legend (top/bottom/right/hidden), gridlines on/off, axis min/max (auto by default), gap width
 - [ ] Data labels: on/off, position (inside end, outside end, center), number format (decimals, pt-BR/en-US separators, percent, negatives in parentheses, units text)
-- [ ] Colors default to theme variables plus a derived palette; fonts from `--font-body`
+- [x] Colors default to theme variables plus a derived palette; fonts from `--font-body` *(accent, primary, lighter mixes of both, then greys; a series' own colour wins)*
 - [ ] Annotations: automatic CAGR arrow between two columns; source/footnote line
-- [ ] Unit tests for the renderer with fixed inputs
+- [x] Unit tests for the renderer with fixed inputs *(tests/unit/charts.test.js: the drawn SVG is read back and measured; each new type adds its own)*
 - [ ] Fallback documented: unsupported chart types pasted from Excel as images (Phase 5)
 - [ ] **Done when:** an EBITDA bridge and a revenue-plus-margin combo chart can be built from data pasted from Excel, edited, saved, reopened, and printed to PDF with sharp lines.
+  - [ ] Charts drawn: after `python3 tests/run_tests.py`, open `tests/output/charts-deck.html` (made by the tests, fake numbers): the report says 2 charts were drawn. Slide 4: columns for 2022-2025E with the 2025E pair lighter and dashed, numbers on top as 1.234, a legend at the bottom; a horizontal bar chart beside it. Drag the column chart's right edge: it is drawn again narrower, the text stays the same size; Ctrl+Z
 
 ## Phase 7: Arrange and slides
 

@@ -2729,6 +2729,70 @@ def test_phase5_done_when(browser):
     editor.close()
 
 
+def chart_deck(name, charts):
+    """The contract deck with its slide-4 chart replaced by `charts`: [(id, left, top, width, height, data)],
+    as Copilot writes them (data, no drawing). Fake numbers only."""
+    text = CONTRACT.read_text(encoding="utf-8")
+    start = text.index('<figure class="el" data-type="chart" data-id="e12"')
+    end = text.index("</figure>", start) + len("</figure>")
+    figures = "".join(
+        f'<figure class="el" data-type="chart" data-id="{id_}" style="left:{left}px; top:{top}px; width:{width}px; '
+        f'height:{height}px; z-index:{index + 2}; margin:0"><script type="application/json" class="chart-data">'
+        f'{json.dumps(data, ensure_ascii=False)}</script></figure>'
+        for index, (id_, left, top, width, height, data) in enumerate(charts))
+    path = OUTPUT / name
+    path.write_text(text[:start] + figures + text[end:], encoding="utf-8")
+    return path
+
+
+CHART_BARS = """id => Array.from(App.deck.getDocument().querySelectorAll('[data-id="' + id + '"] svg rect.chart-bar'),
+    (r) => [Number(r.getAttribute('width')), Number(r.getAttribute('height'))])"""
+
+
+def test_chart_rendering(browser):
+    """Charts drawn by the editor (Phase 6 step 1): a Copilot chart (data, no drawing) is drawn on open as columns;
+    a resize draws it again at the new size (the text keeps its size, nothing stretches); undo; horizontal bars."""
+    revenue = {"version": 1, "type": "column", "categories": ["2022", "2023", "2024", "2025E"],
+               "estimates": [False, False, False, True],
+               "series": [{"name": "Receita (R$ mn)", "values": [410, 498, 587, 702]},
+                          {"name": "EBITDA (R$ mn)", "values": [74, 100, 123, 161]}],
+               "options": {"title": "Receita e EBITDA", "dataLabels": True, "locale": "pt-BR"}}
+    ranking = {"version": 1, "type": "bar", "categories": ["Alfa", "Beta", "Gama"],
+               "series": [{"name": "EV/EBITDA", "values": [9.8, 7.5, 11.2]}], "options": {"title": "Múltiplos"}}
+    deck = chart_deck("charts-deck.html", [("e12", 64, 130, 700, 440, revenue), ("e20", 800, 290, 420, 280, ranking)])
+    editor = Editor(browser)
+    editor.open(deck)
+    check("2 charts had data but no drawing" in (editor.report_dialog_text() or ""), "drawn on open, reported")
+    editor.close_dialog_if_open()
+    page = editor.page
+    page.evaluate("App.deck.goTo(3)")
+    bars = page.evaluate(CHART_BARS, "e12")
+    check(len(bars) == 8 and page.evaluate("document.querySelector('#deck-frame').contentDocument"
+                                            ".querySelectorAll('[data-chart-placeholder]').length") == 0, f"8 columns, no placeholder: {bars}")
+    labels = page.evaluate("Array.from(App.deck.getDocument().querySelectorAll('[data-id=\"e12\"] .chart-data-label'), (t) => t.textContent)")
+    check("702" in labels and "161" in labels, f"data labels: {labels}")
+    check(len(page.evaluate(CHART_BARS, "e20")) == 3, "three horizontal bars")
+    page.screenshot(path=str(OUTPUT / "62-charts-drawn.png"))
+
+    # A resize draws it again: wider bars, the same text size, the svg exactly the new size.
+    font = "id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"] .chart-category-label').getAttribute('font-size')"
+    page.mouse.click(*slide_to_screen(page, 300, 300))
+    check(page.evaluate("App.selection.selectedId()") == "e12", "the chart selected")
+    side = page.locator("#overlay .selection-handle[data-handle='e']").bounding_box()
+    zoom = page.evaluate("App.canvas.getZoom()")
+    drag(page, (side["x"] + 4, side["y"] + 4), (side["x"] + 4 - 200 * zoom, side["y"] + 4))
+    width = element_rect(page, "e12")["width"]
+    svg_width = page.evaluate("Number(App.deck.getDocument().querySelector('[data-id=\"e12\"] svg').getAttribute('width'))")
+    check(round(width) == 500 and svg_width == round(width), f"drawn at the new width: {width} / svg {svg_width}")
+    check(page.evaluate(font, "e12") == "14", "the text keeps its size")
+    narrower = page.evaluate(CHART_BARS, "e12")
+    check(narrower[0][0] < bars[0][0] and narrower[0][1] == bars[0][1], f"narrower bars, same heights: {narrower[0]} vs {bars[0]}")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('[data-id=\"e12\"] svg').length") == 1, "one drawing")
+    page.keyboard.press("Control+z")
+    check(page.evaluate(CHART_BARS, "e12") == bars, "undo: as it was")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -3796,6 +3860,7 @@ TESTS = [
     test_shape_text,
     test_line_and_adjust_handles,
     test_phase5_done_when,
+    test_chart_rendering,
 ]
 
 

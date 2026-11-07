@@ -2793,6 +2793,64 @@ def test_chart_rendering(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_chart_lines_combo_donut(browser):
+    """Line, combo (a margin on a second % axis) and donut drawn in the editor; the Copilot sample's combo is drawn on
+    open (its waterfall still waits); a deck's own drawing is kept until the chart is resized."""
+    margin = {"version": 1, "type": "line", "categories": ["2022", "2023", "2024", "2025E"],
+              "estimates": [False, False, False, True],
+              "series": [{"name": "Margem EBITDA", "values": [0.18, 0.2, 0.21, 0.23], "format": "percent"}],
+              "options": {"title": "Margem", "dataLabels": True}}
+    combo = {"version": 1, "type": "combo", "categories": ["2022", "2023", "2024", "2025E"],
+             "estimates": [False, False, False, True],
+             "series": [{"name": "Receita (R$ mn)", "type": "column", "axis": "primary", "values": [410, 498, 587, 702]},
+                        {"name": "Margem EBITDA", "type": "line", "axis": "secondary", "values": [0.18, 0.2, 0.21, 0.23],
+                         "format": "percent"}],
+             "options": {"title": "Receita e margem", "legend": "bottom", "dataLabels": True, "locale": "pt-BR"}}
+    owners = {"version": 1, "type": "donut", "categories": ["Fundo A", "Fundadores", "Outros"],
+              "series": [{"name": "Participação", "values": [55, 30, 15]}], "options": {"title": "Acionistas"}}
+    deck = chart_deck("charts-step2.html", [("e12", 40, 130, 640, 420, combo), ("e20", 700, 260, 540, 170, margin),
+                                            ("e21", 700, 440, 540, 200, owners)])
+    editor = Editor(browser)
+    editor.open(deck)
+    editor.close_dialog_if_open()
+    page = editor.page
+    page.evaluate("App.deck.goTo(3)")
+    count = lambda id_, selector: page.evaluate(  # noqa: E731
+        "([id, s]) => App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] ' + s).length", [id_, selector])
+    check(count("e12", "rect.chart-bar") == 4 and count("e12", "path.chart-line") == 1 and
+          count("e12", ".chart-value-label-secondary") >= 2, "combo: columns, a line, a % axis on the right")
+    check(count("e20", "path.chart-line-estimate") == 1, "the line dashed into 2025E")
+    check(count("e21", "path.chart-slice") == 3, "three slices")
+    page.evaluate("document.getElementById('format-pane').scrollTop = 0")
+    page.screenshot(path=str(OUTPUT / "63-line-combo-donut.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+    # The Copilot sample: its combo drawn on open, the waterfall still a placeholder (drawn in step 3).
+    editor = Editor(browser)
+    editor.open(APPENDIX_A)
+    editor.close_dialog_if_open()
+    page = editor.page
+    kinds = page.evaluate("""() => Array.from(App.deck.getDocument().querySelectorAll('[data-type="chart"]'), (figure) =>
+        [JSON.parse(figure.querySelector('script.chart-data').textContent).type,
+         figure.querySelector('svg').hasAttribute('data-chart-placeholder')])""")
+    check(sorted(kinds) == [["combo", False], ["waterfall", True]], f"combo drawn, waterfall waits: {kinds}")
+    editor.close()
+
+    # The sample deck's hand-drawn combo is kept on open; resized, the editor draws it.
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(3)")
+    own = "() => App.deck.getDocument().querySelector('[data-id=\"e12\"] svg').getAttribute('class')"
+    check(page.evaluate(own) is None, "the deck's own drawing, kept")
+    page.mouse.click(*slide_to_screen(page, 300, 300))
+    side = page.locator("#overlay .selection-handle[data-handle='e']").bounding_box()
+    drag(page, (side["x"] + 4, side["y"] + 4), (side["x"] - 40, side["y"] + 4))
+    check(page.evaluate(own) == "chart-svg", "resized: drawn by the editor")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -3861,6 +3919,7 @@ TESTS = [
     test_line_and_adjust_handles,
     test_phase5_done_when,
     test_chart_rendering,
+    test_chart_lines_combo_donut,
 ]
 
 

@@ -247,6 +247,7 @@ Nested bullets are the top priority of this phase.
 - [ ] Fallback documented: unsupported chart types pasted from Excel as images (Phase 5)
 - [ ] **Done when:** an EBITDA bridge and a revenue-plus-margin combo chart can be built from data pasted from Excel, edited, saved, reopened, and printed to PDF with sharp lines.
   - [ ] Charts drawn: after `python3 tests/run_tests.py`, open `tests/output/charts-deck.html` (made by the tests, fake numbers): the report says 2 charts were drawn. Slide 4: columns for 2022-2025E with the 2025E pair lighter and dashed, numbers on top as 1.234, a legend at the bottom; a horizontal bar chart beside it. Drag the column chart's right edge: it is drawn again narrower, the text stays the same size; Ctrl+Z
+  - [ ] Lines, combo, donut: open `tests/output/charts-step2.html` (made by the tests). Slide 4: a combo with revenue columns (numbers inside their base) and the margin as a red line with % on a right-hand axis, dashed into 2025E; a line chart; a donut with 55% / 30% / 15% and its legend on the right. Open `samples/copilot-appendix-a-deck.html`: its combo chart is drawn (the waterfall is still grey until the next step). Open `samples/contract-deck.html`, slide 4: the chart looks as before; resize it: now the editor draws it
 
 ## Phase 7: Arrange and slides
 

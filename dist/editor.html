@@ -1675,7 +1675,9 @@ App.createHistory = function createHistory(options) {
  * recolours its charts. Numbers are written by numbers.js, in the chart's
  * locale (pt-BR 1.234,5 or en-US 1,234.5).
  *
- * Drawn so far (Phase 6 step 1): column, stacked-column, bar, stacked-bar.
+ * Drawn so far: column, stacked-column, bar, stacked-bar (step 1); line,
+ * combo (columns and lines, a second value axis on the right for series with
+ * "axis": "secondary"), donut and pie (step 2).
  * Other types still get the Phase 1 placeholder (a grey frame with the
  * title), marked data-chart-placeholder, which renderMissing draws properly
  * on open once the type can be drawn. A chart drawn by hand (a deck's own
@@ -1815,7 +1817,7 @@ App.createHistory = function createHistory(options) {
     // The chart's data, made safe to draw
     // ---------------------------------------------------------------
 
-    const DRAWN = ['column', 'stacked-column', 'bar', 'stacked-bar'];
+    const DRAWN = ['column', 'stacked-column', 'bar', 'stacked-bar', 'line', 'combo', 'donut', 'pie'];
     const PALETTE = [
         'var(--color-accent, #1F2A44)', 'var(--color-primary, #CC092F)',
         'color-mix(in srgb, var(--color-accent, #1F2A44) 55%, white)', 'color-mix(in srgb, var(--color-primary, #CC092F) 55%, white)',
@@ -1831,19 +1833,45 @@ App.createHistory = function createHistory(options) {
         const categories = (Array.isArray(data.categories) ? data.categories : []).map((name) => String(name));
         const series = (Array.isArray(data.series) ? data.series : []).map((item, index) => {
             const values = Array.isArray(item && item.values) ? item.values : [];
+            const given = item || {};
             return {
-                name: String((item && item.name) || 'Series ' + (index + 1)),
+                name: String(given.name || 'Series ' + (index + 1)),
                 values: categories.map((name, i) => (typeof values[i] === 'number' && isFinite(values[i]) ? values[i] : null)),
-                color: (item && item.color) || PALETTE[index % PALETTE.length],
-                percent: !!item && item.format === 'percent',
+                color: given.color || PALETTE[index % PALETTE.length],
+                percent: given.format === 'percent',
+                format: given.format,
+                // A line chart draws lines; a combo its "line" series (by default: all but the first).
+                kind: data.type === 'line' || (data.type === 'combo' && (given.type === 'line' || (!given.type && index > 0)))
+                    ? 'line' : 'bar',
+                axis: given.axis === 'secondary' ? 'secondary' : given.axis === 'primary' ? 'primary' : null,
             };
         });
+        guessComboAxes(data.type, series);
         const estimates = Array.isArray(data.estimates) ? data.estimates : [];
         return {
             type: data.type, categories: categories, series: series,
             estimates: categories.map((name, i) => !!estimates[i]),
             options: Object.assign({}, data.options),
         };
+    }
+
+    /*
+     * A combo whose series do not say their axis (as Copilot writes them): a
+     * line far smaller than the columns (a margin next to revenue) goes on the
+     * second axis, and if its values are all between -1 and 1 they are shown in %.
+     */
+    function guessComboAxes(type, series) {
+        const biggest = (items) => Math.max(0, ...[].concat(...items.map((item) => item.values))
+            .filter((value) => value !== null).map(Math.abs));
+        const columns = biggest(series.filter((item) => item.kind === 'bar'));
+        series.forEach((item) => {
+            if (item.axis === null) {
+                item.axis = type === 'combo' && item.kind === 'line' && biggest([item]) < columns / 10 ? 'secondary' : 'primary';
+                if (item.axis === 'secondary' && item.format === undefined && biggest([item]) <= 1) {
+                    item.percent = true;
+                }
+            }
+        });
     }
 
     // ---------------------------------------------------------------
@@ -1858,6 +1886,8 @@ App.createHistory = function createHistory(options) {
     const TEXT_COLOR = '#404040';
     const GRID_COLOR = '#D9D9D9';
     const AXIS_COLOR = '#A6A6A6';
+    // A white halo behind dark data labels keeps them readable over bars and lines.
+    const HALO = 'paint-order: stroke; stroke: #FFFFFF; stroke-width: 3px; stroke-linejoin: round;';
 
     function n(value) {
         return String(App.util.round2(value) + 0);
@@ -1879,7 +1909,7 @@ App.createHistory = function createHistory(options) {
             '" style="stroke: ' + color + '; stroke-width: 1;"/>';
     }
 
-    function legendPosition(m) {
+    function legendPosition(m, items) {
         const legend = m.options.legend;
         if (legend === 'none' || legend === 'hidden') {
             return 'none';
@@ -1887,28 +1917,39 @@ App.createHistory = function createHistory(options) {
         if (legend === 'top' || legend === 'right' || legend === 'bottom') {
             return legend;
         }
-        return m.series.length > 1 ? 'bottom' : 'none';
+        if (isRound(m.type)) {
+            return 'right';
+        }
+        return items.length > 1 ? 'bottom' : 'none';
     }
 
-    /* The legend: a coloured square and the name of each series, in a row (top / bottom) or a column (right). */
-    function legend(m, position, area) {
-        const items = m.series.map((series) => ({ series: series, width: 10 + 4 + textWidth(series.name, LABEL_SIZE) }));
+    /* A legend entry's key: a square for bars and slices, a short line with a dot for lines. */
+    function legendKey(item, x, middle) {
+        if (item.kind === 'line') {
+            return line('chart-legend-key', x, middle, x + 14, middle, item.color) +
+                '<circle cx="' + n(x + 7) + '" cy="' + n(middle) + '" r="3" style="fill: ' + item.color + ';"/>';
+        }
+        return '<rect x="' + n(x + 2) + '" y="' + n(middle - 5) + '" width="10" height="10" style="fill: ' + item.color + ';"/>';
+    }
+
+    /* The legend: items [{ name, color, kind }] in a row (top / bottom) or a column (right). */
+    function legend(items, position, area) {
+        const sized = items.map((item) => ({ item: item, width: 18 + textWidth(item.name, LABEL_SIZE) }));
         const parts = [];
         if (position === 'right') {
-            items.forEach((item, index) => {
-                const y = area.top + index * (LABEL_SIZE + 8);
-                parts.push('<rect x="' + n(area.left) + '" y="' + n(y) + '" width="10" height="10" style="fill: ' +
-                    item.series.color + ';"/>', text('chart-legend-label', area.left + 14, y + 5 + MIDDLE, item.series.name,
-                    { 'font-size': LABEL_SIZE, fill: TEXT_COLOR }));
+            sized.forEach(({ item }, index) => {
+                const middle = area.top + index * (LABEL_SIZE + 8) + LABEL_SIZE / 2;
+                parts.push(legendKey(item, area.left, middle), text('chart-legend-label', area.left + 18, middle + MIDDLE,
+                    item.name, { 'font-size': LABEL_SIZE, fill: TEXT_COLOR }));
             });
         } else {
-            const total = items.reduce((sum, item) => sum + item.width, 0) + 16 * (items.length - 1);
+            const total = sized.reduce((sum, entry) => sum + entry.width, 0) + 16 * (sized.length - 1);
             let x = area.left + (area.width - total) / 2;
-            items.forEach((item) => {
-                parts.push('<rect x="' + n(x) + '" y="' + n(area.top + 3) + '" width="10" height="10" style="fill: ' +
-                    item.series.color + ';"/>', text('chart-legend-label', x + 14, area.top + 8 + MIDDLE, item.series.name,
+            sized.forEach(({ item, width }) => {
+                const middle = area.top + 8;
+                parts.push(legendKey(item, x, middle), text('chart-legend-label', x + 18, middle + MIDDLE, item.name,
                     { 'font-size': LABEL_SIZE, fill: TEXT_COLOR }));
-                x += item.width + 16;
+                x += width + 16;
             });
         }
         return '<g class="chart-legend">' + parts.join('') + '</g>';
@@ -1920,48 +1961,46 @@ App.createHistory = function createHistory(options) {
             '" style="font-family: var(--font-body, Calibri, Arial, sans-serif);">';
     }
 
-    // ---------------------------------------------------------------
-    // Columns and bars (clustered or stacked)
-    // ---------------------------------------------------------------
-
-    function drawBars(m, width, height) {
-        const horizontal = m.type === 'bar' || m.type === 'stacked-bar';
-        const stacked = m.type === 'stacked-column' || m.type === 'stacked-bar';
-        const locale = m.options.locale || 'pt-BR';
-        const percentAxis = m.series.length > 0 && m.series.every((series) => series.percent);
-        const parts = [];
+    /* The title on top and the legend where it goes; returns the area left for the chart itself. */
+    function frame(m, width, height, items, parts) {
         const area = { left: PAD, top: PAD, right: width - PAD, bottom: height - PAD };
-
         if (m.options.title) {
             parts.push(text('chart-title', width / 2, area.top + TITLE_SIZE, m.options.title,
                 { 'font-size': TITLE_SIZE, 'font-weight': 'bold', 'text-anchor': 'middle', fill: TEXT_COLOR }));
             area.top += TITLE_SIZE + 12;
         }
-        const legendAt = legendPosition(m);
+        const legendAt = legendPosition(m, items);
         if (legendAt === 'bottom') {
             area.bottom -= LABEL_SIZE + 10;
-            parts.push(legend(m, 'bottom', { left: area.left, width: area.right - area.left, top: area.bottom + 4 }));
+            parts.push(legend(items, 'bottom', { left: area.left, width: area.right - area.left, top: area.bottom + 4 }));
         } else if (legendAt === 'top') {
-            parts.push(legend(m, 'top', { left: area.left, width: area.right - area.left, top: area.top }));
+            parts.push(legend(items, 'top', { left: area.left, width: area.right - area.left, top: area.top }));
             area.top += LABEL_SIZE + 12;
         } else if (legendAt === 'right') {
-            const widest = Math.max(...m.series.map((series) => textWidth(series.name, LABEL_SIZE))) + 14;
+            const widest = Math.max(...items.map((item) => textWidth(item.name, LABEL_SIZE))) + 18;
             area.right -= widest + 8;
-            parts.push(legend(m, 'right', { left: area.right + 8, top: area.top }));
+            parts.push(legend(items, 'right', { left: area.right + 8, top: area.top }));
         }
+        return area;
+    }
 
-        // The values' range: stacked bars add up, positives and negatives apart; 0 is always on the axis.
+    // ---------------------------------------------------------------
+    // Columns, bars and lines on axes (column, bar, stacked, line, combo)
+    // ---------------------------------------------------------------
+
+    /* The lowest and highest value `series` reach (bars stacked when `stacked`); 0 is always in. */
+    function rangeOf(series, stacked, count) {
         let low = 0;
         let high = 0;
-        m.categories.forEach((name, i) => {
+        for (let i = 0; i < count; i++) {
             let up = 0;
             let down = 0;
-            m.series.forEach((series) => {
-                const value = series.values[i];
+            series.forEach((item) => {
+                const value = item.values[i];
                 if (value === null) {
                     return;
                 }
-                if (stacked) {
+                if (stacked && item.kind === 'bar') {
                     up += Math.max(value, 0);
                     down += Math.min(value, 0);
                 } else {
@@ -1971,49 +2010,94 @@ App.createHistory = function createHistory(options) {
             });
             high = Math.max(high, up);
             low = Math.min(low, down);
-        });
+        }
+        return [low, high];
+    }
+
+    /* An axis for `series`: its ticks and their labels (in % when every series is a percentage). */
+    function axisOf(series, stacked, count, tickCount, locale) {
+        const [low, high] = rangeOf(series, stacked, count);
+        const ticks = App.charts.niceTicks(low, high, tickCount);
+        const percent = series.length > 0 && series.every((item) => item.percent);
+        const step = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
+        const format = { locale: locale, percent: percent, decimals: App.charts.decimalsOf([step], percent) };
+        return { ticks: ticks, labels: ticks.map((tick) => App.charts.formatValue(tick, format)) };
+    }
+
+    function drawCartesian(m, width, height) {
+        const horizontal = m.type === 'bar' || m.type === 'stacked-bar';
+        const stacked = m.type === 'stacked-column' || m.type === 'stacked-bar';
+        const locale = m.options.locale || 'pt-BR';
+        const parts = [];
+        const area = frame(m, width, height, m.series, parts);
+
+        const count = Math.max(m.categories.length, 1);
+        const primary = m.series.filter((series) => series.axis !== 'secondary');
+        const secondary = m.series.filter((series) => series.axis === 'secondary');
         const categoryWidth = Math.max(0, ...m.categories.map((name) => textWidth(name, LABEL_SIZE)));
         const length = horizontal ? area.right - area.left - categoryWidth : area.bottom - area.top - ROW;
-        const ticks = App.charts.niceTicks(low, high, Math.max(2, Math.min(6, Math.floor(length / (horizontal ? 80 : 45)))));
-        const step = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
-        const tickFormat = { locale: locale, percent: percentAxis, decimals: App.charts.decimalsOf([step], percentAxis) };
-        const tickLabels = ticks.map((tick) => App.charts.formatValue(tick, tickFormat));
+        const tickCount = Math.max(2, Math.min(6, Math.floor(length / (horizontal ? 80 : 45))));
+        const axes = {
+            primary: axisOf(primary, stacked, m.categories.length, tickCount, locale),
+            secondary: secondary.length > 0 ? axisOf(secondary, false, m.categories.length, tickCount, locale) : null,
+        };
+        const widest = (labels) => Math.max(...labels.map((label) => textWidth(label, LABEL_SIZE)));
 
         const plot = Object.assign({}, area);
         plot.bottom -= ROW;   // the row of category names (columns) or of axis numbers (bars)
-        plot.left += horizontal ? categoryWidth + 8 : Math.max(...tickLabels.map((label) => textWidth(label, LABEL_SIZE))) + 6;
-        const first = ticks[0];
-        const last = ticks[ticks.length - 1];
-        const at = horizontal
-            ? (value) => plot.left + (value - first) / (last - first) * (plot.right - plot.left)
-            : (value) => plot.bottom - (value - first) / (last - first) * (plot.bottom - plot.top);
+        plot.left += horizontal ? categoryWidth + 8 : widest(axes.primary.labels) + 6;
+        if (axes.secondary) {
+            plot.right -= widest(axes.secondary.labels) + 6;
+        }
+        const scale = (axis) => {
+            const first = axis.ticks[0];
+            const last = axis.ticks[axis.ticks.length - 1];
+            return horizontal
+                ? (value) => plot.left + (value - first) / (last - first) * (plot.right - plot.left)
+                : (value) => plot.bottom - (value - first) / (last - first) * (plot.bottom - plot.top);
+        };
+        const at = { primary: scale(axes.primary), secondary: axes.secondary ? scale(axes.secondary) : null };
 
-        // Gridlines and the value axis's numbers.
+        // Gridlines and the numbers of each value axis (the second one on the right).
         const grid = [];
-        ticks.forEach((tick, index) => {
-            const p = at(tick);
+        axes.primary.ticks.forEach((tick, index) => {
+            const p = at.primary(tick);
             if (m.options.gridlines !== false) {
                 grid.push(horizontal ? line('chart-gridline', p, plot.top, p, plot.bottom, GRID_COLOR)
                     : line('chart-gridline', plot.left, p, plot.right, p, GRID_COLOR));
             }
             grid.push(horizontal
-                ? text('chart-value-label', p, plot.bottom + LABEL_SIZE + 2, tickLabels[index], { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR })
-                : text('chart-value-label', plot.left - 6, p + MIDDLE, tickLabels[index], { 'font-size': LABEL_SIZE, 'text-anchor': 'end', fill: TEXT_COLOR }));
+                ? text('chart-value-label', p, plot.bottom + LABEL_SIZE + 2, axes.primary.labels[index], { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR })
+                : text('chart-value-label', plot.left - 6, p + MIDDLE, axes.primary.labels[index], { 'font-size': LABEL_SIZE, 'text-anchor': 'end', fill: TEXT_COLOR }));
         });
+        if (axes.secondary) {
+            axes.secondary.ticks.forEach((tick, index) => {
+                grid.push(text('chart-value-label-secondary', plot.right + 6, at.secondary(tick) + MIDDLE, axes.secondary.labels[index],
+                    { 'font-size': LABEL_SIZE, 'text-anchor': 'start', fill: TEXT_COLOR }));
+            });
+        }
         parts.push('<g class="chart-axis">' + grid.join('') + '</g>');
 
-        // The bars: each category gets a band; its bars fill part of it (the rest is the gap).
-        const count = Math.max(m.categories.length, 1);
+        // Each category gets a band; its bars fill part of it (the rest is the gap); line points sit in its middle.
         const band = (horizontal ? plot.bottom - plot.top : plot.right - plot.left) / count;
         const gap = (typeof m.options.gapWidth === 'number' ? m.options.gapWidth : 100) / 100;
         const group = band / (1 + gap);
-        const thick = stacked ? group : group / Math.max(m.series.length, 1);
+        const barSeries = m.series.filter((series) => series.kind === 'bar');
+        const thick = stacked ? group : group / Math.max(barSeries.length, 1);
         const up = m.categories.map(() => 0);
         const down = m.categories.map(() => 0);
         const labels = [];
+        const lines = [];
         m.series.forEach((series, s) => {
-            const rects = [];
+            const scaleOf = at[series.axis === 'secondary' && at.secondary ? 'secondary' : 'primary'];
             const labelFormat = { locale: locale, percent: series.percent, decimals: App.charts.decimalsOf(series.values, series.percent) };
+            if (series.kind === 'line') {
+                lines.push(drawLine(series, s, m.estimates, (i) => plot.left + band * (i + 0.5), scaleOf, labels,
+                    m.options.dataLabels ? labelFormat : null));
+                return;
+            }
+            const slot = barSeries.indexOf(series);
+            const rects = [];
             series.values.forEach((value, i) => {
                 if (value === null) {
                     return;
@@ -2027,11 +2111,10 @@ App.createHistory = function createHistory(options) {
                         down[i] += value;
                     }
                 }
-                const to = from + value;
-                const start = band * i + (band - group) / 2 + (stacked ? 0 : s * thick);
-                const [a, b] = [at(from), at(to)];
+                const start = band * i + (band - group) / 2 + (stacked ? 0 : slot * thick);
+                const [a, b] = [scaleOf(from), scaleOf(from + value)];
                 const box = horizontal
-                    ? { x: Math.min(a, b), y: (horizontal ? plot.top : 0) + start, width: Math.abs(b - a), height: thick }
+                    ? { x: Math.min(a, b), y: plot.top + start, width: Math.abs(b - a), height: thick }
                     : { x: plot.left + start, y: Math.min(a, b), width: thick, height: Math.abs(b - a) };
                 let style = 'fill: ' + series.color + ';';
                 if (m.estimates[i]) {
@@ -2040,16 +2123,19 @@ App.createHistory = function createHistory(options) {
                 rects.push('<rect class="chart-bar" x="' + n(box.x) + '" y="' + n(box.y) + '" width="' + n(box.width) +
                     '" height="' + n(box.height) + '" style="' + style + '"/>');
                 if (m.options.dataLabels) {
-                    labels.push(dataLabel(App.charts.formatValue(value, labelFormat), box, value, horizontal, stacked));
+                    // In a combo the line runs near the column tops, so the columns' numbers go inside their base.
+                    labels.push(dataLabel(App.charts.formatValue(value, labelFormat), box, value, horizontal, stacked,
+                        m.type === 'combo'));
                 }
             });
             parts.push('<g class="chart-series" data-series="' + s + '">' + rects.join('') + '</g>');
         });
 
-        // The zero line, then the category names.
-        const zero = at(0);
+        // The zero line; lines over the bars; then the category names and the data labels on top of everything.
+        const zero = at.primary(0);
         parts.push(horizontal ? line('chart-axis-line', zero, plot.top, zero, plot.bottom, AXIS_COLOR)
             : line('chart-axis-line', plot.left, zero, plot.right, zero, AXIS_COLOR));
+        parts.push(...lines);
         const names = m.categories.map((name, i) => (horizontal
             ? text('chart-category-label', plot.left - 6, plot.top + band * (i + 0.5) + MIDDLE, name, { 'font-size': LABEL_SIZE, 'text-anchor': 'end', fill: TEXT_COLOR })
             : text('chart-category-label', plot.left + band * (i + 0.5), plot.bottom + LABEL_SIZE + 2, name, { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR })));
@@ -2058,14 +2144,122 @@ App.createHistory = function createHistory(options) {
         return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
     }
 
-    /* A bar's value: past its end (clustered), or in its middle in white when it fits (stacked). */
-    function dataLabel(content, box, value, horizontal, stacked) {
-        const attrs = { 'font-size': 13, fill: TEXT_COLOR, 'text-anchor': 'middle' };
+    /*
+     * A series as a line: solid between actual years, dashed into an estimate
+     * year, a dot at each value (hollow for estimates). Its data labels go to `labels`.
+     */
+    function drawLine(series, s, estimates, xOf, yOf, labels, labelFormat) {
+        const points = series.values.map((value, i) => (value === null ? null : { x: xOf(i), y: yOf(value), value: value }));
+        const xy = (point) => n(point.x) + ' ' + n(point.y);
+        let solid = '';
+        let dashed = '';
+        let solidEnd = -1;
+        for (let i = 1; i < points.length; i++) {
+            if (!points[i - 1] || !points[i]) {
+                continue;
+            }
+            if (estimates[i]) {
+                dashed += 'M' + xy(points[i - 1]) + 'L' + xy(points[i]);
+            } else {
+                solid += (solidEnd === i - 1 ? '' : 'M' + xy(points[i - 1])) + 'L' + xy(points[i]);
+                solidEnd = i;
+            }
+        }
+        const stroke = 'fill: none; stroke: ' + series.color + '; stroke-width: 2.5; stroke-linejoin: round;';
+        const out = [];
+        if (solid) {
+            out.push('<path class="chart-line" d="' + solid + '" style="' + stroke + '"/>');
+        }
+        if (dashed) {
+            out.push('<path class="chart-line-estimate" d="' + dashed + '" style="' + stroke + ' stroke-dasharray: 6 4;"/>');
+        }
+        points.forEach((point, i) => {
+            if (!point) {
+                return;
+            }
+            out.push('<circle class="chart-marker" cx="' + n(point.x) + '" cy="' + n(point.y) + '" r="4" style="fill: ' +
+                (estimates[i] ? '#FFFFFF' : series.color) + '; stroke: ' + series.color + '; stroke-width: 2;"/>');
+            if (labelFormat) {
+                labels.push(text('chart-data-label', point.x, point.y - 10, App.charts.formatValue(point.value, labelFormat),
+                    { 'font-size': 13, fill: TEXT_COLOR, 'text-anchor': 'middle', style: HALO }));
+            }
+        });
+        return '<g class="chart-series" data-series="' + s + '">' + out.join('') + '</g>';
+    }
+
+    // ---------------------------------------------------------------
+    // Donut and pie
+    // ---------------------------------------------------------------
+
+    function isRound(type) {
+        return type === 'donut' || type === 'pie';
+    }
+
+    /* The first series as slices of a circle, one per category, from 12 o'clock clockwise. */
+    function drawRound(m, width, height) {
+        const values = m.series.length > 0 ? m.series[0].values : [];
+        const slices = m.categories.map((name, i) => ({
+            name: name, color: m.series[0] && m.series[0].colors ? m.series[0].colors[i] : PALETTE[i % PALETTE.length],
+            value: values[i] !== null && values[i] > 0 ? values[i] : 0, kind: 'bar',
+        })).filter((slice) => slice.value > 0);
+        const parts = [];
+        const area = frame(m, width, height, slices, parts);
+        const total = slices.reduce((sum, slice) => sum + slice.value, 0) || 1;
+        const cx = (area.left + area.right) / 2;
+        const cy = (area.top + area.bottom) / 2;
+        const outer = Math.max(Math.min(area.right - area.left, area.bottom - area.top) / 2 - 2, 1);
+        const inner = m.type === 'donut' ? outer * 0.55 : 0;
+        const point = (angle, radius) => n(cx + radius * Math.sin(angle)) + ' ' + n(cy - radius * Math.cos(angle));
+        const arc = (radius, to, large, sweep) => 'A' + n(radius) + ' ' + n(radius) + ' 0 ' + large + ' ' + sweep + ' ' + point(to, radius);
+        const shares = slices.map((slice) => slice.value / total);
+        const format = { locale: m.options.locale || 'pt-BR', percent: true, decimals: Math.min(1, App.charts.decimalsOf(shares, true)) };
+        const paths = [];
+        const labels = [];
+        let angle = 0;
+        slices.forEach((slice, i) => {
+            const end = angle + shares[i] * 2 * Math.PI;
+            const large = end - angle > Math.PI ? 1 : 0;
+            let d;
+            if (shares[i] > 0.9999) {
+                // A whole circle: two half arcs (one arc cannot start and end at the same point).
+                d = 'M' + point(0, outer) + arc(outer, Math.PI, 1, 1) + arc(outer, 0, 1, 1) + 'Z' +
+                    (inner ? 'M' + point(0, inner) + arc(inner, Math.PI, 1, 0) + arc(inner, 0, 1, 0) + 'Z' : '');
+            } else if (inner) {
+                d = 'M' + point(angle, outer) + arc(outer, end, large, 1) + 'L' + point(end, inner) + arc(inner, angle, large, 0) + 'Z';
+            } else {
+                d = 'M' + n(cx) + ' ' + n(cy) + 'L' + point(angle, outer) + arc(outer, end, large, 1) + 'Z';
+            }
+            paths.push('<path class="chart-slice" d="' + d + '" style="fill: ' + slice.color + '; stroke: #FFFFFF; stroke-width: 1.5;' +
+                (shares[i] > 0.9999 ? ' fill-rule: evenodd;' : '') + '"/>');
+            if (m.options.dataLabels !== false && shares[i] >= 0.05) {
+                const middle = (angle + end) / 2;
+                const radius = inner ? (outer + inner) / 2 : outer * 0.62;
+                labels.push(text('chart-data-label', cx + radius * Math.sin(middle), cy - radius * Math.cos(middle) + MIDDLE,
+                    App.charts.formatValue(shares[i], format), { 'font-size': 13, fill: '#FFFFFF', 'text-anchor': 'middle' }));
+            }
+            angle = end;
+        });
+        parts.push('<g class="chart-plot" data-cx="' + n(cx) + '" data-cy="' + n(cy) + '">' + paths.join('') + '</g>');
+        parts.push('<g class="chart-data-labels">' + labels.join('') + '</g>');
+        return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
+    }
+
+    /*
+     * A bar's value: past its end (clustered), in its middle in white when it
+     * fits (stacked), or inside its base in white (`inside`, a combo's columns,
+     * clear of the line; past the end when the column is too short).
+     */
+    function dataLabel(content, box, value, horizontal, stacked, inside) {
+        const white = { 'font-size': 13, fill: '#FFFFFF', 'text-anchor': 'middle' };
+        if (inside && !horizontal && !stacked && box.height > 22) {
+            const y = value >= 0 ? box.y + box.height - 7 : box.y + 17;
+            return text('chart-data-label', box.x + box.width / 2, y, content, white);
+        }
         if (stacked) {
             const fits = horizontal ? box.width > textWidth(content, 13) + 4 : box.height > 16;
-            return fits ? text('chart-data-label', box.x + box.width / 2, box.y + box.height / 2 + 4, content,
-                Object.assign(attrs, { fill: '#FFFFFF' })) : '';
+            return fits ? text('chart-data-label', box.x + box.width / 2, box.y + box.height / 2 + 4, content, white) : '';
         }
+        const attrs = { 'font-size': 13, fill: TEXT_COLOR, 'text-anchor': 'middle', style: HALO };
         if (horizontal) {
             return value >= 0
                 ? text('chart-data-label', box.x + box.width + 4, box.y + box.height / 2 + 4, content, Object.assign(attrs, { 'text-anchor': 'start' }))
@@ -2086,7 +2280,8 @@ App.createHistory = function createHistory(options) {
         if (!App.charts.canDraw(safe.type)) {
             return placeholder(safe, width, height);
         }
-        return drawBars(modelOf(safe), width, height);
+        const model = modelOf(safe);
+        return isRound(model.type) ? drawRound(model, width, height) : drawCartesian(model, width, height);
     };
 
     /*

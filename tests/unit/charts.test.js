@@ -186,7 +186,7 @@ test('charts: redraw after a resize draws at the new size; a type not drawn yet 
     const doc = parseDoc('<figure class="el" data-type="chart" style="width: 400px; height: 200px">' +
         '<script type="application/json" class="chart-data">' + JSON.stringify(COLUMNS) + '</script><svg></svg></figure>' +
         '<figure class="el" data-type="chart" style="width: 400px; height: 200px">' +
-        '<script type="application/json" class="chart-data">{"type":"combo"}</script><svg id="hand-drawn"></svg></figure>');
+        '<script type="application/json" class="chart-data">{"type":"waterfall"}</script><svg id="hand-drawn"></svg></figure>');
     const [figure, combo] = doc.querySelectorAll('figure');
     figure.style.width = '500px';
     App.charts.redraw(figure);
@@ -203,4 +203,94 @@ test('charts: on open, a placeholder of a type that can now be drawn is drawn (n
     assertEqual(App.charts.renderMissing(doc), 0);
     assertEqual(doc.querySelectorAll('svg[data-chart-placeholder]').length, 0);
     assertEqual(doc.querySelectorAll('rect.chart-bar').length, 3);
+});
+
+// ---------------------------------------------------------------------------
+// Lines, combo, donut and pie (Phase 6 step 2)
+// ---------------------------------------------------------------------------
+
+/* The points of the first chart line: [[x, y], ...]. */
+function linePoints(svg, series) {
+    const path = svg.querySelector('.chart-series[data-series="' + (series || 0) + '"] path.chart-line');
+    return path.getAttribute('d').split(/[ML]/).filter(Boolean).map((pair) => pair.trim().split(' ').map(Number));
+}
+
+test('charts: a line chart: one point per category, at the middle of its category, higher for more', () => {
+    const svg = drawn(Object.assign({}, COLUMNS, { type: 'line' }));
+    const points = linePoints(svg);
+    assertEqual(points.length, 3);
+    const names = Array.from(svg.querySelectorAll('.chart-category-label'), (label) => Number(label.getAttribute('x')));
+    assert(points.every(([x], i) => near(x, names[i])), 'under each category name: ' + JSON.stringify(points));
+    assert(points[0][1] > points[1][1] && points[1][1] > points[2][1], 'rising');
+    assertEqual(svg.querySelectorAll('.chart-marker').length, 3);
+    assertEqual(bars(svg).length, 0, 'no bars');
+});
+
+test('charts: a line into an estimate year is dashed, its marker hollow', () => {
+    const svg = drawn(Object.assign({}, COLUMNS, { type: 'line', estimates: [false, false, true] }));
+    const dashed = svg.querySelector('path.chart-line-estimate');
+    assert(dashed && /stroke-dasharray/.test(dashed.getAttribute('style')), 'a dashed piece');
+    assertEqual(linePoints(svg).length, 2, 'the solid line stops at the last actual year');
+    const markers = svg.querySelectorAll('.chart-marker');
+    assertIncludes(markers[2].getAttribute('style'), 'fill: #FFFFFF');
+});
+
+const SPEC_COMBO = {
+    version: 1, type: 'combo', categories: ['2022', '2023', '2024', '2025E'], estimates: [false, false, false, true],
+    series: [
+        { name: 'Receita (R$ mn)', type: 'column', axis: 'primary', values: [410, 498, 587, 702] },
+        { name: 'Margem EBITDA', type: 'line', axis: 'secondary', values: [0.18, 0.20, 0.21, 0.23], format: 'percent' },
+    ],
+    options: { title: 'Receita e margem', legend: 'bottom', dataLabels: true, locale: 'pt-BR' },
+};
+
+test('charts: combo: revenue columns and the margin as a line on a second axis in %', () => {
+    const svg = drawn(SPEC_COMBO, 760, 420);
+    assertEqual(bars(svg).length, 4, 'four columns');
+    assertEqual(linePoints(svg, 1).length, 3, 'the margin line (the 2025E piece dashed)');
+    const right = texts(svg, '.chart-value-label-secondary');
+    assert(right.length >= 2 && right.every((label) => /%$/.test(label)), 'the right axis in %: ' + right.join(' '));
+    assert(texts(svg, '.chart-data-label').indexOf('23%') !== -1, 'the margin labels in %');
+    const revenue = Array.from(svg.querySelectorAll('.chart-data-label')).find((label) => label.textContent === '587');
+    assertEqual(revenue.getAttribute('fill'), '#FFFFFF', 'a combo\'s column numbers inside the columns, clear of the line\'s');
+    const columns = bars(svg);
+    const points = linePoints(svg, 1);
+    assert(points.every(([x], i) => near(x, columns[i].x + columns[i].width / 2)), 'each point above its column');
+});
+
+test('charts: combo as Copilot writes it (no types, no axis): first series columns, a margin series on a % axis', () => {
+    const svg = drawn({
+        version: 1, type: 'combo', categories: ['2023', '2024', '2025E', '2026E'],
+        series: [{ name: 'Receita (R$ mn)', values: [520, 610, 730, 880] }, { name: 'Margem EBITDA', values: [0.38, 0.39, 0.41, 0.42] }],
+        options: { title: 'Receita e margem EBITDA' },
+    }, 760, 420);
+    assertEqual(bars(svg).length, 4);
+    assert(svg.querySelector('.chart-series[data-series="1"] path.chart-line'), 'the margin as a line');
+    assert(texts(svg, '.chart-value-label-secondary').some((label) => label === '40%'), texts(svg, '.chart-value-label-secondary').join(' '));
+});
+
+test('charts: donut: one slice per category, starting at the top, in shares of the total', () => {
+    const svg = drawn({ version: 1, type: 'donut', categories: ['Fundo A', 'Fundadores', 'Outros'],
+        series: [{ name: 'Participação', values: [50, 30, 20] }], options: { locale: 'pt-BR' } }, 500, 300);
+    const slices = Array.from(svg.querySelectorAll('path.chart-slice'));
+    assertEqual(slices.length, 3);
+    assert(slices.every((slice) => (slice.getAttribute('d').match(/A/g) || []).length === 2), 'a donut: outer and inner arcs');
+    assertEqual(texts(svg, '.chart-data-label'), ['50%', '30%', '20%']);
+    assertEqual(texts(svg, '.chart-legend-label'), ['Fundo A', 'Fundadores', 'Outros']);
+    const fills = slices.map((slice) => slice.getAttribute('style'));
+    assertEqual(new Set(fills).size, 3, 'each slice its own colour');
+    const [, x, y] = /^M([\d.]+) ([\d.]+)/.exec(slices[0].getAttribute('d')).map(Number);
+    const circle = svg.querySelector('.chart-plot');
+    assert(near(x, Number(circle.getAttribute('data-cx'))) && y < Number(circle.getAttribute('data-cy')), 'starts at 12 o\'clock');
+});
+
+test('charts: pie: wedges from the centre; empty and negative values are left out; one category is a full circle', () => {
+    const pie = drawn({ version: 1, type: 'pie', categories: ['A', 'B', 'C', 'D'],
+        series: [{ name: 'S', values: [3, 1, 0, -2] }] });
+    const slices = Array.from(pie.querySelectorAll('path.chart-slice'));
+    assertEqual(slices.length, 2);
+    assert(slices.every((slice) => (slice.getAttribute('d').match(/A/g) || []).length === 1), 'one arc each');
+    assertEqual(texts(pie, '.chart-data-label'), ['75%', '25%']);
+    const whole = drawn({ version: 1, type: 'pie', categories: ['A'], series: [{ name: 'S', values: [5] }] });
+    assertEqual(whole.querySelectorAll('path.chart-slice').length, 1, 'drawn even at 100%');
 });

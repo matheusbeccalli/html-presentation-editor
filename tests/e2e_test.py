@@ -2872,6 +2872,41 @@ def test_chart_waterfall(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_chart_types_priority_2(browser):
+    """The second-priority types drawn in the editor: 100% stacked column and bar, area, bubble (comps: growth vs
+    EV/EBITDA, bubble = revenue, each company named)."""
+    years = ["2022", "2023", "2024", "2025E"]
+    mix = {"version": 1, "type": "stacked-column-100", "categories": years, "estimates": [False, False, False, True],
+           "series": [{"name": "Varejo", "values": [120, 150, 170, 200]}, {"name": "Atacado", "values": [80, 70, 75, 70]}],
+           "options": {"title": "Mix de receita", "dataLabels": True}}
+    cumulative = {"version": 1, "type": "stacked-area", "categories": years,
+                  "series": [{"name": "Brasil", "values": [100, 140, 190, 250]}, {"name": "Exterior", "values": [20, 35, 60, 90]}],
+                  "options": {"title": "Receita acumulada"}}
+    comps = {"version": 1, "type": "bubble", "categories": ["Alfa", "Beta", "Gama", "Delta"],
+             "series": [{"name": "Crescimento", "values": [0.04, 0.09, 0.15, 0.12], "format": "percent"},
+                        {"name": "EV/EBITDA", "values": [7.5, 9.8, 12.4, 8.9]},
+                        {"name": "Receita", "values": [900, 400, 250, 600]}],
+             "options": {"title": "Comparáveis"}}
+    peers = {"version": 1, "type": "stacked-bar-100", "categories": ["Alfa", "Beta", "Gama"],
+             "series": [{"name": "Dívida", "values": [30, 55, 20]}, {"name": "Equity", "values": [70, 45, 80]}],
+             "options": {"title": "Estrutura de capital", "dataLabels": True}}
+    deck = chart_deck("charts-step4.html", [("e12", 40, 120, 600, 290, mix), ("e20", 40, 420, 600, 280, cumulative),
+                                            ("e21", 660, 260, 580, 230, comps), ("e22", 660, 500, 580, 200, peers)])
+    editor = Editor(browser)
+    editor.open(deck)
+    editor.close_dialog_if_open()
+    page = editor.page
+    page.evaluate("App.deck.goTo(3)")
+    count = lambda id_, selector: page.evaluate(  # noqa: E731
+        "([id, s]) => App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] ' + s).length", [id_, selector])
+    check(count("e12", "rect.chart-bar") == 8 and count("e20", "path.chart-area") == 2, "100% columns, two stacked areas")
+    check(count("e21", "circle.chart-point") == 4 and count("e21", ".chart-axis-title") == 2, "four named bubbles, axis titles")
+    check(count("e22", "rect.chart-bar") == 6, "100% bars")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('[data-chart-placeholder]').length") == 0, "no placeholder left")
+    page.screenshot(path=str(OUTPUT / "65-charts-priority-2.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -3942,6 +3977,7 @@ TESTS = [
     test_chart_rendering,
     test_chart_lines_combo_donut,
     test_chart_waterfall,
+    test_chart_types_priority_2,
 ]
 
 

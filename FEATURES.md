@@ -230,7 +230,7 @@ Nested bullets are the top priority of this phase.
 - [x] Chart element stores JSON (`<script type="application/json" class="chart-data">`) plus a static SVG rendering *(a Copilot chart (data, no drawing) is drawn on open; a drawing the deck brought itself is kept until the chart is edited or resized, so opening and saving changes nothing)*
 - [x] Pure renderer `App.charts.render(json, width, height)` → SVG string; deterministic *(no measuring: text widths estimated from their length; types not drawn yet keep the grey placeholder)*
 - [x] Priority 1 types: clustered column, stacked column, horizontal bar, line, combo (columns + line on secondary axis), waterfall, donut / pie *(clustered and stacked columns, horizontal and stacked bars, line (dashed into estimate years), combo (a second value axis on the right, in % for a margin), waterfall, donut and pie)*
-- [ ] Priority 2 types: 100% stacked column / stacked bar, scatter / bubble, area
+- [x] Priority 2 types: 100% stacked column / stacked bar, scatter / bubble, area *(types `stacked-column-100`, `stacked-bar-100` (shares as whole percents), `stacked-bar`, `area` (filled under its line) and `stacked-area`, `scatter` and `bubble`: each category is a point named after it, x and y from the first two series (their names are the axis titles), a bubble's area from the third)*
 - [x] Resizing re-renders at the new size (never stretches the SVG) *(handles and Format pane; the text keeps its size; one undo step)*
 - [ ] "Nice" axis ticks; label collision handling (shrink, rotate or skip category labels)
 - [ ] Data editor: double-click opens a data grid in the Format pane (rows = categories, columns = series)
@@ -249,6 +249,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Charts drawn: after `python3 tests/run_tests.py`, open `tests/output/charts-deck.html` (made by the tests, fake numbers): the report says 2 charts were drawn. Slide 4: columns for 2022-2025E with the 2025E pair lighter and dashed, numbers on top as 1.234, a legend at the bottom; a horizontal bar chart beside it. Drag the column chart's right edge: it is drawn again narrower, the text stays the same size; Ctrl+Z
   - [ ] Lines, combo, donut: open `tests/output/charts-step2.html` (made by the tests). Slide 4: a combo with revenue columns (numbers inside their base) and the margin as a red line with % on a right-hand axis, dashed into 2025E; a line chart; a donut with 55% / 30% / 15% and its legend on the right. Open `samples/copilot-appendix-a-deck.html`: its combo chart is drawn (the waterfall is still grey until the next step). Open `samples/contract-deck.html`, slide 4: the chart looks as before; resize it: now the editor draws it
   - [ ] Waterfall: open `samples/copilot-appendix-a-deck.html`, slide 2: the EBITDA bridge is drawn: EBITDA 2024 and 2026E in the deck's accent, Novos parques and Eficiência green, Custos corporativos red and hanging down, thin connector lines between the bars, labels +95, +30, -25
+  - [ ] More types: open `tests/output/charts-step4.html` (made by the tests). Slide 4: a 100% column chart (each year to 100%, shares as 60% / 40%, 2025E lighter), stacked areas, a bubble chart of four named companies (growth in % across, EV/EBITDA up, bigger revenue = bigger bubble), and 100% bars for capital structure
 
 ## Phase 7: Arrange and slides
 

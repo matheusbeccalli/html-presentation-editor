@@ -18,7 +18,9 @@
  * Drawn so far: column, stacked-column, bar, stacked-bar (step 1); line,
  * combo (columns and lines, a second value axis on the right for series with
  * "axis": "secondary"), donut and pie (step 2); waterfall (step 3: a "roles"
- * list beside "categories": start, delta, subtotal, end).
+ * list beside "categories": start, delta, subtotal, end); stacked-column-100,
+ * stacked-bar-100, area, stacked-area, scatter and bubble (step 4: each category
+ * a point, x and y from the first two series, a bubble's area from the third).
  * Other types still get the Phase 1 placeholder (a grey frame with the
  * title), marked data-chart-placeholder, which renderMissing draws properly
  * on open once the type can be drawn. A chart drawn by hand (a deck's own
@@ -158,7 +160,10 @@
     // The chart's data, made safe to draw
     // ---------------------------------------------------------------
 
-    const DRAWN = ['column', 'stacked-column', 'bar', 'stacked-bar', 'line', 'combo', 'donut', 'pie', 'waterfall'];
+    const DRAWN = ['column', 'stacked-column', 'bar', 'stacked-bar', 'line', 'combo', 'donut', 'pie', 'waterfall',
+        'stacked-column-100', 'stacked-bar-100', 'scatter', 'bubble', 'area', 'stacked-area'];
+    const HORIZONTAL = ['bar', 'stacked-bar', 'stacked-bar-100'];
+    const STACKED = ['stacked-column', 'stacked-bar', 'stacked-column-100', 'stacked-bar-100', 'stacked-area'];
     const PALETTE = [
         'var(--color-accent, #1F2A44)', 'var(--color-primary, #CC092F)',
         'color-mix(in srgb, var(--color-accent, #1F2A44) 55%, white)', 'color-mix(in srgb, var(--color-primary, #CC092F) 55%, white)',
@@ -183,8 +188,9 @@
                 percent: given.format === 'percent',
                 format: given.format,
                 // A line chart draws lines; a combo its "line" series (by default: all but the first).
-                kind: data.type === 'line' || (data.type === 'combo' && (given.type === 'line' || (!given.type && index > 0)))
-                    ? 'line' : 'bar',
+                kind: data.type === 'area' || data.type === 'stacked-area' ? 'area'
+                    : data.type === 'line' || (data.type === 'combo' && (given.type === 'line' || (!given.type && index > 0)))
+                        ? 'line' : 'bar',
                 axis: given.axis === 'secondary' ? 'secondary' : given.axis === 'primary' ? 'primary' : null,
             };
         });
@@ -362,7 +368,7 @@
                 if (value === null) {
                     return;
                 }
-                if (stacked && item.kind === 'bar') {
+                if (stacked && item.kind !== 'line') {
                     up += Math.max(value, 0);
                     down += Math.min(value, 0);
                 } else {
@@ -386,9 +392,20 @@
         return { ticks: ticks, labels: ticks.map((tick) => App.charts.formatValue(tick, format)) };
     }
 
-    function drawCartesian(m, width, height) {
-        const horizontal = m.type === 'bar' || m.type === 'stacked-bar';
-        const stacked = m.type === 'stacked-column' || m.type === 'stacked-bar';
+    /* 100% stacked: each value as its share of its category's total (sizes counted without their sign). */
+    function asShares(series, count) {
+        const totals = Array.from({ length: count }, (unused, i) =>
+            series.reduce((sum, item) => sum + Math.abs(item.values[i] || 0), 0));
+        return series.map((item) => Object.assign({}, item, {
+            percent: true, values: item.values.map((value, i) => (value === null || !totals[i] ? null : value / totals[i])),
+        }));
+    }
+
+    function drawCartesian(model, width, height) {
+        const horizontal = HORIZONTAL.indexOf(model.type) !== -1;
+        const stacked = STACKED.indexOf(model.type) !== -1;
+        const m = /-100$/.test(model.type)
+            ? Object.assign({}, model, { series: asShares(model.series, model.categories.length) }) : model;
         const locale = m.options.locale || 'pt-BR';
         const parts = [];
         const area = frame(m, width, height, m.series, parts);
@@ -410,6 +427,11 @@
         plot.left += horizontal ? categoryWidth + 8 : widest(axes.primary.labels) + 6;
         if (axes.secondary) {
             plot.right -= widest(axes.secondary.labels) + 6;
+        }
+        if (horizontal) {
+            // The last axis number is centred on the plot's right edge: half of it must fit.
+            const labels = axes.primary.labels;
+            plot.right -= Math.max(0, textWidth(labels[labels.length - 1], LABEL_SIZE) / 2 - PAD);
         }
         const scale = (axis) => {
             const first = axis.ticks[0];
@@ -448,14 +470,22 @@
         const thick = stacked ? group : group / Math.max(barSeries.length, 1);
         const up = m.categories.map(() => 0);
         const down = m.categories.map(() => 0);
+        const areaBase = m.categories.map(() => 0);
         const labels = [];
         const lines = [];
         m.series.forEach((series, s) => {
             const scaleOf = at[series.axis === 'secondary' && at.secondary ? 'secondary' : 'primary'];
-            const labelFormat = { locale: locale, percent: series.percent, decimals: App.charts.decimalsOf(series.values, series.percent) };
+            // Shares (100% stacked) rarely come out whole: shown as whole percents.
+            const decimals = /-100$/.test(m.type) ? 0 : App.charts.decimalsOf(series.values, series.percent);
+            const labelFormat = { locale: locale, percent: series.percent, decimals: decimals };
+            const xOf = (i) => plot.left + band * (i + 0.5);
             if (series.kind === 'line') {
-                lines.push(drawLine(series, s, m.estimates, (i) => plot.left + band * (i + 0.5), scaleOf, labels,
-                    m.options.dataLabels ? labelFormat : null));
+                lines.push(drawLine(series, s, m.estimates, xOf, scaleOf, labels, m.options.dataLabels ? labelFormat : null));
+                return;
+            }
+            if (series.kind === 'area') {
+                lines.push(drawArea(series, s, m.estimates, xOf, scaleOf, stacked ? areaBase : null, labels,
+                    m.options.dataLabels && !stacked ? labelFormat : null));
                 return;
             }
             const slot = barSeries.indexOf(series);
@@ -507,10 +537,30 @@
     }
 
     /*
-     * A series as a line: solid between actual years, dashed into an estimate
-     * year, a dot at each value (hollow for estimates). Its data labels go to `labels`.
+     * A series as an area: filled from its line down to zero, or (stacked) down
+     * to the areas below it, whose top `base` it then raises. Its line on top.
      */
-    function drawLine(series, s, estimates, xOf, yOf, labels, labelFormat) {
+    function drawArea(series, s, estimates, xOf, yOf, base, labels, labelFormat) {
+        const bottoms = series.values.map((value, i) => (base ? base[i] : 0));
+        const tops = series.values.map((value, i) => bottoms[i] + (value === null ? 0 : value));
+        const xy = (i, value) => n(xOf(i)) + ' ' + n(yOf(value));
+        const outline = tops.map((top, i) => xy(i, top)).concat(bottoms.map((bottom, i) => xy(i, bottom)).reverse());
+        const fill = '<path class="chart-area" d="M' + outline.join('L') + 'Z" style="fill: ' + series.color +
+            '; fill-opacity: ' + (base ? 0.85 : 0.35) + '; stroke: none;"/>';
+        if (base) {
+            tops.forEach((top, i) => { base[i] = top; });
+        }
+        return drawLine(Object.assign({}, series, { values: tops }), s, estimates, xOf, yOf, labels, labelFormat,
+            { before: fill, markers: false });
+    }
+
+    /*
+     * A series as a line: solid between actual years, dashed into an estimate
+     * year, a dot at each value (hollow for estimates). Its data labels go to
+     * `labels`. options: { before (drawn under the line), markers (default true) }.
+     */
+    function drawLine(series, s, estimates, xOf, yOf, labels, labelFormat, options) {
+        const opts = Object.assign({ before: '', markers: true }, options);
         const points = series.values.map((value, i) => (value === null ? null : { x: xOf(i), y: yOf(value), value: value }));
         const xy = (point) => n(point.x) + ' ' + n(point.y);
         let solid = '';
@@ -528,7 +578,7 @@
             }
         }
         const stroke = 'fill: none; stroke: ' + series.color + '; stroke-width: 2.5; stroke-linejoin: round;';
-        const out = [];
+        const out = [opts.before];
         if (solid) {
             out.push('<path class="chart-line" d="' + solid + '" style="' + stroke + '"/>');
         }
@@ -539,8 +589,10 @@
             if (!point) {
                 return;
             }
-            out.push('<circle class="chart-marker" cx="' + n(point.x) + '" cy="' + n(point.y) + '" r="4" style="fill: ' +
-                (estimates[i] ? '#FFFFFF' : series.color) + '; stroke: ' + series.color + '; stroke-width: 2;"/>');
+            if (opts.markers) {
+                out.push('<circle class="chart-marker" cx="' + n(point.x) + '" cy="' + n(point.y) + '" r="4" style="fill: ' +
+                    (estimates[i] ? '#FFFFFF' : series.color) + '; stroke: ' + series.color + '; stroke-width: 2;"/>');
+            }
             if (labelFormat) {
                 labels.push(text('chart-data-label', point.x, point.y - 10, App.charts.formatValue(point.value, labelFormat),
                     { 'font-size': 13, fill: TEXT_COLOR, 'text-anchor': 'middle', style: HALO }));
@@ -630,6 +682,97 @@
         return value >= 0
             ? text('chart-data-label', box.x + box.width / 2, box.y - 4, content, attrs)
             : text('chart-data-label', box.x + box.width / 2, box.y + box.height + 14, content, attrs);
+    }
+
+    // ---------------------------------------------------------------
+    // Scatter and bubble (comps: one point per company)
+    // ---------------------------------------------------------------
+
+    /*
+     * Each category is a point named after it: x from the first series, y from
+     * the second, and (bubble) its area from the third. The series' names are
+     * the axis titles.
+     */
+    function drawScatter(m, width, height) {
+        const locale = m.options.locale || 'pt-BR';
+        const [xSeries, ySeries, sizeSeries] = [m.series[0], m.series[1], m.series[2]];
+        const valueAt = (series, i) => (series ? series.values[i] : null);
+        const found = m.categories.map((name, i) => ({ name: name, x: valueAt(xSeries, i), y: valueAt(ySeries, i),
+            size: valueAt(sizeSeries, i) })).filter((point) => point.x !== null && point.y !== null);
+        const parts = [];
+        const area = frame(m, width, height, [], parts);
+        const axis = (series, values, length, spacing) => {
+            // A little room past the data, so no point sits on the frame.
+            const [low, high] = [Math.min(0, ...values), Math.max(0, ...values)];
+            const room = (high - low) * 0.08;
+            const ticks = App.charts.niceTicks(low < 0 ? low - room : low, high > 0 ? high + room : high,
+                Math.max(2, Math.min(6, Math.floor(length / spacing))));
+            const percent = !!series && series.percent;
+            const step = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
+            const format = { locale: locale, percent: percent, decimals: App.charts.decimalsOf([step], percent) };
+            return { ticks: ticks, labels: ticks.map((tick) => App.charts.formatValue(tick, format)) };
+        };
+        const xAxis = axis(xSeries, found.map((point) => point.x), area.right - area.left, 80);
+        const yAxis = axis(ySeries, found.map((point) => point.y), area.bottom - area.top, 45);
+
+        const plot = Object.assign({}, area);
+        plot.bottom -= ROW * 2;   // the x numbers, then the x title
+        plot.left += LABEL_SIZE + 6 + Math.max(...yAxis.labels.map((label) => textWidth(label, LABEL_SIZE))) + 6;
+        plot.right -= Math.max(12, textWidth(xAxis.labels[xAxis.labels.length - 1], LABEL_SIZE) / 2);
+        const span = (ticks) => [ticks[0], ticks[ticks.length - 1]];
+        const [x0, x1] = span(xAxis.ticks);
+        const [y0, y1] = span(yAxis.ticks);
+        const xAt = (value) => plot.left + (value - x0) / (x1 - x0) * (plot.right - plot.left);
+        const yAt = (value) => plot.bottom - (value - y0) / (y1 - y0) * (plot.bottom - plot.top);
+
+        const grid = [];
+        xAxis.ticks.forEach((tick, index) => {
+            if (m.options.gridlines !== false) {
+                grid.push(line('chart-gridline', xAt(tick), plot.top, xAt(tick), plot.bottom, GRID_COLOR));
+            }
+            grid.push(text('chart-value-label-x', xAt(tick), plot.bottom + LABEL_SIZE + 2, xAxis.labels[index],
+                { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR }));
+        });
+        yAxis.ticks.forEach((tick, index) => {
+            if (m.options.gridlines !== false) {
+                grid.push(line('chart-gridline', plot.left, yAt(tick), plot.right, yAt(tick), GRID_COLOR));
+            }
+            grid.push(text('chart-value-label', plot.left - 6, yAt(tick) + MIDDLE, yAxis.labels[index],
+                { 'font-size': LABEL_SIZE, 'text-anchor': 'end', fill: TEXT_COLOR }));
+        });
+        grid.push(line('chart-axis-line', plot.left, plot.bottom, plot.right, plot.bottom, AXIS_COLOR),
+            line('chart-axis-line', plot.left, plot.top, plot.left, plot.bottom, AXIS_COLOR));
+        parts.push('<g class="chart-axis">' + grid.join('') + '</g>');
+
+        const titleY = (plot.top + plot.bottom) / 2;
+        parts.push(text('chart-axis-title', (plot.left + plot.right) / 2, area.bottom - 4, xSeries ? xSeries.name : '',
+            { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR }),
+        text('chart-axis-title', area.left + LABEL_SIZE, titleY, ySeries ? ySeries.name : '',
+            { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR,
+                transform: 'rotate(-90 ' + n(area.left + LABEL_SIZE) + ' ' + n(titleY) + ')' }));
+
+        // Bubbles: the area of each in proportion to its size (so the radius to its square root).
+        const bubble = m.type === 'bubble';
+        const biggest = Math.max(0, ...found.map((point) => point.size || 0)) || 1;
+        const largest = Math.max(8, Math.min(plot.right - plot.left, plot.bottom - plot.top) * 0.14);
+        const color = xSeries ? xSeries.color : PALETTE[0];
+        const circles = [];
+        const labels = [];
+        found.forEach((point) => {
+            const r = bubble ? 4 + (largest - 4) * Math.sqrt(Math.max(point.size || 0, 0) / biggest) : 6;
+            const [cx, cy] = [xAt(point.x), yAt(point.y)];
+            circles.push('<circle class="chart-point" cx="' + n(cx) + '" cy="' + n(cy) + '" r="' + n(r) + '" style="fill: ' + color +
+                '; fill-opacity: ' + (bubble ? 0.7 : 1) + '; stroke: #FFFFFF; stroke-width: 1;"/>');
+            if (m.options.dataLabels !== false) {
+                // The name right of the point, or left of it when it would run past the plot.
+                const left = cx + r + 4 + textWidth(point.name, 13) > plot.right;
+                labels.push(text('chart-data-label', left ? cx - r - 4 : cx + r + 4, cy + MIDDLE, point.name,
+                    { 'font-size': 13, fill: TEXT_COLOR, 'text-anchor': left ? 'end' : 'start', style: HALO }));
+            }
+        });
+        parts.push('<g class="chart-series" data-series="0">' + circles.join('') + '</g>');
+        parts.push('<g class="chart-data-labels">' + labels.join('') + '</g>');
+        return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
     }
 
     // ---------------------------------------------------------------
@@ -749,6 +892,9 @@
         const model = App.charts.modelOf(safe);
         if (model.type === 'waterfall') {
             return drawWaterfall(model, width, height);
+        }
+        if (model.type === 'scatter' || model.type === 'bubble') {
+            return drawScatter(model, width, height);
         }
         return isRound(model.type) ? drawRound(model, width, height) : drawCartesian(model, width, height);
     };

@@ -340,3 +340,71 @@ test('charts: a waterfall draws floating bars, green up, red down, totals in the
     const colours = drawn(Object.assign({}, BRIDGE, { options: { waterfall: { increase: '#0070c0' } } }));
     assertIncludes(colours.querySelectorAll('rect.chart-bar')[1].getAttribute('style'), '#0070c0');
 });
+
+// ---------------------------------------------------------------------------
+// 100% stacked, scatter / bubble, area (Phase 6 step 4)
+// ---------------------------------------------------------------------------
+
+const MIX = {
+    version: 1, type: 'stacked-column-100', categories: ['2023', '2024'],
+    series: [{ name: 'Varejo', values: [1, 3] }, { name: 'Atacado', values: [3, 1] }],
+    options: { locale: 'pt-BR', dataLabels: true },
+};
+
+test('charts: 100% stacked columns: each stack fills the axis up to 100%, labelled as shares', () => {
+    const svg = drawn(MIX);
+    const [a, b] = [bars(svg, 0), bars(svg, 1)];
+    assert(near(a[0].height + b[0].height, a[1].height + b[1].height), 'both stacks the same height');
+    assert(near(a[0].height * 3, b[0].height), '25% and 75%');
+    const axis = texts(svg, '.chart-value-label');
+    assertEqual([axis[0], axis[axis.length - 1]], ['0%', '100%']);
+    assertEqual(texts(svg, '.chart-data-label').sort(), ['25%', '25%', '75%', '75%']);
+});
+
+test('charts: 100% stacked bars: horizontal, each bar the full width', () => {
+    const svg = drawn(Object.assign({}, MIX, { type: 'stacked-bar-100' }));
+    const [a, b] = [bars(svg, 0), bars(svg, 1)];
+    assert(near(a[0].width + b[0].width, a[1].width + b[1].width) && a[0].y < a[1].y, JSON.stringify([a, b]));
+});
+
+const COMPS = {
+    version: 1, type: 'scatter', categories: ['Alfa', 'Beta', 'Gama'],
+    series: [{ name: 'Crescimento', values: [0.05, 0.10, 0.15], format: 'percent' }, { name: 'EV/EBITDA', values: [8, 10, 12] }],
+    options: { locale: 'pt-BR' },
+};
+
+function points(svg) {
+    return Array.from(svg.querySelectorAll('circle.chart-point'), (c) => ['cx', 'cy', 'r'].map((key) => Number(c.getAttribute(key))));
+}
+
+test('charts: scatter: one point per company at (first series, second series), named; the series name the axes', () => {
+    const svg = drawn(COMPS);
+    const found = points(svg);
+    assertEqual(found.length, 3);
+    assert(found[0][0] < found[1][0] && found[1][0] < found[2][0], 'more growth: further right');
+    assert(found[0][1] > found[1][1] && found[1][1] > found[2][1], 'higher multiple: higher up');
+    assertEqual(texts(svg, '.chart-data-label'), ['Alfa', 'Beta', 'Gama']);
+    assertEqual(texts(svg, '.chart-axis-title'), ['Crescimento', 'EV/EBITDA']);
+    assert(texts(svg, '.chart-value-label-x').some((label) => /%$/.test(label)), 'growth in %');
+});
+
+test('charts: bubble: the third series sets each bubble\'s area', () => {
+    const svg = drawn(Object.assign({}, COMPS, { type: 'bubble',
+        series: COMPS.series.concat([{ name: 'Receita', values: [100, 400, 900] }]) }));
+    const radii = points(svg).map((point) => point[2]);
+    assert(radii[0] < radii[1] && radii[1] < radii[2], 'bigger company, bigger bubble: ' + radii);
+    assert(near((radii[2] - 4) / (radii[0] - 4), 3), 'areas in proportion (radius ~ square root): ' + radii);
+});
+
+test('charts: area: filled down to zero under its line; stacked areas sit on each other', () => {
+    const data = Object.assign({}, COLUMNS, { type: 'area' });
+    const svg = drawn(data);
+    const area = svg.querySelector('path.chart-area');
+    assert(area && /fill-opacity/.test(area.getAttribute('style')), 'a filled area');
+    assertEqual(linePoints(svg).length, 3, 'its top line');
+    const two = Object.assign({}, COLUMNS, { series: [{ name: 'A', values: [100, 200, 300] }, { name: 'B', values: [50, 50, 50] }] });
+    const stackedArea = drawn(Object.assign({}, two, { type: 'stacked-area' }));
+    const stackedColumns = drawn(Object.assign({}, two, { type: 'stacked-column' }));
+    const top = linePoints(stackedArea, 1)[0][1];
+    assert(near(top, bars(stackedColumns, 1)[0].y), 'B\'s line at A + B (as the stacked column\'s top)');
+});

@@ -156,6 +156,70 @@
         }, 0);
     };
 
+    /* Compound annual growth from `first` to `last` over `periods` (0.196 = 19,6%), or null when it has no meaning. */
+    App.charts.cagr = function cagr(first, last, periods) {
+        return first > 0 && last >= 0 && periods > 0 ? Math.pow(last / first, 1 / periods) - 1 : null;
+    };
+
+    /*
+     * Axis numbers between `low` and `high`, from `min` and / or to `max` when
+     * set (options.axisMin / axisMax; auto otherwise).
+     */
+    function limitedTicks(low, high, count, min, max) {
+        const hasMin = typeof min === 'number' && isFinite(min);
+        const hasMax = typeof max === 'number' && isFinite(max) && (!hasMin || max > min);
+        let ticks = App.charts.niceTicks(hasMin ? min : low, hasMax ? max : high, count);
+        const tiny = 1e-9;
+        if (hasMin) {
+            ticks = [min].concat(ticks.filter((tick) => tick > min + tiny));
+        }
+        if (hasMax) {
+            ticks = ticks.filter((tick) => tick < max - tiny).concat([max]);
+        }
+        return ticks;
+    }
+
+    /* `name` on at most two lines no wider than `room` at `size` px (split between words), or null. */
+    function twoLines(name, size, room) {
+        if (textWidth(name, size) <= room) {
+            return [name];
+        }
+        const words = name.split(/\s+/).filter(Boolean);
+        for (let cut = words.length - 1; cut >= 1; cut--) {
+            const lines = [words.slice(0, cut).join(' '), words.slice(cut).join(' ')];
+            if (lines.every((part) => textWidth(part, size) <= room)) {
+                return lines;
+            }
+        }
+        return null;
+    }
+
+    /*
+     * How the category names fit under columns `band` px apart (SPEC 5.6):
+     * as they are; else on two lines; else smaller (12, then 11 px, again
+     * also on two lines); else turned 45°, and if even that is too crowded
+     * only every `step`-th one. { mode: 'normal' | 'wrap' | 'rotate', size,
+     * lines: [[line, ...] per name], step, height (px the row takes) }.
+     */
+    App.charts.fitCategoryLabels = function fitCategoryLabels(names, band) {
+        const room = band - 4;
+        for (const size of [LABEL_SIZE, 12, 11]) {
+            if (names.every((name) => textWidth(name, size) <= room)) {
+                return { mode: 'normal', size: size, lines: names.map((name) => [name]), step: 1, height: size + 8 };
+            }
+            const wrapped = names.map((name) => twoLines(name, size, room));
+            if (wrapped.every(Boolean)) {
+                return { mode: 'wrap', size: size, lines: wrapped, step: 1, height: size * 2.2 + 8 };
+            }
+        }
+        const size = 12;
+        const widest = Math.max(0, ...names.map((name) => textWidth(name, size)));
+        return {
+            mode: 'rotate', size: size, lines: names.map((name) => [name]),
+            step: Math.max(1, Math.ceil(size * 1.3 / band)), height: (widest + size) * 0.71 + 8,
+        };
+    };
+
     // ---------------------------------------------------------------
     // The chart's data, made safe to draw
     // ---------------------------------------------------------------
@@ -337,6 +401,11 @@
                 { 'font-size': TITLE_SIZE, 'font-weight': 'bold', 'text-anchor': 'middle', fill: TEXT_COLOR }));
             area.top += TITLE_SIZE + 12;
         }
+        if (m.options.source) {
+            // "Fonte: empresa", small and grey, under everything else.
+            parts.push(text('chart-source', area.left, area.bottom - 2, m.options.source, { 'font-size': 12, fill: '#7F7F7F' }));
+            area.bottom -= 12 + 8;
+        }
         const legendAt = legendPosition(m, items);
         if (legendAt === 'bottom') {
             area.bottom -= LABEL_SIZE + 10;
@@ -350,6 +419,30 @@
             parts.push(legend(items, 'right', { left: area.right + 8, top: area.top }));
         }
         return area;
+    }
+
+    /* The category names under the plot, as fitCategoryLabels decided, from `top` down; xOf(i): the middle of category i. */
+    function categoryRow(fit, xOf, top) {
+        const names = fit.lines.map((lines, i) => {
+            if (i % fit.step !== 0) {
+                return '';
+            }
+            const x = n(xOf(i));
+            const y = top + fit.size + 2;
+            const attrs = ' font-size="' + fit.size + '" fill="' + TEXT_COLOR + '"';
+            if (fit.mode === 'rotate') {
+                return '<text class="chart-category-label" x="' + x + '" y="' + n(y) + '" text-anchor="end"' + attrs +
+                    ' transform="rotate(-45 ' + x + ' ' + n(y) + ')">' + App.util.escapeHtml(lines[0]) + '</text>';
+            }
+            if (lines.length === 1) {
+                return '<text class="chart-category-label" x="' + x + '" y="' + n(y) + '" text-anchor="middle"' + attrs + '>' +
+                    App.util.escapeHtml(lines[0]) + '</text>';
+            }
+            return '<text class="chart-category-label" x="' + x + '" y="' + n(y) + '" text-anchor="middle"' + attrs + '>' +
+                lines.map((part, index) => '<tspan x="' + x + '" dy="' + (index === 0 ? 0 : n(fit.size * 1.15)) + '">' +
+                    App.util.escapeHtml(part) + '</tspan>').join('') + '</text>';
+        });
+        return '<g class="chart-categories">' + names.join('') + '</g>';
     }
 
     // ---------------------------------------------------------------
@@ -383,9 +476,10 @@
     }
 
     /* An axis for `series`: its ticks and their labels (in % when every series is a percentage). */
-    function axisOf(series, stacked, count, tickCount, locale) {
+    /* An axis for `series`: its ticks (from limits.min / to limits.max when set) and their labels. */
+    function axisOf(series, stacked, count, tickCount, locale, limits) {
         const [low, high] = rangeOf(series, stacked, count);
-        const ticks = App.charts.niceTicks(low, high, tickCount);
+        const ticks = limitedTicks(low, high, tickCount, limits && limits.min, limits && limits.max);
         const percent = series.length > 0 && series.every((item) => item.percent);
         const step = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
         const format = { locale: locale, percent: percent, decimals: App.charts.decimalsOf([step], percent) };
@@ -413,18 +507,25 @@
         const count = Math.max(m.categories.length, 1);
         const primary = m.series.filter((series) => series.axis !== 'secondary');
         const secondary = m.series.filter((series) => series.axis === 'secondary');
-        const categoryWidth = Math.max(0, ...m.categories.map((name) => textWidth(name, LABEL_SIZE)));
+        // Bars: names at the left, on two lines when longer than 30% of the width.
+        const nameRoom = (area.right - area.left) * 0.3;
+        const sideNames = m.categories.map((name) => (horizontal ? twoLines(name, LABEL_SIZE, nameRoom) || [name] : [name]));
+        const categoryWidth = Math.max(0, ...[].concat(...sideNames).map((name) => textWidth(name, LABEL_SIZE)));
         const length = horizontal ? area.right - area.left - categoryWidth : area.bottom - area.top - ROW;
         const tickCount = Math.max(2, Math.min(6, Math.floor(length / (horizontal ? 80 : 45))));
+        const limits = { min: m.options.axisMin, max: m.options.axisMax };
         const axes = {
-            primary: axisOf(primary, stacked, m.categories.length, tickCount, locale),
-            secondary: secondary.length > 0 ? axisOf(secondary, false, m.categories.length, tickCount, locale) : null,
+            primary: axisOf(primary, stacked, m.categories.length, tickCount, locale, limits),
+            secondary: secondary.length > 0 ? axisOf(secondary, false, m.categories.length, tickCount, locale, null) : null,
         };
         const widest = (labels) => Math.max(...labels.map((label) => textWidth(label, LABEL_SIZE)));
+        const cagr = horizontal ? null : cagrOf(m);
 
         const plot = Object.assign({}, area);
-        plot.bottom -= ROW;   // the row of category names (columns) or of axis numbers (bars)
         plot.left += horizontal ? categoryWidth + 8 : widest(axes.primary.labels) + 6;
+        if (cagr) {
+            plot.top += 40;   // room for the CAGR arrow over the columns
+        }
         if (axes.secondary) {
             plot.right -= widest(axes.secondary.labels) + 6;
         }
@@ -433,12 +534,18 @@
             const labels = axes.primary.labels;
             plot.right -= Math.max(0, textWidth(labels[labels.length - 1], LABEL_SIZE) / 2 - PAD);
         }
+        // The row under the plot: axis numbers (bars), or the category names as they fit (columns).
+        const fit = horizontal ? null
+            : App.charts.fitCategoryLabels(m.categories, (plot.right - plot.left) / Math.max(m.categories.length, 1));
+        plot.bottom -= horizontal ? ROW : fit.height;
         const scale = (axis) => {
             const first = axis.ticks[0];
             const last = axis.ticks[axis.ticks.length - 1];
+            // Values beyond an axis minimum / maximum stop at it (a bar from 0 starts at the axis).
+            const inside = (value) => Math.min(Math.max(value, first), last);
             return horizontal
-                ? (value) => plot.left + (value - first) / (last - first) * (plot.right - plot.left)
-                : (value) => plot.bottom - (value - first) / (last - first) * (plot.bottom - plot.top);
+                ? (value) => plot.left + (inside(value) - first) / (last - first) * (plot.right - plot.left)
+                : (value) => plot.bottom - (inside(value) - first) / (last - first) * (plot.bottom - plot.top);
         };
         const at = { primary: scale(axes.primary), secondary: axes.secondary ? scale(axes.secondary) : null };
 
@@ -471,6 +578,7 @@
         const up = m.categories.map(() => 0);
         const down = m.categories.map(() => 0);
         const areaBase = m.categories.map(() => 0);
+        const highestAt = m.categories.map(() => Infinity);   // the top of what is drawn in each category (CAGR arrow)
         const labels = [];
         const lines = [];
         m.series.forEach((series, s) => {
@@ -479,6 +587,13 @@
             const decimals = /-100$/.test(m.type) ? 0 : App.charts.decimalsOf(series.values, series.percent);
             const labelFormat = { locale: locale, percent: series.percent, decimals: decimals };
             const xOf = (i) => plot.left + band * (i + 0.5);
+            if (series.kind !== 'bar') {
+                series.values.forEach((value, i) => {
+                    if (value !== null) {
+                        highestAt[i] = Math.min(highestAt[i], scaleOf(value + (series.kind === 'area' && stacked ? areaBase[i] : 0)));
+                    }
+                });
+            }
             if (series.kind === 'line') {
                 lines.push(drawLine(series, s, m.estimates, xOf, scaleOf, labels, m.options.dataLabels ? labelFormat : null));
                 return;
@@ -512,6 +627,7 @@
                 if (m.estimates[i]) {
                     style += ' fill-opacity: 0.5; stroke: ' + series.color + '; stroke-width: 1; stroke-dasharray: 3 2;';
                 }
+                highestAt[i] = Math.min(highestAt[i], box.y);
                 rects.push('<rect class="chart-bar" x="' + n(box.x) + '" y="' + n(box.y) + '" width="' + n(box.width) +
                     '" height="' + n(box.height) + '" style="' + style + '"/>');
                 if (m.options.dataLabels) {
@@ -528,12 +644,62 @@
         parts.push(horizontal ? line('chart-axis-line', zero, plot.top, zero, plot.bottom, AXIS_COLOR)
             : line('chart-axis-line', plot.left, zero, plot.right, zero, AXIS_COLOR));
         parts.push(...lines);
-        const names = m.categories.map((name, i) => (horizontal
-            ? text('chart-category-label', plot.left - 6, plot.top + band * (i + 0.5) + MIDDLE, name, { 'font-size': LABEL_SIZE, 'text-anchor': 'end', fill: TEXT_COLOR })
-            : text('chart-category-label', plot.left + band * (i + 0.5), plot.bottom + LABEL_SIZE + 2, name, { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR })));
-        parts.push('<g class="chart-categories">' + names.join('') + '</g>');
+        if (horizontal) {
+            parts.push('<g class="chart-categories">' + sideNames.map((lines, i) => {
+                const x = n(plot.left - 6);
+                const y = plot.top + band * (i + 0.5) + MIDDLE - (lines.length - 1) * LABEL_SIZE * 0.575;
+                return '<text class="chart-category-label" x="' + x + '" y="' + n(y) + '" text-anchor="end" font-size="' +
+                    LABEL_SIZE + '" fill="' + TEXT_COLOR + '">' + (lines.length === 1 ? App.util.escapeHtml(lines[0])
+                    : lines.map((part, index) => '<tspan x="' + x + '" dy="' + (index === 0 ? 0 : n(LABEL_SIZE * 1.15)) + '">' +
+                        App.util.escapeHtml(part) + '</tspan>').join('')) + '</text>';
+            }).join('') + '</g>');
+        } else {
+            parts.push(categoryRow(fit, (i) => plot.left + band * (i + 0.5), plot.bottom));
+        }
         parts.push('<g class="chart-data-labels">' + labels.filter(Boolean).join('') + '</g>');
+        if (cagr) {
+            parts.push(drawCagr(cagr, (i) => plot.left + band * (i + 0.5), highestAt, !!m.options.dataLabels, locale));
+        }
         return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
+    }
+
+    /* options.cagr { series, from, to } (category indexes) worked out: { from, to, rate }, or null. */
+    function cagrOf(m) {
+        const wanted = m.options.cagr;
+        if (!wanted || typeof wanted !== 'object') {
+            return null;
+        }
+        const series = m.series[Number(wanted.series) || 0];
+        const [from, to] = [Number(wanted.from), Number(wanted.to)];
+        if (!series || !(from >= 0) || !(to > from) || to >= m.categories.length) {
+            return null;
+        }
+        const rate = App.charts.cagr(series.values[from], series.values[to], to - from);
+        return rate === null ? null : { from: from, to: to, rate: rate };
+    }
+
+    /*
+     * The CAGR arrow: up from above the first column, across over everything
+     * between, down onto the last one, with "CAGR 19,6%" in a pill on top.
+     */
+    function drawCagr(cagr, xOf, highestAt, withLabels, locale) {
+        const clear = withLabels ? 22 : 8;   // keep clear of the columns' own numbers
+        const [x1, x2] = [xOf(cagr.from), xOf(cagr.to)];
+        const start = highestAt[cagr.from] - clear;
+        const end = highestAt[cagr.to] - clear;
+        const level = Math.min(...highestAt.slice(cagr.from, cagr.to + 1)) - clear - 16;
+        const content = 'CAGR ' + App.charts.formatValue(cagr.rate, { locale: locale, percent: true, decimals: 1 });
+        const pill = textWidth(content, 13) + 14;
+        const middle = (x1 + x2) / 2;
+        return '<g class="chart-annotation">' +
+            '<path class="chart-cagr" d="M' + n(x1) + ' ' + n(start) + 'L' + n(x1) + ' ' + n(level) + 'L' + n(x2) + ' ' + n(level) +
+            'L' + n(x2) + ' ' + n(end - 6) + '" style="fill: none; stroke: ' + TEXT_COLOR + '; stroke-width: 1.2;"/>' +
+            '<path class="chart-cagr-head" d="M' + n(x2) + ' ' + n(end) + 'L' + n(x2 - 4) + ' ' + n(end - 7) + 'L' + n(x2 + 4) + ' ' +
+            n(end - 7) + 'Z" style="fill: ' + TEXT_COLOR + ';"/>' +
+            '<rect x="' + n(middle - pill / 2) + '" y="' + n(level - 11) + '" width="' + n(pill) + '" height="22" rx="11" ' +
+            'style="fill: #FFFFFF; stroke: ' + TEXT_COLOR + '; stroke-width: 1.2;"/>' +
+            text('chart-cagr-label', middle, level + 4.5, content, { 'font-size': 13, 'font-weight': 'bold', 'text-anchor': 'middle', fill: TEXT_COLOR }) +
+            '</g>';
     }
 
     /*
@@ -814,16 +980,17 @@
         const length = area.bottom - area.top - ROW;
         const low = Math.min(0, ...steps.map((step) => Math.min(step.from, step.to)));
         const high = Math.max(0, ...steps.map((step) => Math.max(step.from, step.to)));
-        const ticks = App.charts.niceTicks(low, high, Math.max(2, Math.min(6, Math.floor(length / 45))));
+        const ticks = limitedTicks(low, high, Math.max(2, Math.min(6, Math.floor(length / 45))), m.options.axisMin, m.options.axisMax);
         const step = ticks.length > 1 ? ticks[1] - ticks[0] : 1;
         const tickLabels = ticks.map((tick) => App.charts.formatValue(tick, { locale: locale, decimals: App.charts.decimalsOf([step]) }));
 
         const plot = Object.assign({}, area);
-        plot.bottom -= ROW;
         plot.left += Math.max(...tickLabels.map((label) => textWidth(label, LABEL_SIZE))) + 6;
+        const fit = App.charts.fitCategoryLabels(m.categories, (plot.right - plot.left) / Math.max(steps.length, 1));
+        plot.bottom -= fit.height;
         const first = ticks[0];
         const last = ticks[ticks.length - 1];
-        const at = (value) => plot.bottom - (value - first) / (last - first) * (plot.bottom - plot.top);
+        const at = (value) => plot.bottom - (Math.min(Math.max(value, first), last) - first) / (last - first) * (plot.bottom - plot.top);
 
         const grid = [];
         ticks.forEach((tick, index) => {
@@ -872,9 +1039,7 @@
         parts.push('<g class="chart-series" data-series="0">' + rects.join('') + '</g>');
         parts.push('<g class="chart-connectors">' + connectors.join('') + '</g>');
         parts.push(line('chart-axis-line', plot.left, at(0), plot.right, at(0), AXIS_COLOR));
-        parts.push('<g class="chart-categories">' + m.categories.map((name, i) => text('chart-category-label',
-            plot.left + band * (i + 0.5), plot.bottom + LABEL_SIZE + 2, name,
-            { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR })).join('') + '</g>');
+        parts.push(categoryRow(fit, (i) => plot.left + band * (i + 0.5), plot.bottom));
         parts.push('<g class="chart-data-labels">' + labels.join('') + '</g>');
         return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
     }

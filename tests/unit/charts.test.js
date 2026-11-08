@@ -408,3 +408,56 @@ test('charts: area: filled down to zero under its line; stacked areas sit on eac
     const top = linePoints(stackedArea, 1)[0][1];
     assert(near(top, bars(stackedColumns, 1)[0].y), 'B\'s line at A + B (as the stacked column\'s top)');
 });
+
+// ---------------------------------------------------------------------------
+// Readability (Phase 6 step 5): crowded names, axis min / max, CAGR, source
+// ---------------------------------------------------------------------------
+
+test('charts: category names that do not fit wrap onto two lines, then get smaller, then turn, then skip', () => {
+    const fit = App.charts.fitCategoryLabels;
+    assertEqual(fit(['2022', '2023'], 120).mode, 'normal');
+    const wrapped = fit(['EBITDA 2024', 'Custos corporativos'], 120);
+    assertEqual([wrapped.mode, wrapped.size, wrapped.lines[1]], ['wrap', 14, ['Custos', 'corporativos']]);
+    assertEqual(fit(['Corporativos'], 85).size, 12, 'one long word: a smaller size');
+    const turned = fit(['Empresa Alfa Ltda', 'Empresa Beta Ltda'], 30);
+    assertEqual([turned.mode, turned.step], ['rotate', 1]);
+    assertEqual(fit(Array.from({ length: 40 }, (u, i) => 'Mês ' + (i + 1)), 15).step, 2, 'too many even turned: every other one');
+});
+
+test('charts: drawn category names: a long one on two lines; crowded ones turned', () => {
+    const svg = drawn(BRIDGE, 600, 360);
+    const long = Array.from(svg.querySelectorAll('.chart-category-label')).find((label) => /Custos/.test(label.textContent));
+    assertEqual(Array.from(long.querySelectorAll('tspan'), (line) => line.textContent), ['Custos', 'corporativos']);
+    const months = Object.assign({}, COLUMNS, { categories: Array.from({ length: 24 }, (u, i) => (i + 1) + '/2024'),
+        series: [{ name: 'R', values: Array.from({ length: 24 }, (u, i) => i + 1) }] });
+    const crowded = drawn(months, 600, 300);
+    const labels = crowded.querySelectorAll('.chart-category-label');
+    assertIncludes(labels[0].getAttribute('transform') || '', 'rotate(-45');
+});
+
+test('charts: axis minimum and maximum, when set; bars start at the axis', () => {
+    const svg = drawn(Object.assign({}, COLUMNS, { options: { axisMin: 50, axisMax: 350 } }));
+    const axis = texts(svg, '.chart-value-label');
+    assertEqual([axis[0], axis[axis.length - 1]], ['50', '350']);
+    const found = bars(svg);
+    assert(near(found[1].height, 3 * found[0].height), 'heights from 50: 50, 150 (and 250)');
+});
+
+test('charts: CAGR: worked out between two categories, drawn as an arrow over the columns', () => {
+    assert(Math.abs(App.charts.cagr(410, 702, 3) - 0.1964) < 0.0001, String(App.charts.cagr(410, 702, 3)));
+    assertEqual(App.charts.cagr(0, 702, 3), null, 'no CAGR from zero');
+    const svg = drawn(Object.assign({}, SPEC_COMBO, { options: Object.assign({}, SPEC_COMBO.options,
+        { cagr: { series: 0, from: 0, to: 3 } }) }), 760, 420);
+    assertEqual(texts(svg, '.chart-cagr-label'), ['CAGR 19,6%']);
+    const arrow = svg.querySelector('path.chart-cagr');
+    const top = Math.min(...arrow.getAttribute('d').split(/[MLZ]/).filter(Boolean).map((pair) => Number(pair.trim().split(' ')[1])));
+    assert(top < Math.min(...bars(svg).map((bar) => bar.y)), 'above the highest column');
+});
+
+test('charts: a source line under the chart', () => {
+    const svg = drawn(Object.assign({}, COLUMNS, { options: { source: 'Fonte: empresa' } }), 600, 300);
+    const source = svg.querySelector('.chart-source');
+    assertEqual(source.textContent, 'Fonte: empresa');
+    assert(Number(source.getAttribute('y')) > Math.max(...Array.from(svg.querySelectorAll('.chart-category-label'),
+        (label) => Number(label.getAttribute('y')))), 'below the category names');
+});

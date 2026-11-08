@@ -2907,6 +2907,43 @@ def test_chart_types_priority_2(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_chart_readability(browser):
+    """Readability: a long category name wraps, crowded ones turn 45 degrees, long bar names wrap at the left; the CAGR
+    arrow over a combo ("CAGR 19,6%") and a source line under it."""
+    combo = {"version": 1, "type": "combo", "categories": ["2022", "2023", "2024", "2025E"],
+             "estimates": [False, False, False, True],
+             "series": [{"name": "Receita (R$ mn)", "type": "column", "values": [410, 498, 587, 702]},
+                        {"name": "Margem EBITDA", "type": "line", "axis": "secondary", "values": [0.18, 0.2, 0.21, 0.23],
+                         "format": "percent"}],
+             "options": {"title": "Receita e margem", "dataLabels": True, "cagr": {"series": 0, "from": 0, "to": 3},
+                         "source": "Fonte: empresa"}}
+    bridge = {"version": 1, "type": "waterfall",
+              "categories": ["EBITDA 2024", "Novos parques", "Eficiência", "Custos corporativos", "EBITDA 2026E"],
+              "series": [{"name": "R$ mn", "values": [240, 95, 30, -25, 340]}], "options": {"title": "Ponte"}}
+    months = {"version": 1, "type": "column", "categories": [f"{i}/2024" for i in range(1, 25)],
+              "series": [{"name": "Vendas", "values": [10 + i for i in range(24)]}], "options": {"title": "Vendas mensais"}}
+    peers = {"version": 1, "type": "bar", "categories": ["Companhia Alfa de Energia", "Beta", "Gama Participações S.A."],
+             "series": [{"name": "EV/EBITDA", "values": [9.8, 7.5, 11.2]}], "options": {"title": "Múltiplos"}}
+    deck = chart_deck("charts-step5.html", [("e12", 40, 120, 600, 340, combo), ("e20", 660, 260, 580, 220, bridge),
+                                            ("e21", 40, 470, 600, 230, months), ("e22", 660, 490, 580, 210, peers)])
+    editor = Editor(browser)
+    editor.open(deck)
+    editor.close_dialog_if_open()
+    page = editor.page
+    page.evaluate("App.deck.goTo(3)")
+    read = lambda id_, script: page.evaluate(  # noqa: E731
+        "([id, script]) => { const svg = App.deck.getDocument().querySelector('[data-id=\"' + id + '\"] svg'); return eval(script); }",
+        [id_, script])
+    check(read("e12", "svg.querySelector('.chart-cagr-label').textContent") == "CAGR 19,6%", "the CAGR arrow")
+    check(read("e12", "svg.querySelector('.chart-source').textContent") == "Fonte: empresa", "the source line")
+    check(read("e20", "Array.from(svg.querySelectorAll('.chart-category-label tspan'), (t) => t.textContent).join('|')") ==
+          "Custos|corporativos", "the long bridge name on two lines")
+    check(read("e21", "/rotate\\(-45/.test(svg.querySelector('.chart-category-label').getAttribute('transform'))"), "months turned")
+    check(read("e22", "svg.querySelectorAll('.chart-category-label tspan').length") == 4, "two long company names on two lines")
+    page.screenshot(path=str(OUTPUT / "66-chart-readability.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -3978,6 +4015,7 @@ TESTS = [
     test_chart_lines_combo_donut,
     test_chart_waterfall,
     test_chart_types_priority_2,
+    test_chart_readability,
 ]
 
 

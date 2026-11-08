@@ -232,7 +232,7 @@ Nested bullets are the top priority of this phase.
 - [x] Priority 1 types: clustered column, stacked column, horizontal bar, line, combo (columns + line on secondary axis), waterfall, donut / pie *(clustered and stacked columns, horizontal and stacked bars, line (dashed into estimate years), combo (a second value axis on the right, in % for a margin), waterfall, donut and pie)*
 - [x] Priority 2 types: 100% stacked column / stacked bar, scatter / bubble, area *(types `stacked-column-100`, `stacked-bar-100` (shares as whole percents), `stacked-bar`, `area` (filled under its line) and `stacked-area`, `scatter` and `bubble`: each category is a point named after it, x and y from the first two series (their names are the axis titles), a bubble's area from the third)*
 - [x] Resizing re-renders at the new size (never stretches the SVG) *(handles and Format pane; the text keeps its size; one undo step)*
-- [ ] "Nice" axis ticks; label collision handling (shrink, rotate or skip category labels)
+- [x] "Nice" axis ticks; label collision handling (shrink, rotate or skip category labels) *(1-2-5 axis steps; category names: as they are, else on two lines, else smaller (12 / 11 px), else turned 45°, else only every 2nd / 3rd …; bar charts wrap long names at the left)*
 - [ ] Data editor: double-click opens a data grid in the Format pane (rows = categories, columns = series)
 - [ ] Data editor: paste from Excel into the grid; add/remove rows and series; reorder by dragging
 - [ ] Per series: name, color, chart type and axis (primary/secondary) for combo charts
@@ -242,7 +242,7 @@ Nested bullets are the top priority of this phase.
 - [ ] Formatting: title, axis titles, legend (top/bottom/right/hidden), gridlines on/off, axis min/max (auto by default), gap width
 - [ ] Data labels: on/off, position (inside end, outside end, center), number format (decimals, pt-BR/en-US separators, percent, negatives in parentheses, units text)
 - [x] Colors default to theme variables plus a derived palette; fonts from `--font-body` *(accent, primary, lighter mixes of both, then greys; a series' own colour wins)*
-- [ ] Annotations: automatic CAGR arrow between two columns; source/footnote line
+- [x] Annotations: automatic CAGR arrow between two columns; source/footnote line *(options.cagr {series, from, to}: worked out and drawn as an arrow over the columns with "CAGR 19,6%" in a pill; options.source: a small grey line under the chart; chosen from the ribbon from the Chart Design step)*
 - [x] Unit tests for the renderer with fixed inputs *(tests/unit/charts.test.js: the drawn SVG is read back and measured; each new type adds its own)*
 - [ ] Fallback documented: unsupported chart types pasted from Excel as images (Phase 5)
 - [ ] **Done when:** an EBITDA bridge and a revenue-plus-margin combo chart can be built from data pasted from Excel, edited, saved, reopened, and printed to PDF with sharp lines.
@@ -250,6 +250,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Lines, combo, donut: open `tests/output/charts-step2.html` (made by the tests). Slide 4: a combo with revenue columns (numbers inside their base) and the margin as a red line with % on a right-hand axis, dashed into 2025E; a line chart; a donut with 55% / 30% / 15% and its legend on the right. Open `samples/copilot-appendix-a-deck.html`: its combo chart is drawn (the waterfall is still grey until the next step). Open `samples/contract-deck.html`, slide 4: the chart looks as before; resize it: now the editor draws it
   - [ ] Waterfall: open `samples/copilot-appendix-a-deck.html`, slide 2: the EBITDA bridge is drawn: EBITDA 2024 and 2026E in the deck's accent, Novos parques and Eficiência green, Custos corporativos red and hanging down, thin connector lines between the bars, labels +95, +30, -25
   - [ ] More types: open `tests/output/charts-step4.html` (made by the tests). Slide 4: a 100% column chart (each year to 100%, shares as 60% / 40%, 2025E lighter), stacked areas, a bubble chart of four named companies (growth in % across, EV/EBITDA up, bigger revenue = bigger bubble), and 100% bars for capital structure
+  - [ ] Readability: open `tests/output/charts-step5.html` (made by the tests). Slide 4: "CAGR 19,6%" in a pill on an arrow over the revenue columns and "Fonte: empresa" under the chart; in the bridge "Custos corporativos" on two lines; 24 months of columns with their names turned; long company names on two lines left of their bars
 
 ## Phase 7: Arrange and slides
 

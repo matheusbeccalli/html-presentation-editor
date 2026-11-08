@@ -85,3 +85,45 @@ test('chart data: a row the CAGR runs to stays its end when rows move; a removed
     App.chartData.removeRow(data, 1);
     assertEqual(data.options.cagr, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Paste from Excel (Phase 6 step 8)
+// ---------------------------------------------------------------------------
+
+const COMPS_ROWS = [
+    ['Empresa', 'EV (R$ mn)', 'EV/EBITDA', 'Margem EBITDA'],
+    ['Alfa', '2.450', '9,8x', '19,50%'],
+    ['Beta', '1.120', '(1,2x)', '-3,50%'],
+];
+
+test('chart data: a whole table has names across its first row; a block of numbers does not', () => {
+    assert(App.chartData.isWholeTable(COMPS_ROWS), 'comps');
+    assert(App.chartData.isWholeTable([['', 'Receita', 'EBITDA'], ['2022', '100', '30']]), 'years down the side are names too');
+    assert(!App.chartData.isWholeTable([['100', '30'], ['120', '36']]), 'numbers only');
+    assert(!App.chartData.isWholeTable([['Alfa', '10'], ['Beta', '20']]), 'names down the side, no header row');
+});
+
+test('chart data: a whole table replaces the data: names, series, %, estimates; colours of kept series stay', () => {
+    const data = sampleColumns();
+    data.series[0].color = '#00b050';
+    data.options.cagr = { series: 0, from: 0, to: 2 };
+    App.chartData.fromRows(data, COMPS_ROWS, 'pt-BR');
+    assertEqual(data.categories, ['Alfa', 'Beta']);
+    assertEqual(data.series.map((series) => series.name), ['EV (R$ mn)', 'EV/EBITDA', 'Margem EBITDA']);
+    assertEqual(data.series.map((series) => series.values), [[2450, 1120], [9.8, -1.2], [0.195, -0.035]]);
+    assertEqual([data.series[0].color, data.series[2].format], ['#00b050', 'percent']);
+    assertEqual(data.options.cagr, undefined, 'the CAGR pointed past the new rows');
+    const years = sampleBridge();
+    App.chartData.fromRows(years, [['', 'R$ mn'], ['EBITDA 2024', '240'], ['Novos parques', '95'], ['EBITDA 2026E', '335']], 'pt-BR');
+    assertEqual([years.estimates, years.roles], [[false, false, true], undefined], '2026E an estimate; a bridge\'s roles back to first / last');
+});
+
+test('chart data: a block of numbers fills from the cell, adding rows and series as needed', () => {
+    const data = sampleColumns();
+    App.chartData.fillRows(data, [['300'], ['400'], ['500']], 1, 0, 'pt-BR');
+    assertEqual(data.series[0].values, [100, 300, 400, 500]);
+    assertEqual(data.categories.length, 4);
+    App.chartData.fillRows(data, [['Alfa', '10', '1', '7']], 0, -1, 'pt-BR');
+    assertEqual([data.categories[0], data.series[0].values[0], data.series[1].values[0], data.series.length, data.series[2].values[0]],
+        ['Alfa', 10, 1, 3, 7]);
+});

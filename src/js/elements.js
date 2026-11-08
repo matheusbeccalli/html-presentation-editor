@@ -298,8 +298,8 @@
     }
 
     /*
-     * Ctrl+V: a table from another program (Excel), else a picture (a
-     * screenshot, an Excel chart), else our own copy. Excel puts a picture of
+     * Ctrl+V: cells from another program (Excel) into a selected chart's data,
+     * else a table, else a picture (a screenshot, an Excel chart), else our own copy. Excel puts a picture of
      * copied cells on the clipboard too, so the table is looked for first.
      */
     function onPasteEvent(event) {
@@ -309,7 +309,9 @@
         const clipboard = { html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') };
         const ours = copyMark !== null && clipboard.html.indexOf(copyMark) !== -1;
         const pictures = App.images.picturesIn(event.clipboardData);
-        if (!ours && App.tablePaste.paste(clipboard)) {
+        if (!ours && App.chartData.pasteOnChart(clipboard)) {
+            event.preventDefault();   // cells pasted on a selected chart become its data, not a new table
+        } else if (!ours && App.tablePaste.paste(clipboard)) {
             event.preventDefault();
         } else if (!ours && pictures.length > 0) {
             event.preventDefault();

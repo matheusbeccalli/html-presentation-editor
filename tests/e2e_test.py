@@ -871,6 +871,11 @@ def put_on_clipboard(page, html, text):
     }""", [html, text])
 
 
+def put_text_on_clipboard(page, text):
+    """Only plain text on the system clipboard, as a text editor copies (tab-separated cells, say)."""
+    page.evaluate("text => navigator.clipboard.writeText(text)", text)
+
+
 def test_paste_into_text(browser):
     """Ctrl+V (lists and bold kept, the deck's look), Ctrl+Shift+V (plain text), each one undo step."""
     context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
@@ -3125,6 +3130,63 @@ def test_chart_data_grid(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_chart_paste_from_excel(browser):
+    """Paste from Excel into a chart: on the selected chart, Excel's comps table (the real capture, fake text) becomes
+    its data (names, series, %), one undo step; into the grid, a column of numbers fills from the cell (adding a row),
+    names and numbers from the category column; a single value pastes as typing."""
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    editor.open(CONTRACT)
+    page = editor.page
+    grid = "#chart-data-grid"
+    cell = lambda row, col: f"{grid} input.cell[data-row='{row}'][data-col='{col}']"  # noqa: E731
+    page.evaluate("App.deck.goTo(4)")
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.chart-button")
+    page.click(".chart-gallery-item[data-chart-type='column']")
+    chart = page.evaluate("App.selection.selectedId()")
+    data = lambda: page.evaluate(CHART_DATA, chart)  # noqa: E731
+
+    # A column of numbers pasted into the grid from 2023's cell: it fills down, a fifth row is added.
+    page.click(cell(1, 0))
+    put_text_on_clipboard(page, "300\r\n400\r\n500\r\n600\r\n")
+    page.keyboard.press("Control+v")
+    check(data()["series"][0]["values"] == [100, 300, 400, 500, 600] and len(data()["categories"]) == 5, f"filled down: {data()}")
+    check(page.input_value(cell(4, 0)) == "600" and page.evaluate("App.history.undoLabel()") == "Paste chart data", "the grid shows it, one step")
+
+    # Names and numbers from the category column.
+    page.click(f"{grid} input.category[data-row='0']")
+    put_text_on_clipboard(page, "Alfa\t10\r\nBeta\t20\r\n")
+    page.keyboard.press("Control+v")
+    check(data()["categories"][:2] == ["Alfa", "Beta"] and data()["series"][0]["values"][:2] == [10, 20], f"names and numbers: {data()}")
+
+    # One value pastes as typing does.
+    page.click(cell(2, 0))
+    put_text_on_clipboard(page, "777")
+    page.keyboard.press("Control+v")
+    check(data()["series"][0]["values"][2] == 777, f"one value: {data()['series'][0]['values']}")
+
+    # Excel's comps table pasted on the selected chart (the grid closed): it becomes the chart's data.
+    page.click("#chart-data-close")
+    comps = clipboard_fixture("excel-comps")
+    put_on_clipboard(page, comps["text/html"], comps["text/plain"])
+    page.keyboard.press("Control+v")
+    pasted = data()
+    check(pasted["categories"] == ["Aaaa Aaaaa", "Aaaa Aaaaaaaa", "Aaaaa Aaaaaa", "Aaaaaaa Aaaaaaaaa", "Aaaaaaa"],
+          f"the companies: {pasted['categories']}")
+    check([series["values"] for series in pasted["series"]] == [[2450, 1120, 780, 530, 950], [9.8, 8.9, 10.4, -1.2, 9.4],
+                                                                [0.195, 0.172, 0.21, -0.035, 0.184]], f"the numbers: {pasted['series']}")
+    check(pasted["series"][2].get("format") == "percent", "the margin in %")
+    check(page.is_visible("#chart-data-panel") and page.evaluate("App.deck.getCurrentSlide().querySelectorAll('table').length") == 0,
+          "the grid shows it; no new table on the slide")
+    page.screenshot(path=str(OUTPUT / "70-chart-pasted.png"))
+    page.click("#chart-data-close")
+    page.keyboard.press("Control+z")
+    check(data()["series"][0]["values"][2] == 777, "one undo: the data before the paste")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4199,6 +4261,7 @@ TESTS = [
     test_chart_readability,
     test_insert_chart_and_design,
     test_chart_data_grid,
+    test_chart_paste_from_excel,
 ]
 
 

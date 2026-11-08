@@ -15,7 +15,12 @@
  * Numbers are typed as the deck writes them (pt-BR 1.234,5 or en-US 1,234.5,
  * numbers.js); a percentage series takes "18" as 18%.
  *
- * Talks to: charts.js (readData / writeData), numbers.js, history.js,
+ * Paste from Excel (Phase 4's reader, tablepaste.readCells): in the grid,
+ * several cells fill it from the cell (adding rows and series), or replace it
+ * all when they are a whole table (series names across the top); on the
+ * slide, Ctrl+V with a chart selected does the same for that chart.
+ *
+ * Talks to: charts.js (readData / writeData), numbers.js, tablepaste.js, history.js,
  *           selection.js, textcontrols.js (colour split buttons), tabledesign.js (locale).
  */
 
@@ -178,6 +183,90 @@
         if (data.options.cagr) {
             data.options.cagr.series = moved(data.options.cagr.series, from, to);
         }
+    };
+
+    // ---------------------------------------------------------------
+    // Paste from Excel (pure: rows are the pasted cells' texts)
+    // ---------------------------------------------------------------
+
+    function isNumber(text) {
+        const typed = String(text === undefined || text === null ? '' : text).trim();
+        return typed !== '' && App.numbers.parse(typed, 'pt-BR') !== null;
+    }
+
+    /*
+     * A whole table: a header row of names (series) across the top, its first
+     * cell empty or a name too. Then the first column (years too) is the
+     * categories. A block that starts with numbers is not.
+     */
+    App.chartData.isWholeTable = function isWholeTable(rows) {
+        return rows.length >= 2 && rows[0].length >= 2 && !isNumber(rows[0][0]) &&
+            rows[0].slice(1).every((text) => String(text).trim() !== '' && !isNumber(text));
+    };
+
+    /*
+     * A whole table as the chart's data: the first column the categories, each
+     * other column a series named by its header (a column of text, not numbers,
+     * is left out). A column of percentages is a % series; a category ending in
+     * a digit and E (2026E) an estimate; a bridge's roles go back to first =
+     * start, last = end. Series in the same place keep their colour and type.
+     */
+    App.chartData.fromRows = function fromRows(data, rows, locale) {
+        const header = rows[0];
+        const body = rows.slice(1).filter((row) => row.some((text) => String(text).trim() !== ''));
+        const width = Math.max(...rows.map((row) => row.length));
+        const old = Array.isArray(data.series) ? data.series : [];
+        const series = [];
+        for (let col = 1; col < width; col++) {
+            const texts = body.map((row) => String(row[col] === undefined ? '' : row[col]).trim());
+            const values = texts.map((text) => {
+                const value = App.chartData.parseCell(text, locale, false);
+                return value === undefined ? null : value;
+            });
+            const filled = texts.filter((text) => text !== '');
+            if (filled.length > 0 && values.every((value) => value === null)) {
+                continue;   // a column of names, not numbers
+            }
+            const kept = Object.assign({}, old[series.length]);
+            delete kept.format;
+            const item = Object.assign(kept, {
+                name: String(header[col] === undefined ? '' : header[col]).trim() || 'Série ' + (series.length + 1), values: values,
+            });
+            if (filled.length > 0 && filled.every((text) => /%\)?$/.test(text))) {
+                item.format = 'percent';
+            }
+            series.push(item);
+        }
+        data.categories = body.map((row) => String(row[0] === undefined ? '' : row[0]).trim());
+        data.series = series;
+        data.estimates = data.categories.map((name) => /\d\s*E$/i.test(name));
+        delete data.roles;
+        data.options = data.options || {};
+        const cagr = data.options.cagr;
+        if (cagr && (cagr.series >= series.length || cagr.to >= data.categories.length)) {
+            delete data.options.cagr;
+        }
+    };
+
+    /* A block pasted from row `row`, column `col` (-1: the category names): it fills over, adding rows and series. */
+    App.chartData.fillRows = function fillRows(data, rows, row, col, locale) {
+        complete(data);
+        rows.forEach((cells, i) => cells.forEach((text, j) => {
+            const r = row + i;
+            const c = col + j;
+            while (r >= data.categories.length) {
+                App.chartData.addRow(data, data.categories.length);
+            }
+            if (c === -1) {
+                data.categories[r] = String(text).trim();
+                return;
+            }
+            while (c >= data.series.length) {
+                App.chartData.addSeries(data);
+            }
+            const value = App.chartData.parseCell(text, locale, data.series[c].format === 'percent');
+            data.series[c].values[r] = value === undefined ? null : value;
+        }));
     };
 
     // ---------------------------------------------------------------
@@ -435,10 +524,71 @@
         }
     }
 
+    /*
+     * The clipboard's cells ({ html, text }, read as Phase 4 reads Excel) as
+     * rows of texts; null for one value. In the grid a column of numbers, one
+     * per line and no tabs, is cells too (in a text box it is just text).
+     */
+    function rowsOf(clipboard) {
+        const cells = App.tablePaste.readCells(clipboard);
+        if (cells) {
+            return cells.cells.map((row) => row.map((cell) => (cell ? cell.lines.join(' ') : '')));
+        }
+        const lines = (clipboard.text || '').replace(/\r\n?/g, '\n').replace(/\n+$/, '').split('\n');
+        return lines.length > 1 && !/<table/i.test(clipboard.html || '') ? lines.map((line) => line.split('\t')) : null;
+    }
+
+    /* Pasted rows into `data`: a whole table replaces it, a block fills from (row, col); numbers read as they show. */
+    function pasteRows(data, rows, row, col) {
+        const locale = App.numbers.localeShown([].concat(...rows)) || localeOf(data);
+        if (App.chartData.isWholeTable(rows)) {
+            App.chartData.fromRows(data, rows, locale);
+        } else {
+            App.chartData.fillRows(data, rows, row, col, locale);
+        }
+    }
+
+    /* Ctrl+V in the grid: several cells fill it from the cell (or replace it all); one value pastes as typing. */
+    function onGridPaste(event) {
+        const target = event.target;
+        if (!shown || !target.matches || !target.matches('input.cell, input.category')) {
+            return;
+        }
+        const rows = rowsOf({ html: event.clipboardData.getData('text/html'), text: event.clipboardData.getData('text/plain') });
+        if (!rows) {
+            return;
+        }
+        event.preventDefault();
+        const row = Number(target.getAttribute('data-row'));
+        const col = target.classList.contains('category') ? -1 : Number(target.getAttribute('data-col'));
+        edit('Paste chart data', (copy) => pasteRows(copy, rows, row, col), { rebuild: true });
+    }
+
+    /*
+     * Ctrl+V on the slide with a chart selected (elements.js): cells from Excel
+     * become its data (a whole table replaces it, numbers fill from the top
+     * left) instead of a new table; the grid opens to show them. False when
+     * there is no chart or no cells.
+     */
+    App.chartData.pasteOnChart = function pasteOnChart(clipboard) {
+        const element = App.selection.getElement();
+        if (!element || element.getAttribute('data-type') !== 'chart' || !App.charts.readData(element)) {
+            return false;
+        }
+        const rows = rowsOf(clipboard);
+        if (!rows) {
+            return false;
+        }
+        App.chartData.open(element);
+        edit('Paste chart data', (copy) => pasteRows(copy, rows, 0, 0), { rebuild: true });
+        return true;
+    };
+
     /* Wiring, called once from App.start(). */
     App.chartData.init = function init() {
         panel = document.getElementById('chart-data-panel');
         grid = document.getElementById('chart-data-grid');
+        panel.addEventListener('paste', onGridPaste);
         document.getElementById('chart-data-close').addEventListener('click', () => App.chartData.close());
         document.getElementById('chart-data-add-row').addEventListener('click', () => {
             let row = 0;

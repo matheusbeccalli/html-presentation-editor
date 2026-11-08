@@ -53,6 +53,7 @@ App.start = function start() {
     App.formatPane.init();
     App.shapeControls.init();   // its Format pane section
     App.chartControls.init();   // its Format pane section too
+    App.chartData.init();       // the data grid under the slide
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();

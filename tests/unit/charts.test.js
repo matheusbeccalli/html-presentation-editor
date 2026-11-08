@@ -508,3 +508,9 @@ test('charts: whether data labels show: as set, else on by default for bridges, 
         App.charts.labelsOn({ type: 'waterfall', options: { dataLabels: false } }), App.charts.labelsOn({ type: 'line', options: { dataLabels: true } })],
     [false, true, false, true]);
 });
+
+test('charts: "E after estimates": an estimate year gets an E on the chart (not twice)', () => {
+    const svg = drawn(Object.assign({}, COLUMNS, { categories: ['2023', '2024', '2025E'], estimates: [false, true, true],
+        options: { estimateSuffix: true } }));
+    assertEqual(texts(svg, '.chart-category-label'), ['2023', '2024E', '2025E']);
+});

@@ -93,7 +93,8 @@
             App.elements.addOnTop(slide, figure);
         });
         App.selection.select(figure);
-        App.ui.setStatus('Sample numbers: type over them in the data grid (Format pane for titles)');
+        App.chartData.open(figure);   // made-up numbers: the grid opens to type over them
+        App.ui.setStatus('Made-up numbers: type over them in the grid under the slide');
         return figure;
     };
 
@@ -151,6 +152,10 @@
                 run: (choice) => changeChart('Waterfall colour', (data) => {
                     data.options.waterfall = Object.assign({}, data.options.waterfall, { [choice.kind]: choice.value });
                 }),
+            },
+            editChartData: {
+                label: 'Edit Data', isEnabled: isChart, isChecked: () => App.chartData.isOpen(),
+                run: () => (App.chartData.isOpen() ? App.chartData.close() : App.chartData.open(selectedChart())),
             },
             setChartOption: {
                 label: 'Chart option', isEnabled: isChart,
@@ -322,6 +327,7 @@
                 input.value = options[name] === undefined || options[name] === null ? '' : String(options[name]);
             }
         });
+        document.getElementById('format-chart-esuffix').checked = !!options.estimateSuffix;
     }
 
     function applyField(input, name, label, kind) {
@@ -359,6 +365,9 @@
                 }
             });
         });
+        const suffix = document.getElementById('format-chart-esuffix');
+        suffix.addEventListener('change', () => App.commands.run('setChartOption',
+            { name: 'estimateSuffix', value: suffix.checked ? true : '', label: 'Estimate suffix' }));
         ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded'].forEach((name) => {
             App.events.on(name, () => refreshPane(false));
         });

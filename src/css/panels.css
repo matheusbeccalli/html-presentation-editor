@@ -171,6 +171,38 @@
 #notes-text { padding-top: 4px; line-height: 1.45; white-space: pre-wrap; }
 #notes-text.empty { color: var(--text-muted); font-style: italic; }
 
+/* ---- Chart data (chartdata.js): in place of the notes, taller, while a chart's data is open ---- */
+#chart-data-panel {
+    flex: none;
+    height: 250px;
+    display: flex; flex-direction: column;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+}
+#chart-data-panel[hidden], #notes-panel[hidden] { display: none; }
+.chart-data-bar { display: flex; align-items: center; gap: 10px; padding: 6px 12px; border-bottom: 1px solid var(--border); }
+.chart-data-bar .panel-hint { flex: 1; font-size: 12px; }
+.chart-data-bar .btn { padding: 3px 10px; font-size: 12px; }
+.chart-data-scroll { flex: 1; overflow: auto; }
+#chart-data-grid { border-collapse: collapse; font-size: 13px; }
+#chart-data-grid th, #chart-data-grid td { border: 1px solid var(--border); padding: 0; background: var(--surface); }
+#chart-data-grid thead th { position: sticky; top: 0; z-index: 1; background: #f3f2f1; font-weight: 400; }
+#chart-data-grid tbody th { font-weight: 400; }
+#chart-data-grid th.corner { padding: 4px 8px; text-align: left; color: var(--text-muted); font-size: 12px; }
+#chart-data-grid input[type=text] { width: 100%; min-width: 0; border: 0; padding: 5px 6px; font: inherit; background: transparent; }
+#chart-data-grid input[type=text]:focus { outline: 2px solid var(--focus); outline-offset: -2px; }
+#chart-data-grid input.cell { width: 96px; text-align: right; }
+#chart-data-grid input.cell.invalid { background: #fde7e9; }
+#chart-data-grid input.category { width: 130px; }
+#chart-data-grid input.series-name { width: 120px; font-weight: 600; }
+.series-head-parts, .row-head-parts { display: flex; align-items: center; gap: 2px; padding-right: 2px; }
+.series-head-parts select, .row-head-parts select { font: inherit; font-size: 12px; padding: 1px 2px; }
+.row-handle, .series-handle { cursor: grab; color: var(--text-muted); padding: 0 4px; user-select: none; touch-action: none; }
+#chart-data-grid.dragging, #chart-data-grid.dragging * { cursor: grabbing; }
+.row-remove, .series-remove { border: 0; background: transparent; color: var(--text-muted); font-size: 15px; cursor: pointer; padding: 0 5px; }
+.row-remove:hover, .series-remove:hover { color: #a4262c; }
+.estimate-label { display: flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-muted); padding: 0 4px; }
+
 /* ---- Find & replace (findreplace.js): floats over the top right of the slide, stays open ---- */
 #find-panel {
     position: absolute; top: 8px; right: 16px; z-index: 20;

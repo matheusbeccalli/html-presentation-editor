@@ -234,6 +234,11 @@
         '#7F7F7F', '#BFBFBF',
     ];
 
+    /* The colour series number `index` gets when it has none of its own. */
+    App.charts.defaultColor = function defaultColor(index) {
+        return PALETTE[index % PALETTE.length];
+    };
+
     /* A chart type render() can draw (not the placeholder). */
     App.charts.canDraw = function canDraw(type) {
         return DRAWN.indexOf(type) !== -1;
@@ -260,8 +265,11 @@
         });
         guessComboAxes(data.type, series);
         const estimates = Array.isArray(data.estimates) ? data.estimates : [];
+        // options.estimateSuffix: "E after estimates" (2026 -> 2026E on the chart; the data keeps 2026).
+        const suffix = !!(data.options && data.options.estimateSuffix);
+        const shownNames = categories.map((name, i) => (suffix && estimates[i] && !/E$/i.test(name.trim()) ? name + 'E' : name));
         return {
-            type: data.type, categories: categories, series: series,
+            type: data.type, categories: shownNames, series: series,
             estimates: categories.map((name, i) => !!estimates[i]),
             roles: rolesOf(data.roles, categories.length),
             options: Object.assign({}, data.options),

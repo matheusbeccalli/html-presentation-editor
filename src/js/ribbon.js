@@ -116,6 +116,7 @@
             id: 'chart-design', label: 'Chart Design', contextual: () => App.chartControls.isChartSelected(),
             groups: [
                 { label: 'Type', commands: [{ control: 'chartType' }] },
+                { label: 'Data', commands: [['editChartData', 'table']] },
                 { label: 'Chart Elements', rows: [
                     [{ command: 'chartTitle', icon: 'chartTitle' }, { command: 'chartDataLabels', icon: 'dataLabels' },
                         { command: 'chartGridlines', icon: 'gridlines' }],
@@ -305,7 +306,8 @@
         });
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
-         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed', 'crop-changed']
+         'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed', 'crop-changed',
+         'chart-data-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 

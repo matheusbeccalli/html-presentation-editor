@@ -3031,6 +3031,100 @@ def test_insert_chart_and_design(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_chart_data_grid(browser):
+    """The data grid under the slide: opens with a new chart and on a double-click; typing in a cell redraws the chart
+    at once (one undo step per cell); rows and series added, removed, renamed, dragged; estimates, waterfall roles,
+    a combo series' type and axis, a series colour."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    grid = "#chart-data-grid"
+    cell = lambda row, col: f"{grid} input.cell[data-row='{row}'][data-col='{col}']"  # noqa: E731
+
+    def insert(kind):
+        page.click(".ribbon-tab[data-tab='insert']")
+        page.click(".ribbon-button.chart-button")
+        page.click(f".chart-gallery-item[data-chart-type='{kind}']")
+        return page.evaluate("App.selection.selectedId()")
+
+    page.evaluate("App.deck.goTo(4)")
+    chart = insert("column")
+    data = lambda: page.evaluate(CHART_DATA, chart)  # noqa: E731
+    check(page.is_visible("#chart-data-panel") and page.is_hidden("#notes-panel"), "a new chart opens its grid (under the slide)")
+    check(page.locator(f"{grid} tbody tr").count() == 4 and page.input_value(cell(0, 0)) == "100", "4 rows, the sample numbers")
+
+    # Typing redraws at once; the whole cell is one undo step.
+    heights = lambda: [bar[1] for bar in page.evaluate(CHART_BARS, chart)]  # noqa: E731
+    check(heights()[0] < heights()[1], "the sample: 100 shorter than 120")
+    page.fill(cell(0, 0), "")
+    page.click(cell(0, 0))
+    page.keyboard.type("200")
+    check(data()["series"][0]["values"][0] == 200 and heights()[0] > heights()[1], "the chart follows the typing: 200 now taller")
+    page.keyboard.press("Enter")
+    check(page.evaluate("document.activeElement.getAttribute('data-row')") == "1", "Enter: the next row")
+    page.keyboard.type("1.234,5")
+    page.keyboard.press("Tab")
+    check(data()["series"][0]["values"][1] == 1234.5, "1.234,5 read the deck's way")
+    page.click("#chart-data-close")
+    check(page.is_hidden("#chart-data-panel") and page.is_visible("#notes-panel"), "closed: the notes are back")
+    page.keyboard.press("Control+z")
+    check(data()["series"][0]["values"][1] == 120, f"one undo: that cell back: {data()['series'][0]['values']}")
+    page.keyboard.press("Control+z")
+    check(data()["series"][0]["values"][0] == 100, "one more: the first cell back")
+
+    # A double-click opens it again; a row and a series added, named; an estimate ticked.
+    page.mouse.dblclick(*slide_to_screen(page, 640, 375))
+    check(page.is_visible("#chart-data-panel"), "double-click: the grid")
+    page.click("#chart-data-add-row")
+    page.fill(f"{grid} input.category[data-row='4']", "2026E")
+    page.keyboard.press("Enter")
+    page.check(f"{grid} input.estimate[data-row='4']")
+    page.click("#chart-data-add-series")
+    page.fill(f"{grid} input.series-name[data-col='1']", "EBITDA")
+    page.keyboard.press("Enter")
+    page.fill(cell(4, 1), "40")
+    page.keyboard.press("Enter")
+    check(data()["categories"][-1] == "2026E" and data()["estimates"][-1] is True and data()["series"][1]["name"] == "EBITDA"
+          and data()["series"][1]["values"][4] == 40, f"row, estimate, series: {data()}")
+    check(len(page.evaluate(CHART_BARS, chart)) == 5, "five columns: four revenues, one EBITDA (empty cells draw nothing)")
+    page.fill(f"{grid} input.category[data-row='4']", "2026")
+    page.check("#format-chart-esuffix")
+    names = page.evaluate("id => Array.from(App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] .chart-category-label'), (t) => t.textContent)", chart)
+    check(names[-1] == "2026E" and data()["categories"][-1] == "2026", f"E added on the chart only: {names}")
+
+    # A row dragged by its handle to the top; a row removed.
+    handle = page.locator(f"{grid} .row-handle[data-row='4']").bounding_box()
+    target = page.locator(f"{grid} tbody tr").first.bounding_box()
+    drag(page, (handle["x"] + 4, handle["y"] + 4), (handle["x"] + 4, target["y"] + 3))
+    check(data()["categories"][0] == "2026" and data()["series"][1]["values"][0] == 40, f"moved with its numbers: {data()['categories']}")
+    page.click(f"{grid} .row-remove[data-row='0']")
+    check(data()["categories"] == ["2022", "2023", "2024", "2025E"], "removed")
+
+    # A series' colour.
+    page.click(f"{grid} .series-color-menu-button >> nth=1")
+    page.click(".series-color-menu .color-swatch[title='Green']")
+    check(data()["series"][1].get("color") == "#00b050", f"EBITDA green: {data()['series'][1]}")
+    page.screenshot(path=str(OUTPUT / "69-chart-data-grid.png"))
+
+    # A combo: a series' type and axis; a waterfall: the roles.
+    page.keyboard.press("Escape")
+    combo = insert("combo")
+    page.select_option(f"{grid} select.series-type[data-col='1']", "column")
+    check(page.evaluate(CHART_DATA, combo)["series"][1]["type"] == "column", "the margin as columns now")
+    page.select_option(f"{grid} select.series-axis[data-col='1']", "primary")
+    check(page.evaluate(CHART_DATA, combo)["series"][1]["axis"] == "primary", "on the main axis")
+    bridge = insert("waterfall")
+    page.select_option(f"{grid} select.role[data-row='2']", "subtotal")
+    check(page.evaluate(CHART_DATA, bridge)["roles"] == ["start", "delta", "subtotal", "end"], "a subtotal")
+    check(page.evaluate(CHART_COUNT, [bridge, "rect[data-role='total']"]) == 3, "drawn as a total")
+
+    # Selecting something else closes the grid.
+    page.keyboard.press("Escape")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e14\"]'))")
+    check(page.is_hidden("#chart-data-panel"), "a text box selected: the grid closes")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4104,6 +4198,7 @@ TESTS = [
     test_chart_types_priority_2,
     test_chart_readability,
     test_insert_chart_and_design,
+    test_chart_data_grid,
 ]
 
 

@@ -208,6 +208,11 @@
             editCellAt(element, point);
             return;
         }
+        if (element && element.getAttribute('data-type') === 'chart') {
+            App.selection.select(element);
+            App.chartData.open(element);   // its data grid, under the slide
+            return;
+        }
         if (App.shapes.canHoldText(element)) {
             App.selection.select(element);
             App.text.enterEdit(App.shapes.textOf(element, { create: true }), { point: point });

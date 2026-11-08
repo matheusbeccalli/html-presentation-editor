@@ -52,6 +52,7 @@ App.start = function start() {
     App.crop.init();       // after selection: its press listener goes first
     App.formatPane.init();
     App.shapeControls.init();   // its Format pane section
+    App.chartControls.init();   // its Format pane section too
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();

@@ -257,10 +257,9 @@
     function numberField(input, low, high, command) {
         const apply = () => {
             const value = typedNumber(input, low, high);
-            if (value !== null) {
-                App.commands.run(command, value);
-            }
-            refreshPane(true);
+            // A command runs a moment later (a Promise): show the field once the shape has changed.
+            const done = value !== null ? App.commands.run(command, value) : Promise.resolve();
+            done.then(() => refreshPane(true));
         };
         input.addEventListener('change', apply);
         input.addEventListener('keydown', (event) => {

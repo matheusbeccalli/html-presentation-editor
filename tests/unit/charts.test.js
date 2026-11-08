@@ -461,3 +461,50 @@ test('charts: a source line under the chart', () => {
     assert(Number(source.getAttribute('y')) > Math.max(...Array.from(svg.querySelectorAll('.chart-category-label'),
         (label) => Number(label.getAttribute('y')))), 'below the category names');
 });
+
+// ---------------------------------------------------------------------------
+// New charts and their options (Phase 6 step 6)
+// ---------------------------------------------------------------------------
+
+test('charts: the gallery: every type has made-up sample data that draws (no placeholder)', () => {
+    assertEqual(App.charts.GALLERY.length, 15);
+    App.charts.GALLERY.forEach((entry) => {
+        const data = App.charts.sampleData(entry.type, 'pt-BR');
+        assertEqual(data.type, entry.type);
+        assert(data.series.length > 0 && data.categories.length > 1, entry.type);
+        const svg = drawn(data, 800, 450);
+        assertEqual(svg.querySelectorAll('[data-chart-placeholder]').length, 0, entry.type);
+        assertEqual(svg.documentElement.localName, 'svg', entry.type);
+    });
+    assertEqual(App.charts.sampleData('combo', 'en-US').options.locale, 'en-US');
+});
+
+test('charts: a new chart element follows the contract; its data is stored safely', () => {
+    const doc = parseDoc('<section class="slide"></section>');
+    const data = App.charts.sampleData('column', 'pt-BR');
+    data.options.title = 'Receita </script><b>x</b>';
+    const figure = App.charts.createChart(doc, data, { left: 240, top: 150, width: 800, height: 450 }, 'e30');
+    assertEqual([figure.localName, figure.className, figure.getAttribute('data-type'), figure.getAttribute('data-id')],
+        ['figure', 'el', 'chart', 'e30']);
+    assertEqual(figure.getAttribute('style'), 'left: 240px; top: 150px; width: 800px; height: 450px; margin: 0px;');
+    assertNotIncludes(figure.querySelector('script.chart-data').textContent, '</script');
+    assertEqual(App.charts.readData(figure).options.title, 'Receita </script><b>x</b>');
+    assertEqual(figure.querySelector('svg').getAttribute('width'), '800');
+    App.charts.writeData(figure, Object.assign({}, data, { type: 'line' }));
+    assertEqual(App.charts.readData(figure).type, 'line');
+    assert(figure.querySelector('path.chart-line'), 'written data is drawn again');
+});
+
+test('charts: axis titles: the values\' at the side, the categories\' under their names', () => {
+    const svg = drawn(Object.assign({}, COLUMNS, { options: { valueAxisTitle: 'R$ mn', categoryAxisTitle: 'Ano' } }));
+    assertEqual(texts(svg, '.chart-axis-title'), ['R$ mn', 'Ano']);
+    const [value, category] = svg.querySelectorAll('.chart-axis-title');
+    assertIncludes(value.getAttribute('transform'), 'rotate(-90');
+    assert(Number(category.getAttribute('y')) > Number(svg.querySelector('.chart-category-label').getAttribute('y')), 'under the names');
+});
+
+test('charts: whether data labels show: as set, else on by default for bridges, donuts, pies and scatter', () => {
+    assertEqual([App.charts.labelsOn({ type: 'column', options: {} }), App.charts.labelsOn({ type: 'waterfall', options: {} }),
+        App.charts.labelsOn({ type: 'waterfall', options: { dataLabels: false } }), App.charts.labelsOn({ type: 'line', options: { dataLabels: true } })],
+    [false, true, false, true]);
+});

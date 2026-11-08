@@ -2442,6 +2442,7 @@ def test_shape_format(browser):
     page.keyboard.press("Enter")
     page.fill("#format-shape-width", "6")
     page.keyboard.press("Enter")
+    check(page.input_value("#format-shape-width") == "6", f"the field shows the new width: {page.input_value('#format-shape-width')!r}")
     page.select_option("#format-shape-dash", "dot")
     page.check("#format-shape-shadow")
     check(look() == {"fill": "#c00000", "outline": "#002060", "width": 6, "dash": "dot", "transparency": 25, "shadow": True},
@@ -2941,6 +2942,92 @@ def test_chart_readability(browser):
     check(read("e21", "/rotate\\(-45/.test(svg.querySelector('.chart-category-label').getAttribute('transform'))"), "months turned")
     check(read("e22", "svg.querySelectorAll('.chart-category-label tspan').length") == 4, "two long company names on two lines")
     page.screenshot(path=str(OUTPUT / "66-chart-readability.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
+CHART_DATA = "id => JSON.parse(App.deck.getDocument().querySelector('[data-id=\"' + id + '\"] script.chart-data').textContent)"
+CHART_COUNT = "([id, s]) => App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] svg ' + s).length"
+
+
+def test_insert_chart_and_design(browser):
+    """Insert > Chart (15 types, made-up numbers, centred, one undo step) and Chart Design: type, data labels,
+    gridlines, legend, CAGR; the Format pane's title, source and axis maximum; a waterfall's colours; saved, reopened."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    tab = ".ribbon-tab[data-tab='chart-design']"
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    page.evaluate("App.deck.goTo(4)")
+    check(page.is_hidden(tab), "no Chart Design tab without a chart")
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.chart-button")
+    check(page.locator(".chart-gallery-item").count() == 15, "15 chart types")
+    page.screenshot(path=str(OUTPUT / "67-chart-gallery.png"))
+    page.click(".chart-gallery-item[data-chart-type='combo']")
+    chart = page.evaluate("App.selection.selectedId()")
+    data = lambda: page.evaluate(CHART_DATA, chart)  # noqa: E731
+    count = lambda selector: page.evaluate(CHART_COUNT, [chart, selector])  # noqa: E731
+    check(data()["type"] == "combo" and label() == "Insert chart" and count("rect.chart-bar") == 4 and count("path.chart-line") == 1,
+          f"a combo with sample numbers: {data()}")
+    check(element_rect(page, chart) == {"left": 240, "top": 150, "width": 800, "height": 450}, "centred")
+    check(page.is_visible(tab) and page.is_visible("#format-chart"), "Chart Design and the pane's Chart section")
+    page.click(tab)
+
+    # The type: columns now; one Ctrl+Z gives the combo back.
+    page.click(".list-button.chart-type")
+    page.click(".chart-type-menu .menu-label:text-is('Clustered Column')")
+    check(data()["type"] == "column" and count("path.chart-line") == 0 and label() == "Chart type", "now columns")
+    page.keyboard.press("Control+z")
+    check(data()["type"] == "combo", "undo: the combo again")
+
+    # Chart elements.
+    run = lambda command: page.click(f".ribbon-button[data-command='{command}']")  # noqa: E731
+    run("chartDataLabels")
+    check(count(".chart-data-label") > 0, "data labels on")
+    run("chartGridlines")
+    check(count(".chart-gridline") == 0, "gridlines off")
+    page.click(".list-button.chart-legend")
+    page.click(".chart-legend-menu .menu-label:text-is('Right')")
+    check(data()["options"]["legend"] == "right", "legend at the right")
+    run("chartCagr")
+    check(page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"] .chart-cagr-label').textContent", chart)
+          == "CAGR 14,5%", "CAGR from 2022 to 2025E: (150 / 100) ^ (1/3) - 1")
+    check(page.get_attribute(".ribbon-button[data-command='chartCagr']", "aria-pressed") == "true", "CAGR shows it is on")
+
+    # The Format pane: typed options, one step each.
+    for field, value in [("#format-chart-title", "Receita e margem"), ("#format-chart-source", "Fonte: empresa"),
+                         ("#format-chart-max", "200")]:
+        page.fill(field, value)
+        page.keyboard.press("Enter")
+    options = data()["options"]
+    check(options["title"] == "Receita e margem" and options["source"] == "Fonte: empresa" and options["axisMax"] == 200,
+          f"from the pane: {options}")
+    values = page.evaluate("id => Array.from(App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] .chart-value-label'), (t) => t.textContent)", chart)
+    check(values[-1] == "200", f"the axis up to 200: {values}")
+    page.fill("#format-chart-max", "")
+    page.keyboard.press("Enter")
+    check("axisMax" not in data()["options"], "empty: automatic again")
+    check(page.input_value("#format-chart-max") == "", f"the field shows it: {page.input_value('#format-chart-max')!r}")
+    page.screenshot(path=str(OUTPUT / "68-chart-design.png"))
+
+    # A waterfall: its increase colour.
+    page.keyboard.press("Escape")
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.chart-button")
+    page.click(".chart-gallery-item[data-chart-type='waterfall']")
+    bridge = page.evaluate("App.selection.selectedId()")
+    page.click(tab)
+    page.click(".waterfall-increase-menu-button")
+    page.click(".waterfall-increase-menu .color-swatch[title='Blue']")
+    style = page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"] rect[data-role=\"increase\"]').getAttribute('style')", bridge)
+    check("#0070c0" in style, f"increases blue: {style}")
+
+    # Saved and reopened: the same data.
+    before = {chart: data(), bridge: page.evaluate(CHART_DATA, bridge)}
+    saved = editor.save_as_download("charts-design-saved.html")
+    editor.open(saved)
+    page.evaluate("App.deck.goTo(4)")
+    check(page.evaluate(CHART_DATA, chart) == before[chart] and page.evaluate(CHART_DATA, bridge) == before[bridge], "kept")
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
@@ -4016,6 +4103,7 @@ TESTS = [
     test_chart_waterfall,
     test_chart_types_priority_2,
     test_chart_readability,
+    test_insert_chart_and_design,
 ]
 
 

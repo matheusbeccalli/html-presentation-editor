@@ -252,6 +252,15 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .table-grid-label { padding: 0 2px 6px; font-size: 12px; }
 .table-grid { display: grid; grid-template-columns: repeat(10, 18px); gap: 3px; }
 .table-grid-cell { width: 18px; height: 18px; box-sizing: border-box; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
+/* Insert > Chart gallery (chartcontrols.js): an icon and a name per type, two columns. */
+.chart-gallery { min-width: 0; padding: 6px; }
+.chart-gallery:focus { outline: none; }
+.chart-gallery-grid { display: grid; grid-template-columns: repeat(2, 190px); gap: 2px; }
+.chart-gallery-item {
+    display: flex; align-items: center; gap: 8px; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px;
+    background: none; color: var(--text); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.chart-gallery-item:hover, .chart-gallery-item:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }
 /* Insert > Shapes gallery (shapecontrols.js). */
 .shape-gallery { min-width: 0; padding: 6px; }
 .shape-gallery:focus { outline: none; }
@@ -542,6 +551,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .format-grid span { color: var(--text-muted); }
 .format-tip { margin: 10px 0 0; font-size: 12px; }
 .format-shape-grid [hidden] { display: none; }
+.format-chart-grid input { text-align: left; }
 .format-shape-grid select { padding: 3px 4px; font: inherit; }
 .format-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }
 #format-autofit { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }
@@ -727,6 +737,19 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
                 <label for="format-shape-dash">Dashes</label><select id="format-shape-dash"></select><span></span>
             </div>
             <label class="format-check"><input type="checkbox" id="format-shape-shadow"> Shadow</label>
+        </section>
+        <!-- Charts (chartcontrols.js): what is typed; the rest is on the Chart Design tab. -->
+        <section id="format-chart" hidden>
+            <h3>Chart</h3>
+            <div class="format-grid format-chart-grid">
+                <label for="format-chart-title">Title</label><input id="format-chart-title" type="text" autocomplete="off"><span></span>
+                <label for="format-chart-value-title">Value axis</label><input id="format-chart-value-title" type="text" autocomplete="off" placeholder="title"><span></span>
+                <label for="format-chart-category-title">Category axis</label><input id="format-chart-category-title" type="text" autocomplete="off" placeholder="title"><span></span>
+                <label for="format-chart-min">Axis minimum</label><input id="format-chart-min" type="text" inputmode="decimal" autocomplete="off" placeholder="auto"><span></span>
+                <label for="format-chart-max">Axis maximum</label><input id="format-chart-max" type="text" inputmode="decimal" autocomplete="off" placeholder="auto"><span></span>
+                <label for="format-chart-gap">Gap width</label><input id="format-chart-gap" type="text" inputmode="decimal" autocomplete="off" placeholder="100"><span>%</span>
+                <label for="format-chart-source">Source</label><input id="format-chart-source" type="text" autocomplete="off" placeholder="Fonte: …"><span></span>
+            </div>
         </section>
         <section id="format-text" hidden>
             <h3>Text box</h3>
@@ -942,6 +965,7 @@ App.start = function start() {
     App.crop.init();       // after selection: its press listener goes first
     App.formatPane.init();
     App.shapeControls.init();   // its Format pane section
+    App.chartControls.init();   // its Format pane section too
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
@@ -2146,6 +2170,47 @@ App.createHistory = function createHistory(options) {
         return { ticks: ticks, labels: ticks.map((tick) => App.charts.formatValue(tick, format)) };
     }
 
+    /*
+     * Room for the axis titles a chart has (options.valueAxisTitle,
+     * categoryAxisTitle, secondaryAxisTitle) is taken from `plot` now; place(plot)
+     * draws them once the plot's size is final (centred along it). Columns: the
+     * value title turned at the left, the category title under the names;
+     * bars: the other way round. The second axis's title turned at the right.
+     */
+    function axisTitles(m, horizontal, plot, parts, hasSecondary) {
+        const value = m.options.valueAxisTitle;
+        const category = m.options.categoryAxisTitle;
+        const secondary = hasSecondary ? m.options.secondaryAxisTitle : null;
+        const [side, under] = horizontal ? [category, value] : [value, category];
+        const outer = Object.assign({}, plot);
+        if (side) {
+            plot.left += LABEL_SIZE + 6;
+        }
+        if (under) {
+            plot.bottom -= ROW;
+        }
+        if (secondary) {
+            plot.right -= LABEL_SIZE + 6;
+        }
+        const attrs = { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR };
+        const turned = (content, x, y) => text('chart-axis-title', x, y, content,
+            Object.assign({ transform: 'rotate(-90 ' + n(x) + ' ' + n(y) + ')' }, attrs));
+        return {
+            place: (final) => {
+                const middle = (final.top + final.bottom) / 2;
+                if (side) {
+                    parts.push(turned(side, outer.left + LABEL_SIZE, middle));
+                }
+                if (under) {
+                    parts.push(text('chart-axis-title', (final.left + final.right) / 2, outer.bottom - 4, under, attrs));
+                }
+                if (secondary) {
+                    parts.push(turned(secondary, outer.right - 4, middle));
+                }
+            },
+        };
+    }
+
     /* 100% stacked: each value as its share of its category's total (sizes counted without their sign). */
     function asShares(series, count) {
         const totals = Array.from({ length: count }, (unused, i) =>
@@ -2182,6 +2247,8 @@ App.createHistory = function createHistory(options) {
         const cagr = horizontal ? null : cagrOf(m);
 
         const plot = Object.assign({}, area);
+        // Axis titles: turned at the side of a vertical axis, under a horizontal one (options.*AxisTitle).
+        const titles = axisTitles(m, horizontal, plot, parts, axes.secondary !== null);
         plot.left += horizontal ? categoryWidth + 8 : widest(axes.primary.labels) + 6;
         if (cagr) {
             plot.top += 40;   // room for the CAGR arrow over the columns
@@ -2198,6 +2265,7 @@ App.createHistory = function createHistory(options) {
         const fit = horizontal ? null
             : App.charts.fitCategoryLabels(m.categories, (plot.right - plot.left) / Math.max(m.categories.length, 1));
         plot.bottom -= horizontal ? ROW : fit.height;
+        titles.place(plot);
         const scale = (axis) => {
             const first = axis.ticks[0];
             const last = axis.ticks[axis.ticks.length - 1];
@@ -2645,9 +2713,11 @@ App.createHistory = function createHistory(options) {
         const tickLabels = ticks.map((tick) => App.charts.formatValue(tick, { locale: locale, decimals: App.charts.decimalsOf([step]) }));
 
         const plot = Object.assign({}, area);
+        const titles = axisTitles(m, false, plot, parts, false);
         plot.left += Math.max(...tickLabels.map((label) => textWidth(label, LABEL_SIZE))) + 6;
         const fit = App.charts.fitCategoryLabels(m.categories, (plot.right - plot.left) / Math.max(steps.length, 1));
         plot.bottom -= fit.height;
+        titles.place(plot);
         const first = ticks[0];
         const last = ticks[ticks.length - 1];
         const at = (value) => plot.bottom - (Math.min(Math.max(value, first), last) - first) / (last - first) * (plot.bottom - plot.top);
@@ -2703,6 +2773,90 @@ App.createHistory = function createHistory(options) {
         parts.push('<g class="chart-data-labels">' + labels.join('') + '</g>');
         return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
     }
+
+    // ---------------------------------------------------------------
+    // New charts (Insert > Chart) and their data
+    // ---------------------------------------------------------------
+
+    /* Insert > Chart's gallery, in order. */
+    App.charts.GALLERY = [
+        { type: 'column', label: 'Clustered Column' }, { type: 'stacked-column', label: 'Stacked Column' },
+        { type: 'stacked-column-100', label: '100% Stacked Column' }, { type: 'bar', label: 'Clustered Bar' },
+        { type: 'stacked-bar', label: 'Stacked Bar' }, { type: 'stacked-bar-100', label: '100% Stacked Bar' },
+        { type: 'line', label: 'Line' }, { type: 'area', label: 'Area' }, { type: 'stacked-area', label: 'Stacked Area' },
+        { type: 'combo', label: 'Combo (columns + line)' }, { type: 'waterfall', label: 'Waterfall' },
+        { type: 'donut', label: 'Donut' }, { type: 'pie', label: 'Pie' }, { type: 'scatter', label: 'Scatter' },
+        { type: 'bubble', label: 'Bubble' },
+    ];
+
+    /* A new chart of `type` with made-up numbers to type over (decided in the Phase 6 Q&A). */
+    App.charts.sampleData = function sampleData(type, locale) {
+        const years = ['2022', '2023', '2024', '2025E'];
+        const data = { version: 1, type: type, categories: years, estimates: [false, false, false, true],
+            series: [{ name: 'Receita', values: [100, 120, 135, 150] }], options: { title: 'Título do gráfico', locale: locale } };
+        if (STACKED.indexOf(type) !== -1) {
+            data.series = [{ name: 'Produto A', values: [60, 70, 75, 80] }, { name: 'Produto B', values: [40, 50, 60, 70] }];
+        } else if (type === 'combo') {
+            data.series = [{ name: 'Receita', type: 'column', axis: 'primary', values: [100, 120, 135, 150] },
+                { name: 'Margem', type: 'line', axis: 'secondary', values: [0.2, 0.22, 0.23, 0.25], format: 'percent' }];
+        } else if (type === 'waterfall') {
+            Object.assign(data, { categories: ['Início', 'Aumento', 'Redução', 'Fim'], estimates: [false, false, false, false],
+                roles: ['start', 'delta', 'delta', 'end'], series: [{ name: 'Valor', values: [100, 30, -15, 115] }] });
+        } else if (isRound(type)) {
+            Object.assign(data, { categories: ['Parte A', 'Parte B', 'Parte C'], estimates: [false, false, false],
+                series: [{ name: 'Participação', values: [50, 30, 20] }] });
+        } else if (type === 'scatter' || type === 'bubble') {
+            Object.assign(data, { categories: ['Empresa A', 'Empresa B', 'Empresa C'], estimates: [false, false, false],
+                series: [{ name: 'Crescimento', values: [0.05, 0.1, 0.15], format: 'percent' }, { name: 'Múltiplo', values: [8, 10, 12] }] });
+            if (type === 'bubble') {
+                data.series.push({ name: 'Tamanho', values: [100, 400, 900] });
+            }
+        }
+        return data;
+    };
+
+    /* Whether a chart's data labels show: as its options say, else on for bridges, donuts, pies and scatter. */
+    App.charts.labelsOn = function labelsOn(data) {
+        const options = (data && data.options) || {};
+        if (typeof options.dataLabels === 'boolean') {
+            return options.dataLabels;
+        }
+        return ['waterfall', 'donut', 'pie', 'scatter', 'bubble'].indexOf(data && data.type) !== -1;
+    };
+
+    /* The chart's data from its <script class="chart-data">, or null. */
+    App.charts.readData = function readData(figure) {
+        const script = figure && figure.querySelector('script.chart-data');
+        return script ? App.charts.parseChartData(script.textContent) : null;
+    };
+
+    /*
+     * Store `data` in the chart and draw it again. "<" is written as <,
+     * so no text in the data (a title holding a closing script tag) can end the script early.
+     */
+    App.charts.writeData = function writeData(figure, data) {
+        let script = figure.querySelector('script.chart-data');
+        if (!script) {
+            script = figure.ownerDocument.createElement('script');
+            script.setAttribute('type', 'application/json');
+            script.setAttribute('class', 'chart-data');
+            figure.insertBefore(script, figure.firstChild);
+        }
+        script.textContent = JSON.stringify(data).replace(/</g, '\\u003c');
+        App.charts.redraw(figure);
+    };
+
+    /* A new chart element (not yet on a slide) holding `data`, at `rect`, with id `id`, drawn. */
+    App.charts.createChart = function createChart(doc, data, rect, id) {
+        const figure = doc.createElement('figure');
+        figure.setAttribute('class', 'el');
+        figure.setAttribute('data-type', 'chart');
+        figure.setAttribute('data-id', id);
+        figure.setAttribute('style', ['left', 'top', 'width', 'height'].map((side) => side + ': ' + rect[side] + 'px;').join(' ') +
+            ' margin: 0px;');
+        App.charts.writeData(figure, data);
+        return figure;
+    };
 
     // ---------------------------------------------------------------
     // render, redraw
@@ -10539,6 +10693,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         shapeFill: '<path d="M4 9.5L9.5 4l6 6-5.5 5.5z"/><path d="M15.5 12.5c0 1.2 1 2 1.6 2s1.4-.8 1.4-2c0-1-1.5-2.8-1.5-2.8s-1.5 1.8-1.5 2.8z"/>',
         shapeOutline: '<path d="M13 3.5l3.5 3.5-8.5 8.5H4.5V12z"/><path d="M11 5.5l3.5 3.5"/>',
         shadow: '<rect x="3" y="3" width="10" height="10"/><path d="M15.5 6v9.5H6" stroke-width="2.4"/>',
+        chartColumn: '<path d="M3 17.5h14"/><rect x="4.5" y="9.5" width="3" height="8"/><rect x="8.5" y="5.5" width="3" height="12"/><rect x="12.5" y="2.5" width="3" height="15"/>',
+        chartBar: '<path d="M2.5 3v14"/><rect x="2.5" y="4" width="8" height="3"/><rect x="2.5" y="8.5" width="12" height="3"/><rect x="2.5" y="13" width="15" height="3"/>',
+        chartLine: '<path d="M3 17.5h14"/><path d="M3.5 14l4-5 3.5 3 5.5-7"/>',
+        chartArea: '<path d="M3 17.5h14"/><path d="M3.5 17.5V13l4-5 3.5 3 5.5-6v12.5z"/>',
+        chartCombo: '<path d="M3 17.5h14"/><rect x="4.5" y="11.5" width="3" height="6"/><rect x="12.5" y="8.5" width="3" height="9"/><path d="M3.5 8l6-3 7 1"/>',
+        chartWaterfall: '<path d="M3 17.5h14"/><rect x="3.5" y="8.5" width="3" height="9"/><rect x="8.5" y="4.5" width="3" height="4"/><rect x="13.5" y="4.5" width="3" height="13"/>',
+        chartDonut: '<circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3"/><path d="M10 3v4M16.2 13.2l-3.4-1.6"/>',
+        chartScatter: '<path d="M3 3v14h14"/><circle cx="7" cy="12" r="1.5"/><circle cx="11" cy="8" r="2"/><circle cx="15" cy="5" r="1.3"/>',
+        chartTitle: '<path d="M4 4h12M10 4v4"/><path d="M3 17.5h14"/><rect x="5" y="12" width="3" height="5.5"/><rect x="12" y="10" width="3" height="7.5"/>',
+        dataLabels: '<path d="M3 17.5h14"/><rect x="4.5" y="11" width="4" height="6.5"/><rect x="11.5" y="8" width="4" height="9.5"/><path d="M5 7.5h3M12 4.5h3"/>',
+        gridlines: '<path d="M3 4.5h14M3 9h14M3 13.5h14M3 17.5h14"/>',
+        cagr: '<path d="M3 17.5h14"/><path d="M5 13V5h10v8"/><path d="M13 11l2 2.5 2-2.5"/>',
         shapes: '<rect x="2.5" y="9.5" width="8" height="8"/><circle cx="13" cy="7" r="4.5"/>',
         shapeRect: '<rect x="2.5" y="5.5" width="15" height="9"/>',
         shapeRoundRect: '<rect x="2.5" y="5.5" width="15" height="9" rx="2.5"/>',
@@ -15194,6 +15360,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         Object.keys(design).forEach((name) => App.commands.define(name, design[name]));
         const shapeFormat = App.shapeControls.commands();
         Object.keys(shapeFormat).forEach((name) => App.commands.define(name, shapeFormat[name]));
+        const chartDesign = App.chartControls.commands();
+        Object.keys(chartDesign).forEach((name) => App.commands.define(name, chartDesign[name]));
         App.commands.define('insertPicture', {
             label: 'Pictures', isEnabled: hasDeck,
             run: () => {
@@ -17625,10 +17793,9 @@ App.template.newDeckHtml = function newDeckHtml() {
     function numberField(input, low, high, command) {
         const apply = () => {
             const value = typedNumber(input, low, high);
-            if (value !== null) {
-                App.commands.run(command, value);
-            }
-            refreshPane(true);
+            // A command runs a moment later (a Promise): show the field once the shape has changed.
+            const done = value !== null ? App.commands.run(command, value) : Promise.resolve();
+            done.then(() => refreshPane(true));
         };
         input.addEventListener('change', apply);
         input.addEventListener('keydown', (event) => {
@@ -17683,6 +17850,377 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
         });
         ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded', 'selection-dragged'].forEach((name) => {
+            App.events.on(name, () => refreshPane(false));
+        });
+        refreshPane(false);
+    };
+})();
+
+</script>
+<script>
+// ---- js/chartcontrols.js ----
+/*
+ * chartcontrols.js - Insert > Chart and Chart Design (SPEC 5.4, Phase 6).
+ *
+ * Insert > Chart: a gallery of the types charts.js draws; a pick puts a chart
+ * with made-up numbers (charts.sampleData) in the middle of the slide, one undo
+ * step, selected (decided in the Phase 6 Q&A: sample data to type over).
+ *
+ * Chart Design (a tab shown while a chart is selected) changes the chart's
+ * options on the ribbon: type, title on / off, data labels, gridlines, legend,
+ * the CAGR arrow, a waterfall's colours. The Format pane's "Chart" section
+ * holds what is typed: title, axis titles, axis minimum / maximum, gap width,
+ * source line. Every change rewrites the chart's JSON and draws it again
+ * (charts.writeData) as one undo step.
+ *
+ * Talks to: charts.js, commands.js, icons.js, textcontrols.js (colour split
+ * buttons, lists), elements.js (ids, on top), history.js, selection.js,
+ * tabledesign.js (the number locale).
+ */
+
+(function () {
+    'use strict';
+
+    App.chartControls = {};
+
+    const el = (...args) => App.util.el(...args);
+
+    const NEW_CHART = { left: 240, top: 150, width: 800, height: 450 };
+    const DEFAULT_TITLE = 'Título do gráfico';
+    const LEGENDS = [['bottom', 'Bottom'], ['top', 'Top'], ['right', 'Right'], ['none', 'None']];
+    const ICONS = {
+        column: 'chartColumn', 'stacked-column': 'chartColumn', 'stacked-column-100': 'chartColumn',
+        bar: 'chartBar', 'stacked-bar': 'chartBar', 'stacked-bar-100': 'chartBar', line: 'chartLine',
+        area: 'chartArea', 'stacked-area': 'chartArea', combo: 'chartCombo', waterfall: 'chartWaterfall',
+        donut: 'chartDonut', pie: 'chartDonut', scatter: 'chartScatter', bubble: 'chartScatter',
+    };
+    // Types the CAGR arrow goes on: columns (and lines) standing on a horizontal axis.
+    const CAGR_TYPES = ['column', 'stacked-column', 'line', 'area', 'stacked-area', 'combo'];
+
+    // ---------------------------------------------------------------
+    // The selected chart and changes to it
+    // ---------------------------------------------------------------
+
+    /* The selected chart, if it carries data the editor can change (a picture of a chart cannot). */
+    function selectedChart() {
+        const element = App.selection.getElement();
+        return element && element.getAttribute('data-type') === 'chart' && App.charts.readData(element) ? element : null;
+    }
+
+    App.chartControls.isChartSelected = function isChartSelected() {
+        return !!selectedChart();
+    };
+
+    function currentData() {
+        const figure = selectedChart();
+        return figure ? App.charts.readData(figure) : null;
+    }
+
+    /* One undo step: change(data) edits a copy of the selected chart's data, which is stored and drawn. */
+    function changeChart(label, change) {
+        const figure = selectedChart();
+        if (!figure) {
+            return;
+        }
+        const data = App.charts.readData(figure);
+        data.options = Object.assign({}, data.options);
+        change(data);
+        App.history.change(label, { slideId: figure.closest('section.slide').getAttribute('data-slide-id') },
+            () => App.charts.writeData(figure, data));
+    }
+
+    /* One option set (or, with undefined / '', removed) as one undo step. */
+    function setOption(label, name, value) {
+        changeChart(label, (data) => {
+            if (value === undefined || value === null || value === '') {
+                delete data.options[name];
+            } else {
+                data.options[name] = value;
+            }
+        });
+    }
+
+    /* Insert > Chart: a chart of `type` with sample numbers in the middle of the slide, selected. */
+    App.chartControls.insertChart = function insertChart(type) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return null;
+        }
+        const doc = slide.ownerDocument;
+        let figure = null;
+        App.history.change('Insert chart', { slideId: slide.getAttribute('data-slide-id') }, () => {
+            figure = App.charts.createChart(doc, App.charts.sampleData(type, App.tableDesign.numberLocale()), NEW_CHART,
+                App.elements.freshId(doc));
+            App.elements.addOnTop(slide, figure);
+        });
+        App.selection.select(figure);
+        App.ui.setStatus('Sample numbers: type over them in the data grid (Format pane for titles)');
+        return figure;
+    };
+
+    /* The Chart commands, defined in commands.js. */
+    App.chartControls.commands = function commands() {
+        const isChart = () => App.chartControls.isChartSelected();
+        const isType = (types) => () => isChart() && types.indexOf(currentData().type) !== -1;
+        return {
+            insertChart: {
+                label: 'Chart', isEnabled: () => App.state.hasDeck,
+                run: (type) => {
+                    App.text.exitEdit({ select: false });
+                    App.chartControls.insertChart(type || 'column');
+                },
+            },
+            setChartType: { label: 'Chart type', isEnabled: isChart, run: (type) => changeChart('Chart type', (data) => { data.type = type; }) },
+            setChartLegend: { label: 'Legend', isEnabled: isChart, run: (position) => setOption('Legend', 'legend', position) },
+            chartTitle: {
+                label: 'Chart Title', isEnabled: isChart,
+                isChecked: () => isChart() && !!currentData().options && !!currentData().options.title,
+                run: () => changeChart('Chart title', (data) => {
+                    if (data.options.title) {
+                        data.options.hiddenTitle = data.options.title;   // kept, so the title comes back as it was
+                        delete data.options.title;
+                    } else {
+                        data.options.title = data.options.hiddenTitle || DEFAULT_TITLE;
+                        delete data.options.hiddenTitle;
+                    }
+                }),
+            },
+            chartDataLabels: {
+                label: 'Data Labels', isEnabled: isChart,
+                isChecked: () => isChart() && App.charts.labelsOn(currentData()),
+                run: () => changeChart('Data labels', (data) => { data.options.dataLabels = !App.charts.labelsOn(data); }),
+            },
+            chartGridlines: {
+                label: 'Gridlines', isEnabled: isChart,
+                isChecked: () => isChart() && (currentData().options || {}).gridlines !== false,
+                run: () => changeChart('Gridlines', (data) => { data.options.gridlines = data.options.gridlines === false; }),
+            },
+            chartCagr: {
+                label: 'CAGR', isEnabled: isType(CAGR_TYPES),
+                isChecked: () => isChart() && !!(currentData().options || {}).cagr,
+                run: () => changeChart('CAGR', (data) => {
+                    if (data.options.cagr) {
+                        delete data.options.cagr;
+                    } else {
+                        // From the first category to the last, of the first series (change in the data later).
+                        data.options.cagr = { series: 0, from: 0, to: Math.max((data.categories || []).length - 1, 1) };
+                    }
+                }),
+            },
+            setWaterfallColor: {
+                label: 'Waterfall colour', isEnabled: isType(['waterfall']),
+                run: (choice) => changeChart('Waterfall colour', (data) => {
+                    data.options.waterfall = Object.assign({}, data.options.waterfall, { [choice.kind]: choice.value });
+                }),
+            },
+            setChartOption: {
+                label: 'Chart option', isEnabled: isChart,
+                run: (choice) => setOption(choice.label, choice.name, choice.value),
+            },
+        };
+    };
+
+    // ---------------------------------------------------------------
+    // Ribbon controls
+    // ---------------------------------------------------------------
+
+    let chartButton = null;
+    let gallery = null;
+    const listButtons = {};
+
+    function closeGallery() {
+        if (gallery) {
+            gallery.remove();
+            gallery = null;
+            window.removeEventListener('pointerdown', onOutsidePointerDown, true);
+            chartButton.setAttribute('aria-expanded', 'false');
+        }
+    }
+
+    function onOutsidePointerDown(event) {
+        if (gallery && !gallery.contains(event.target) && !chartButton.contains(event.target)) {
+            closeGallery();
+        }
+    }
+
+    function openGallery() {
+        closeGallery();
+        const items = App.charts.GALLERY.map((entry) => {
+            const item = el('button', {
+                type: 'button', class: 'chart-gallery-item', 'data-chart-type': entry.type, title: entry.label,
+                onclick: () => {
+                    closeGallery();
+                    App.commands.run('insertChart', entry.type);
+                },
+            });
+            item.innerHTML = App.icons.get(ICONS[entry.type]);
+            item.appendChild(el('span', {}, [entry.label]));
+            return item;
+        });
+        gallery = el('div', {
+            class: 'menu chart-gallery', role: 'dialog', 'aria-label': 'Insert a chart', tabindex: '-1',
+            onkeydown: (event) => {
+                if (event.key === 'Escape') {
+                    event.stopPropagation();
+                    closeGallery();
+                    chartButton.focus();
+                }
+            },
+        }, [el('div', { class: 'table-grid-label' }, ['Charts']), el('div', { class: 'chart-gallery-grid' }, items)]);
+        const rect = chartButton.getBoundingClientRect();
+        gallery.style.left = rect.left + 'px';
+        gallery.style.top = rect.bottom + 'px';
+        document.body.appendChild(gallery);
+        chartButton.setAttribute('aria-expanded', 'true');
+        window.addEventListener('pointerdown', onOutsidePointerDown, true);
+        items[0].focus();
+    }
+
+    function createChartButton() {
+        chartButton = el('button', {
+            type: 'button', class: 'ribbon-button chart-button', title: 'Insert a chart', 'aria-label': 'Chart',
+            'aria-haspopup': 'dialog', 'aria-expanded': 'false',
+            onclick: () => (gallery ? closeGallery() : openGallery()),
+        });
+        chartButton.innerHTML = App.icons.get('chartColumn');
+        chartButton.appendChild(el('span', { class: 'ribbon-button-label' }, ['Chart ▾']));
+        return chartButton;
+    }
+
+    /* A "Bottom ▾" style button opening a list (className-menu). */
+    function listControl(className, title, items, onChoose) {
+        const button = el('button', {
+            type: 'button', class: 'ribbon-button small named list-button ' + className, title: title, 'aria-label': title,
+            'aria-haspopup': 'menu',
+            onclick: () => (App.textControls.isMenuOpen(className + '-menu') ? App.textControls.closeMenu()
+                : App.textControls.openMenu(button, className + '-menu', items(), onChoose)),
+        });
+        listButtons[className] = button;
+        return button;
+    }
+
+    function typeName(type) {
+        const entry = App.charts.GALLERY.find((item) => item.type === type);
+        return entry ? entry.label : type;
+    }
+
+    function waterfallColor(kind, label, fallback) {
+        return App.textControls.colorSplit({
+            label: label, icon: 'shapeFill', command: null, menuClass: 'waterfall-' + kind + '-menu', palette: 'theme',
+            current: () => {
+                const data = currentData();
+                return (data && data.options && data.options.waterfall && data.options.waterfall[kind]) || fallback;
+            },
+            choose: (value) => App.commands.run('setWaterfallColor', { kind: kind, value: value }),
+            isEnabled: () => App.commands.isEnabled('setWaterfallColor'),
+        });
+    }
+
+    /* The control named in the ribbon's layout, or null when it is not a chart control. */
+    App.chartControls.create = function create(name) {
+        switch (name) {
+            case 'insertChart': return createChartButton();
+            case 'chartType':
+                return listControl('chart-type', 'Chart type', () => {
+                    const current = (currentData() || {}).type;
+                    return App.charts.GALLERY.map((entry) => ({ label: entry.label, value: entry.type, checked: entry.type === current }));
+                }, (type) => App.commands.run('setChartType', type));
+            case 'chartLegend':
+                return listControl('chart-legend', 'Legend', () => {
+                    const current = ((currentData() || {}).options || {}).legend;
+                    return LEGENDS.map(([value, label]) => ({ label: label, value: value, checked: value === current }));
+                }, (position) => App.commands.run('setChartLegend', position));
+            case 'waterfallIncrease': return waterfallColor('increase', 'Increase colour', '#3C9D5D');
+            case 'waterfallDecrease': return waterfallColor('decrease', 'Decrease colour', '#D9534F');
+            case 'waterfallTotal': return waterfallColor('total', 'Total colour', 'var(--color-accent, #1F2A44)');
+            default: return null;
+        }
+    };
+
+    /* The list buttons show the selected chart's type and legend. */
+    App.chartControls.refresh = function refresh() {
+        const data = currentData();
+        const legend = data && data.options && data.options.legend;
+        const labels = {
+            'chart-type': data ? typeName(data.type) : 'Type',
+            'chart-legend': 'Legend: ' + (legend ? LEGENDS.find(([value]) => value === legend)[1] : 'Auto'),
+        };
+        Object.keys(listButtons).forEach((className) => {
+            const button = listButtons[className];
+            if (button.isConnected) {
+                button.textContent = labels[className] + ' ▾';
+                button.disabled = !data;
+            }
+        });
+    };
+
+    // ---------------------------------------------------------------
+    // The Format pane's "Chart" section
+    // ---------------------------------------------------------------
+
+    // [field id, option, undo label, kind]: text fields, or numbers (empty = automatic).
+    const FIELDS = [
+        ['format-chart-title', 'title', 'Chart title', 'text'],
+        ['format-chart-value-title', 'valueAxisTitle', 'Axis title', 'text'],
+        ['format-chart-category-title', 'categoryAxisTitle', 'Axis title', 'text'],
+        ['format-chart-min', 'axisMin', 'Axis minimum', 'number'],
+        ['format-chart-max', 'axisMax', 'Axis maximum', 'number'],
+        ['format-chart-gap', 'gapWidth', 'Gap width', 'number'],
+        ['format-chart-source', 'source', 'Source', 'text'],
+    ];
+    let section = null;
+
+    function refreshPane(force) {
+        const data = currentData();
+        section.hidden = !data;
+        if (!data) {
+            return;
+        }
+        const options = data.options || {};
+        FIELDS.forEach(([id, name]) => {
+            const input = document.getElementById(id);
+            if (force || document.activeElement !== input) {
+                input.value = options[name] === undefined || options[name] === null ? '' : String(options[name]);
+            }
+        });
+    }
+
+    function applyField(input, name, label, kind) {
+        const options = (currentData() || {}).options || {};
+        const typed = input.value.trim();
+        let value = typed;
+        if (kind === 'number' && typed !== '') {
+            value = App.formatPane.parseNumber(typed);
+            if (value === null) {
+                App.ui.setStatus('Type a number, or leave it empty for automatic');
+                refreshPane(true);
+                return;
+            }
+        }
+        const before = options[name] === undefined ? '' : options[name];
+        // A command runs a moment later (a Promise): show the field once the chart has changed.
+        const done = String(before) !== String(value)
+            ? App.commands.run('setChartOption', { name: name, value: value, label: label }) : Promise.resolve();
+        done.then(() => refreshPane(true));
+    }
+
+    /* Wiring, called once from App.start(): the Format pane's section. */
+    App.chartControls.init = function init() {
+        section = document.getElementById('format-chart');
+        FIELDS.forEach(([id, name, label, kind]) => {
+            const input = document.getElementById(id);
+            input.addEventListener('change', () => applyField(input, name, label, kind));
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    applyField(input, name, label, kind);
+                } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    refreshPane(true);
+                }
+            });
+        });
+        ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded'].forEach((name) => {
             App.events.on(name, () => refreshPane(false));
         });
         refreshPane(false);
@@ -18056,7 +18594,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
  *
  * Tabs: Home, Insert, Arrange, Slide Show, Export, and contextual tabs shown
- * only while they apply (Table Design and Layout, Picture Format, Shape Format). In Phase 1 only Home has
+ * only while they apply (Table Design and Layout, Picture Format, Shape Format, Chart Design). In Phase 1 only Home has
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
  *
@@ -18108,12 +18646,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             groups: [
                 { label: 'Tables', commands: [{ control: 'insertTable' }] },
                 { label: 'Images', commands: [['insertPicture', 'picture']] },
-                { label: 'Illustrations', commands: [{ control: 'insertShape' }] },
+                { label: 'Illustrations', commands: [{ control: 'insertShape' }, { control: 'insertChart' }] },
                 { label: 'Text', commands: [['insertTextBox', 'textBox']] },
             ],
             note: 'Table: move over the grid to pick a size, click to insert. Pictures: from a file, made smaller on the way ' +
                 'in. Shapes: pick one, then drag on the slide (Shift keeps its proportions) or click. Text box: click it, then click on ' +
-                'the slide (or drag to set its width). Charts arrive in Phase 6.',
+                'the slide (or drag to set its width). Chart: pick a type; it comes with made-up numbers to type over.',
         },
         {
             // Shown only while a table is selected (PowerPoint's Table Design tab).
@@ -18164,6 +18702,21 @@ App.template.newDeckHtml = function newDeckHtml() {
             ],
             note: 'Fill and Outline: the button applies the colour on its bar, ▾ picks another. A width or a dash gives a shape ' +
                 'without an outline one. Transparency is of the fill (of the line for lines). Also in the Format pane.',
+        },
+        {
+            // Shown only while a chart is selected (PowerPoint's Chart Design tab).
+            id: 'chart-design', label: 'Chart Design', contextual: () => App.chartControls.isChartSelected(),
+            groups: [
+                { label: 'Type', commands: [{ control: 'chartType' }] },
+                { label: 'Chart Elements', rows: [
+                    [{ command: 'chartTitle', icon: 'chartTitle' }, { command: 'chartDataLabels', icon: 'dataLabels' },
+                        { command: 'chartGridlines', icon: 'gridlines' }],
+                    [{ control: 'chartLegend' }, { command: 'chartCagr', icon: 'cagr' }]] },
+                { label: 'Waterfall', rows: [[{ control: 'waterfallIncrease' }, { control: 'waterfallDecrease' },
+                    { control: 'waterfallTotal' }]] },
+            ],
+            note: 'Title, axis titles, axis minimum / maximum, gap width and the source line are typed in the Format pane. ' +
+                'Waterfall: the colours of increases, decreases and totals.',
         },
         {
             id: 'arrange', label: 'Arrange',
@@ -18227,7 +18780,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
     function createControl(name) {
         return App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
-            App.textControls.create(name);
+            App.chartControls.create(name) || App.textControls.create(name);
     }
 
     function renderTab(tab) {
@@ -18379,6 +18932,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.tableControls.refresh();
         App.tableDesign.refresh();
         App.shapeControls.refresh();
+        App.chartControls.refresh();
     };
 })();
 

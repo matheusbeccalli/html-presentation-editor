@@ -2,7 +2,7 @@
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
  *
  * Tabs: Home, Insert, Arrange, Slide Show, Export, and contextual tabs shown
- * only while they apply (Table Design and Layout, Picture Format, Shape Format). In Phase 1 only Home has
+ * only while they apply (Table Design and Layout, Picture Format, Shape Format, Chart Design). In Phase 1 only Home has
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
  *
@@ -54,12 +54,12 @@
             groups: [
                 { label: 'Tables', commands: [{ control: 'insertTable' }] },
                 { label: 'Images', commands: [['insertPicture', 'picture']] },
-                { label: 'Illustrations', commands: [{ control: 'insertShape' }] },
+                { label: 'Illustrations', commands: [{ control: 'insertShape' }, { control: 'insertChart' }] },
                 { label: 'Text', commands: [['insertTextBox', 'textBox']] },
             ],
             note: 'Table: move over the grid to pick a size, click to insert. Pictures: from a file, made smaller on the way ' +
                 'in. Shapes: pick one, then drag on the slide (Shift keeps its proportions) or click. Text box: click it, then click on ' +
-                'the slide (or drag to set its width). Charts arrive in Phase 6.',
+                'the slide (or drag to set its width). Chart: pick a type; it comes with made-up numbers to type over.',
         },
         {
             // Shown only while a table is selected (PowerPoint's Table Design tab).
@@ -110,6 +110,21 @@
             ],
             note: 'Fill and Outline: the button applies the colour on its bar, ▾ picks another. A width or a dash gives a shape ' +
                 'without an outline one. Transparency is of the fill (of the line for lines). Also in the Format pane.',
+        },
+        {
+            // Shown only while a chart is selected (PowerPoint's Chart Design tab).
+            id: 'chart-design', label: 'Chart Design', contextual: () => App.chartControls.isChartSelected(),
+            groups: [
+                { label: 'Type', commands: [{ control: 'chartType' }] },
+                { label: 'Chart Elements', rows: [
+                    [{ command: 'chartTitle', icon: 'chartTitle' }, { command: 'chartDataLabels', icon: 'dataLabels' },
+                        { command: 'chartGridlines', icon: 'gridlines' }],
+                    [{ control: 'chartLegend' }, { command: 'chartCagr', icon: 'cagr' }]] },
+                { label: 'Waterfall', rows: [[{ control: 'waterfallIncrease' }, { control: 'waterfallDecrease' },
+                    { control: 'waterfallTotal' }]] },
+            ],
+            note: 'Title, axis titles, axis minimum / maximum, gap width and the source line are typed in the Format pane. ' +
+                'Waterfall: the colours of increases, decreases and totals.',
         },
         {
             id: 'arrange', label: 'Arrange',
@@ -173,7 +188,7 @@
     /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
     function createControl(name) {
         return App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
-            App.textControls.create(name);
+            App.chartControls.create(name) || App.textControls.create(name);
     }
 
     function renderTab(tab) {
@@ -325,5 +340,6 @@
         App.tableControls.refresh();
         App.tableDesign.refresh();
         App.shapeControls.refresh();
+        App.chartControls.refresh();
     };
 })();

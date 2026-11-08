@@ -264,6 +264,8 @@
         Object.keys(design).forEach((name) => App.commands.define(name, design[name]));
         const shapeFormat = App.shapeControls.commands();
         Object.keys(shapeFormat).forEach((name) => App.commands.define(name, shapeFormat[name]));
+        const chartDesign = App.chartControls.commands();
+        Object.keys(chartDesign).forEach((name) => App.commands.define(name, chartDesign[name]));
         App.commands.define('insertPicture', {
             label: 'Pictures', isEnabled: hasDeck,
             run: () => {

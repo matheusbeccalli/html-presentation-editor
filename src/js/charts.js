@@ -486,6 +486,47 @@
         return { ticks: ticks, labels: ticks.map((tick) => App.charts.formatValue(tick, format)) };
     }
 
+    /*
+     * Room for the axis titles a chart has (options.valueAxisTitle,
+     * categoryAxisTitle, secondaryAxisTitle) is taken from `plot` now; place(plot)
+     * draws them once the plot's size is final (centred along it). Columns: the
+     * value title turned at the left, the category title under the names;
+     * bars: the other way round. The second axis's title turned at the right.
+     */
+    function axisTitles(m, horizontal, plot, parts, hasSecondary) {
+        const value = m.options.valueAxisTitle;
+        const category = m.options.categoryAxisTitle;
+        const secondary = hasSecondary ? m.options.secondaryAxisTitle : null;
+        const [side, under] = horizontal ? [category, value] : [value, category];
+        const outer = Object.assign({}, plot);
+        if (side) {
+            plot.left += LABEL_SIZE + 6;
+        }
+        if (under) {
+            plot.bottom -= ROW;
+        }
+        if (secondary) {
+            plot.right -= LABEL_SIZE + 6;
+        }
+        const attrs = { 'font-size': LABEL_SIZE, 'text-anchor': 'middle', fill: TEXT_COLOR };
+        const turned = (content, x, y) => text('chart-axis-title', x, y, content,
+            Object.assign({ transform: 'rotate(-90 ' + n(x) + ' ' + n(y) + ')' }, attrs));
+        return {
+            place: (final) => {
+                const middle = (final.top + final.bottom) / 2;
+                if (side) {
+                    parts.push(turned(side, outer.left + LABEL_SIZE, middle));
+                }
+                if (under) {
+                    parts.push(text('chart-axis-title', (final.left + final.right) / 2, outer.bottom - 4, under, attrs));
+                }
+                if (secondary) {
+                    parts.push(turned(secondary, outer.right - 4, middle));
+                }
+            },
+        };
+    }
+
     /* 100% stacked: each value as its share of its category's total (sizes counted without their sign). */
     function asShares(series, count) {
         const totals = Array.from({ length: count }, (unused, i) =>
@@ -522,6 +563,8 @@
         const cagr = horizontal ? null : cagrOf(m);
 
         const plot = Object.assign({}, area);
+        // Axis titles: turned at the side of a vertical axis, under a horizontal one (options.*AxisTitle).
+        const titles = axisTitles(m, horizontal, plot, parts, axes.secondary !== null);
         plot.left += horizontal ? categoryWidth + 8 : widest(axes.primary.labels) + 6;
         if (cagr) {
             plot.top += 40;   // room for the CAGR arrow over the columns
@@ -538,6 +581,7 @@
         const fit = horizontal ? null
             : App.charts.fitCategoryLabels(m.categories, (plot.right - plot.left) / Math.max(m.categories.length, 1));
         plot.bottom -= horizontal ? ROW : fit.height;
+        titles.place(plot);
         const scale = (axis) => {
             const first = axis.ticks[0];
             const last = axis.ticks[axis.ticks.length - 1];
@@ -985,9 +1029,11 @@
         const tickLabels = ticks.map((tick) => App.charts.formatValue(tick, { locale: locale, decimals: App.charts.decimalsOf([step]) }));
 
         const plot = Object.assign({}, area);
+        const titles = axisTitles(m, false, plot, parts, false);
         plot.left += Math.max(...tickLabels.map((label) => textWidth(label, LABEL_SIZE))) + 6;
         const fit = App.charts.fitCategoryLabels(m.categories, (plot.right - plot.left) / Math.max(steps.length, 1));
         plot.bottom -= fit.height;
+        titles.place(plot);
         const first = ticks[0];
         const last = ticks[ticks.length - 1];
         const at = (value) => plot.bottom - (Math.min(Math.max(value, first), last) - first) / (last - first) * (plot.bottom - plot.top);
@@ -1043,6 +1089,90 @@
         parts.push('<g class="chart-data-labels">' + labels.join('') + '</g>');
         return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
     }
+
+    // ---------------------------------------------------------------
+    // New charts (Insert > Chart) and their data
+    // ---------------------------------------------------------------
+
+    /* Insert > Chart's gallery, in order. */
+    App.charts.GALLERY = [
+        { type: 'column', label: 'Clustered Column' }, { type: 'stacked-column', label: 'Stacked Column' },
+        { type: 'stacked-column-100', label: '100% Stacked Column' }, { type: 'bar', label: 'Clustered Bar' },
+        { type: 'stacked-bar', label: 'Stacked Bar' }, { type: 'stacked-bar-100', label: '100% Stacked Bar' },
+        { type: 'line', label: 'Line' }, { type: 'area', label: 'Area' }, { type: 'stacked-area', label: 'Stacked Area' },
+        { type: 'combo', label: 'Combo (columns + line)' }, { type: 'waterfall', label: 'Waterfall' },
+        { type: 'donut', label: 'Donut' }, { type: 'pie', label: 'Pie' }, { type: 'scatter', label: 'Scatter' },
+        { type: 'bubble', label: 'Bubble' },
+    ];
+
+    /* A new chart of `type` with made-up numbers to type over (decided in the Phase 6 Q&A). */
+    App.charts.sampleData = function sampleData(type, locale) {
+        const years = ['2022', '2023', '2024', '2025E'];
+        const data = { version: 1, type: type, categories: years, estimates: [false, false, false, true],
+            series: [{ name: 'Receita', values: [100, 120, 135, 150] }], options: { title: 'Título do gráfico', locale: locale } };
+        if (STACKED.indexOf(type) !== -1) {
+            data.series = [{ name: 'Produto A', values: [60, 70, 75, 80] }, { name: 'Produto B', values: [40, 50, 60, 70] }];
+        } else if (type === 'combo') {
+            data.series = [{ name: 'Receita', type: 'column', axis: 'primary', values: [100, 120, 135, 150] },
+                { name: 'Margem', type: 'line', axis: 'secondary', values: [0.2, 0.22, 0.23, 0.25], format: 'percent' }];
+        } else if (type === 'waterfall') {
+            Object.assign(data, { categories: ['Início', 'Aumento', 'Redução', 'Fim'], estimates: [false, false, false, false],
+                roles: ['start', 'delta', 'delta', 'end'], series: [{ name: 'Valor', values: [100, 30, -15, 115] }] });
+        } else if (isRound(type)) {
+            Object.assign(data, { categories: ['Parte A', 'Parte B', 'Parte C'], estimates: [false, false, false],
+                series: [{ name: 'Participação', values: [50, 30, 20] }] });
+        } else if (type === 'scatter' || type === 'bubble') {
+            Object.assign(data, { categories: ['Empresa A', 'Empresa B', 'Empresa C'], estimates: [false, false, false],
+                series: [{ name: 'Crescimento', values: [0.05, 0.1, 0.15], format: 'percent' }, { name: 'Múltiplo', values: [8, 10, 12] }] });
+            if (type === 'bubble') {
+                data.series.push({ name: 'Tamanho', values: [100, 400, 900] });
+            }
+        }
+        return data;
+    };
+
+    /* Whether a chart's data labels show: as its options say, else on for bridges, donuts, pies and scatter. */
+    App.charts.labelsOn = function labelsOn(data) {
+        const options = (data && data.options) || {};
+        if (typeof options.dataLabels === 'boolean') {
+            return options.dataLabels;
+        }
+        return ['waterfall', 'donut', 'pie', 'scatter', 'bubble'].indexOf(data && data.type) !== -1;
+    };
+
+    /* The chart's data from its <script class="chart-data">, or null. */
+    App.charts.readData = function readData(figure) {
+        const script = figure && figure.querySelector('script.chart-data');
+        return script ? App.charts.parseChartData(script.textContent) : null;
+    };
+
+    /*
+     * Store `data` in the chart and draw it again. "<" is written as <,
+     * so no text in the data (a title holding a closing script tag) can end the script early.
+     */
+    App.charts.writeData = function writeData(figure, data) {
+        let script = figure.querySelector('script.chart-data');
+        if (!script) {
+            script = figure.ownerDocument.createElement('script');
+            script.setAttribute('type', 'application/json');
+            script.setAttribute('class', 'chart-data');
+            figure.insertBefore(script, figure.firstChild);
+        }
+        script.textContent = JSON.stringify(data).replace(/</g, '\\u003c');
+        App.charts.redraw(figure);
+    };
+
+    /* A new chart element (not yet on a slide) holding `data`, at `rect`, with id `id`, drawn. */
+    App.charts.createChart = function createChart(doc, data, rect, id) {
+        const figure = doc.createElement('figure');
+        figure.setAttribute('class', 'el');
+        figure.setAttribute('data-type', 'chart');
+        figure.setAttribute('data-id', id);
+        figure.setAttribute('style', ['left', 'top', 'width', 'height'].map((side) => side + ': ' + rect[side] + 'px;').join(' ') +
+            ' margin: 0px;');
+        App.charts.writeData(figure, data);
+        return figure;
+    };
 
     // ---------------------------------------------------------------
     // render, redraw

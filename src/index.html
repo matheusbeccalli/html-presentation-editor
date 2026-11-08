@@ -105,6 +105,19 @@
             </div>
             <label class="format-check"><input type="checkbox" id="format-shape-shadow"> Shadow</label>
         </section>
+        <!-- Charts (chartcontrols.js): what is typed; the rest is on the Chart Design tab. -->
+        <section id="format-chart" hidden>
+            <h3>Chart</h3>
+            <div class="format-grid format-chart-grid">
+                <label for="format-chart-title">Title</label><input id="format-chart-title" type="text" autocomplete="off"><span></span>
+                <label for="format-chart-value-title">Value axis</label><input id="format-chart-value-title" type="text" autocomplete="off" placeholder="title"><span></span>
+                <label for="format-chart-category-title">Category axis</label><input id="format-chart-category-title" type="text" autocomplete="off" placeholder="title"><span></span>
+                <label for="format-chart-min">Axis minimum</label><input id="format-chart-min" type="text" inputmode="decimal" autocomplete="off" placeholder="auto"><span></span>
+                <label for="format-chart-max">Axis maximum</label><input id="format-chart-max" type="text" inputmode="decimal" autocomplete="off" placeholder="auto"><span></span>
+                <label for="format-chart-gap">Gap width</label><input id="format-chart-gap" type="text" inputmode="decimal" autocomplete="off" placeholder="100"><span>%</span>
+                <label for="format-chart-source">Source</label><input id="format-chart-source" type="text" autocomplete="off" placeholder="Fonte: …"><span></span>
+            </div>
+        </section>
         <section id="format-text" hidden>
             <h3>Text box</h3>
             <fieldset id="format-autofit">
@@ -185,6 +198,7 @@
 <!-- INLINE-JS: js/tabledesign.js -->
 <!-- INLINE-JS: js/tablepaste.js -->
 <!-- INLINE-JS: js/shapecontrols.js -->
+<!-- INLINE-JS: js/chartcontrols.js -->
 <!-- INLINE-JS: js/findreplace.js -->
 <!-- INLINE-JS: js/ribbon.js -->
 <!-- INLINE-JS: js/ui.js -->

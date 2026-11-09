@@ -3187,6 +3187,44 @@ def test_chart_paste_from_excel(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_chart_label_numbers(browser):
+    """Data label numbers and positions from the ribbon and the Format pane: Inside End, decimals, units,
+    1,234.5 writing, negatives in parentheses; each one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(4)")
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.chart-button")
+    page.click(".chart-gallery-item[data-chart-type='column']")
+    chart = page.evaluate("App.selection.selectedId()")
+    page.click("#chart-data-close")
+    page.click(".ribbon-tab[data-tab='chart-design']")
+    page.click(".ribbon-button[data-command='chartDataLabels']")
+    labels = lambda: page.evaluate("id => Array.from(App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] .chart-data-label'), (t) => [t.textContent, t.getAttribute('fill')])", chart)  # noqa: E731
+    check([text for text, fill in labels()] == ["100", "120", "135", "150"] and labels()[0][1] != "#FFFFFF", f"outside, dark: {labels()}")
+
+    page.click(".list-button.chart-label-position")
+    page.click(".chart-label-position-menu .menu-label:text-is('Inside End')")
+    check([fill for text, fill in labels()] == ["#FFFFFF", "#FFFFFF", "#FFFFFF", "#404040"],
+          f"inside the columns, white; dark in the lighter 2025E: {labels()}")
+    check(page.text_content(".list-button.chart-label-position").startswith("Labels: Inside End"), "the button says so")
+
+    for field, value in [("#format-chart-decimals", "1"), ("#format-chart-units", "R$ mn")]:
+        page.fill(field, value)
+        page.keyboard.press("Enter")
+    check(labels()[0][0] == "100,0 R$ mn", f"decimals and units: {labels()[0]}")
+    page.select_option("#format-chart-locale", "en-US")
+    check(labels()[0][0] == "100.0 R$ mn", f"written 1,234.5: {labels()[0]}")
+    page.check("#format-chart-parens")
+    check(page.evaluate(CHART_DATA, chart)["options"].get("parens") is True, "negatives in parentheses on")
+    page.screenshot(path=str(OUTPUT / "71-chart-label-numbers.png"))
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(labels()[0][0] == "100,0 R$ mn", f"two undos: parentheses and the locale back: {labels()[0]}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4262,6 +4300,7 @@ TESTS = [
     test_insert_chart_and_design,
     test_chart_data_grid,
     test_chart_paste_from_excel,
+    test_chart_label_numbers,
 ]
 
 

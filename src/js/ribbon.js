@@ -120,7 +120,7 @@
                 { label: 'Chart Elements', rows: [
                     [{ command: 'chartTitle', icon: 'chartTitle' }, { command: 'chartDataLabels', icon: 'dataLabels' },
                         { command: 'chartGridlines', icon: 'gridlines' }],
-                    [{ control: 'chartLegend' }, { command: 'chartCagr', icon: 'cagr' }]] },
+                    [{ control: 'chartLegend' }, { control: 'chartLabelPosition' }, { command: 'chartCagr', icon: 'cagr' }]] },
                 { label: 'Waterfall', rows: [[{ control: 'waterfallIncrease' }, { control: 'waterfallDecrease' },
                     { control: 'waterfallTotal' }]] },
             ],

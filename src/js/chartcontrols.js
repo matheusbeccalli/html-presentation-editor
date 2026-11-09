@@ -27,6 +27,8 @@
     const NEW_CHART = { left: 240, top: 150, width: 800, height: 450 };
     const DEFAULT_TITLE = 'Título do gráfico';
     const LEGENDS = [['bottom', 'Bottom'], ['top', 'Top'], ['right', 'Right'], ['none', 'None']];
+    const LABEL_POSITIONS = [['', 'Automatic'], ['outsideEnd', 'Outside End'], ['insideEnd', 'Inside End'], ['center', 'Center'],
+        ['insideBase', 'Inside Base']];
     const ICONS = {
         column: 'chartColumn', 'stacked-column': 'chartColumn', 'stacked-column-100': 'chartColumn',
         bar: 'chartBar', 'stacked-bar': 'chartBar', 'stacked-bar-100': 'chartBar', line: 'chartLine',
@@ -68,7 +70,7 @@
             () => App.charts.writeData(figure, data));
     }
 
-    /* One option set (or, with undefined / '', removed) as one undo step. */
+    /* One option set (or, with undefined / '', removed) as one undo step. Label decimals: whole, 0 to 6. */
     function setOption(label, name, value) {
         changeChart(label, (data) => {
             if (value === undefined || value === null || value === '') {
@@ -274,6 +276,11 @@
                     const current = ((currentData() || {}).options || {}).legend;
                     return LEGENDS.map(([value, label]) => ({ label: label, value: value, checked: value === current }));
                 }, (position) => App.commands.run('setChartLegend', position));
+            case 'chartLabelPosition':
+                return listControl('chart-label-position', 'Data label position', () => {
+                    const current = ((currentData() || {}).options || {}).labelPosition || '';
+                    return LABEL_POSITIONS.map(([value, label]) => ({ label: label, value: value, checked: value === current }));
+                }, (position) => App.commands.run('setChartOption', { name: 'labelPosition', value: position, label: 'Label position' }));
             case 'waterfallIncrease': return waterfallColor('increase', 'Increase colour', '#3C9D5D');
             case 'waterfallDecrease': return waterfallColor('decrease', 'Decrease colour', '#D9534F');
             case 'waterfallTotal': return waterfallColor('total', 'Total colour', 'var(--color-accent, #1F2A44)');
@@ -285,9 +292,11 @@
     App.chartControls.refresh = function refresh() {
         const data = currentData();
         const legend = data && data.options && data.options.legend;
+        const position = data && data.options && data.options.labelPosition;
         const labels = {
             'chart-type': data ? typeName(data.type) : 'Type',
             'chart-legend': 'Legend: ' + (legend ? LEGENDS.find(([value]) => value === legend)[1] : 'Auto'),
+            'chart-label-position': 'Labels: ' + (LABEL_POSITIONS.find(([value]) => value === (position || '')) || LABEL_POSITIONS[0])[1],
         };
         Object.keys(listButtons).forEach((className) => {
             const button = listButtons[className];
@@ -311,6 +320,14 @@
         ['format-chart-max', 'axisMax', 'Axis maximum', 'number'],
         ['format-chart-gap', 'gapWidth', 'Gap width', 'number'],
         ['format-chart-source', 'source', 'Source', 'text'],
+        ['format-chart-decimals', 'labelDecimals', 'Label decimals', 'number'],
+        ['format-chart-units', 'units', 'Units', 'text'],
+    ];
+    // [checkbox id, option, undo label]: on = true, off = the option removed.
+    const CHECKS = [
+        ['format-chart-esuffix', 'estimateSuffix', 'Estimate suffix'],
+        ['format-chart-percent', 'percent', 'Show as %'],
+        ['format-chart-parens', 'parens', 'Negatives in parentheses'],
     ];
     let section = null;
 
@@ -327,7 +344,8 @@
                 input.value = options[name] === undefined || options[name] === null ? '' : String(options[name]);
             }
         });
-        document.getElementById('format-chart-esuffix').checked = !!options.estimateSuffix;
+        CHECKS.forEach(([id, name]) => { document.getElementById(id).checked = !!options[name]; });
+        document.getElementById('format-chart-locale').value = options.locale === 'en-US' ? 'en-US' : 'pt-BR';
     }
 
     function applyField(input, name, label, kind) {
@@ -336,6 +354,9 @@
         let value = typed;
         if (kind === 'number' && typed !== '') {
             value = App.formatPane.parseNumber(typed);
+            if (name === 'labelDecimals' && value !== null) {
+                value = Math.min(6, Math.max(0, Math.round(value)));
+            }
             if (value === null) {
                 App.ui.setStatus('Type a number, or leave it empty for automatic');
                 refreshPane(true);
@@ -365,9 +386,12 @@
                 }
             });
         });
-        const suffix = document.getElementById('format-chart-esuffix');
-        suffix.addEventListener('change', () => App.commands.run('setChartOption',
-            { name: 'estimateSuffix', value: suffix.checked ? true : '', label: 'Estimate suffix' }));
+        CHECKS.forEach(([id, name, label]) => {
+            const box = document.getElementById(id);
+            box.addEventListener('change', () => App.commands.run('setChartOption', { name: name, value: box.checked ? true : '', label: label }));
+        });
+        const locale = document.getElementById('format-chart-locale');
+        locale.addEventListener('change', () => App.commands.run('setChartOption', { name: 'locale', value: locale.value, label: 'Number format' }));
         ['selection-changed', 'history-changed', 'slide-changed', 'deck-loaded'].forEach((name) => {
             App.events.on(name, () => refreshPane(false));
         });

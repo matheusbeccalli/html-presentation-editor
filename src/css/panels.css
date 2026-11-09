@@ -249,6 +249,7 @@
 .format-tip { margin: 10px 0 0; font-size: 12px; }
 .format-shape-grid [hidden] { display: none; }
 .format-chart-grid input { text-align: left; }
+.format-chart-grid select { padding: 3px 4px; font: inherit; }
 .format-shape-grid select { padding: 3px 4px; font: inherit; }
 .format-check { display: flex; align-items: center; gap: 6px; margin-top: 10px; font-size: 13px; }
 #format-autofit { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; }

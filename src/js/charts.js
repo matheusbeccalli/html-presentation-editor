@@ -128,7 +128,7 @@
 
     /*
      * A value as a label: { locale, decimals, percent (0.195 -> 19,5%), parens
-     * (negatives in parentheses) }. Written by numbers.js, so a chart writes
+     * (negatives in parentheses), units (a text after it: "702 R$ mn") }. Written by numbers.js, so a chart writes
      * numbers exactly as a table does.
      */
     App.charts.formatValue = function formatValue(value, options) {
@@ -141,7 +141,8 @@
         parts.grouped = true;
         parts.parens = !!opts.parens && parts.negative;
         parts.suffix = opts.percent ? '%' : '';
-        return App.numbers.format(parts, opts.locale || 'pt-BR');
+        const written = App.numbers.format(parts, opts.locale || 'pt-BR');
+        return opts.units ? written + ' ' + opts.units : written;
     };
 
     /* How many decimals `values` need (as percentages when `percent`), at most two. */
@@ -254,7 +255,7 @@
                 name: String(given.name || 'Series ' + (index + 1)),
                 values: categories.map((name, i) => (typeof values[i] === 'number' && isFinite(values[i]) ? values[i] : null)),
                 color: given.color || PALETTE[index % PALETTE.length],
-                percent: given.format === 'percent',
+                percent: given.format === 'percent' || (!!data.options && data.options.percent === true),
                 format: given.format,
                 // A line chart draws lines; a combo its "line" series (by default: all but the first).
                 kind: data.type === 'area' || data.type === 'stacked-area' ? 'area'
@@ -636,8 +637,10 @@
         m.series.forEach((series, s) => {
             const scaleOf = at[series.axis === 'secondary' && at.secondary ? 'secondary' : 'primary'];
             // Shares (100% stacked) rarely come out whole: shown as whole percents.
-            const decimals = /-100$/.test(m.type) ? 0 : App.charts.decimalsOf(series.values, series.percent);
-            const labelFormat = { locale: locale, percent: series.percent, decimals: decimals };
+            const decimals = typeof m.options.labelDecimals === 'number' ? m.options.labelDecimals
+                : /-100$/.test(m.type) ? 0 : App.charts.decimalsOf(series.values, series.percent);
+            const labelFormat = { locale: locale, percent: series.percent, decimals: decimals, parens: !!m.options.parens,
+                units: m.options.units };
             const xOf = (i) => plot.left + band * (i + 0.5);
             if (series.kind !== 'bar') {
                 series.values.forEach((value, i) => {
@@ -683,9 +686,8 @@
                 rects.push('<rect class="chart-bar" x="' + n(box.x) + '" y="' + n(box.y) + '" width="' + n(box.width) +
                     '" height="' + n(box.height) + '" style="' + style + '"/>');
                 if (m.options.dataLabels) {
-                    // In a combo the line runs near the column tops, so the columns' numbers go inside their base.
                     labels.push(dataLabel(App.charts.formatValue(value, labelFormat), box, value, horizontal, stacked,
-                        m.type === 'combo'));
+                        labelPositionOf(m, stacked), m.estimates[i]));
                 }
             });
             parts.push('<g class="chart-series" data-series="' + s + '">' + rects.join('') + '</g>');
@@ -844,7 +846,8 @@
         const point = (angle, radius) => n(cx + radius * Math.sin(angle)) + ' ' + n(cy - radius * Math.cos(angle));
         const arc = (radius, to, large, sweep) => 'A' + n(radius) + ' ' + n(radius) + ' 0 ' + large + ' ' + sweep + ' ' + point(to, radius);
         const shares = slices.map((slice) => slice.value / total);
-        const format = { locale: m.options.locale || 'pt-BR', percent: true, decimals: Math.min(1, App.charts.decimalsOf(shares, true)) };
+        const format = { locale: m.options.locale || 'pt-BR', percent: true, decimals: typeof m.options.labelDecimals === 'number'
+            ? m.options.labelDecimals : Math.min(1, App.charts.decimalsOf(shares, true)) };
         const paths = [];
         const labels = [];
         let angle = 0;
@@ -876,28 +879,55 @@
         return svgOpen(width, height, m.options.title) + parts.join('') + '</svg>';
     }
 
+    const LABEL_SIZE_DATA = 13;
+
     /*
-     * A bar's value: past its end (clustered), in its middle in white when it
-     * fits (stacked), or inside its base in white (`inside`, a combo's columns,
-     * clear of the line; past the end when the column is too short).
+     * Where a bar's number goes (options.labelPosition): 'outsideEnd',
+     * 'insideEnd', 'center' or 'insideBase'. Automatic: centred in a stacked
+     * segment; inside the base in a combo (the line runs near the column tops);
+     * past the end otherwise.
      */
-    function dataLabel(content, box, value, horizontal, stacked, inside) {
-        const white = { 'font-size': 13, fill: '#FFFFFF', 'text-anchor': 'middle' };
-        if (inside && !horizontal && !stacked && box.height > 22) {
-            const y = value >= 0 ? box.y + box.height - 7 : box.y + 17;
+    function labelPositionOf(m, stacked) {
+        const chosen = m.options.labelPosition;
+        if (['outsideEnd', 'insideEnd', 'center', 'insideBase'].indexOf(chosen) !== -1) {
+            return chosen;
+        }
+        return stacked ? 'center' : m.type === 'combo' ? 'insideBase' : 'outsideEnd';
+    }
+
+    /*
+     * A bar's number at `position`: inside the bar (white; dark in a lighter
+     * estimate bar) when it fits there, else past its end (dark, with a halo);
+     * in a stacked segment too small for it, nothing.
+     */
+    function dataLabel(content, box, value, horizontal, stacked, position, lighter) {
+        const up = value >= 0;
+        const fits = horizontal ? box.width > textWidth(content, LABEL_SIZE_DATA) + 8 : box.height > 22;
+        const middle = LABEL_SIZE_DATA * 0.35;
+        if (position !== 'outsideEnd' && fits) {
+            const white = { 'font-size': LABEL_SIZE_DATA, fill: lighter ? TEXT_COLOR : '#FFFFFF', 'text-anchor': 'middle' };
+            if (horizontal) {
+                const atEnd = position === 'insideEnd' ? up : !up;   // the end is the right edge for a positive bar
+                const x = position === 'center' ? box.x + box.width / 2 : atEnd ? box.x + box.width - 4 : box.x + 4;
+                const anchor = position === 'center' ? 'middle' : atEnd ? 'end' : 'start';
+                return text('chart-data-label', x, box.y + box.height / 2 + middle, content, Object.assign(white, { 'text-anchor': anchor }));
+            }
+            const top = box.y + 16;
+            const bottom = box.y + box.height - 7;
+            const y = position === 'center' ? box.y + box.height / 2 + middle
+                : position === 'insideEnd' ? (up ? top : bottom) : (up ? bottom : top);
             return text('chart-data-label', box.x + box.width / 2, y, content, white);
         }
         if (stacked) {
-            const fits = horizontal ? box.width > textWidth(content, 13) + 4 : box.height > 16;
-            return fits ? text('chart-data-label', box.x + box.width / 2, box.y + box.height / 2 + 4, content, white) : '';
+            return '';   // a segment too small for its number
         }
-        const attrs = { 'font-size': 13, fill: TEXT_COLOR, 'text-anchor': 'middle', style: HALO };
+        const attrs = { 'font-size': LABEL_SIZE_DATA, fill: TEXT_COLOR, 'text-anchor': 'middle', style: HALO };
         if (horizontal) {
-            return value >= 0
-                ? text('chart-data-label', box.x + box.width + 4, box.y + box.height / 2 + 4, content, Object.assign(attrs, { 'text-anchor': 'start' }))
-                : text('chart-data-label', box.x - 4, box.y + box.height / 2 + 4, content, Object.assign(attrs, { 'text-anchor': 'end' }));
+            return up
+                ? text('chart-data-label', box.x + box.width + 4, box.y + box.height / 2 + middle, content, Object.assign(attrs, { 'text-anchor': 'start' }))
+                : text('chart-data-label', box.x - 4, box.y + box.height / 2 + middle, content, Object.assign(attrs, { 'text-anchor': 'end' }));
         }
-        return value >= 0
+        return up
             ? text('chart-data-label', box.x + box.width / 2, box.y - 4, content, attrs)
             : text('chart-data-label', box.x + box.width / 2, box.y + box.height + 14, content, attrs);
     }
@@ -1061,7 +1091,8 @@
         const gap = (typeof m.options.gapWidth === 'number' ? m.options.gapWidth : 60) / 100;
         const thick = band / (1 + gap);
         const values = m.series.length > 0 ? m.series[0].values : [];
-        const format = { locale: locale, parens: !!m.options.parens, decimals: App.charts.decimalsOf(values) };
+        const format = { locale: locale, parens: !!m.options.parens, units: m.options.units, percent: m.options.percent === true,
+            decimals: typeof m.options.labelDecimals === 'number' ? m.options.labelDecimals : App.charts.decimalsOf(values) };
         const rects = [];
         const connectors = [];
         const labels = [];
@@ -1085,9 +1116,11 @@
                 if (bar.kind === 'increase') {
                     content = '+' + content;
                 }
+                // Decreases (and negative totals) hang down: their "end" is the bottom.
                 const below = bar.kind === 'decrease' || (bar.kind === 'total' && bar.value < 0);
-                labels.push(text('chart-data-label', box.x + thick / 2, below ? box.y + box.height + 14 : box.y - 4, content,
-                    { 'font-size': 13, fill: TEXT_COLOR, 'text-anchor': 'middle', style: HALO }));
+                const position = ['insideEnd', 'center', 'insideBase'].indexOf(m.options.labelPosition) !== -1
+                    ? m.options.labelPosition : 'outsideEnd';
+                labels.push(dataLabel(content, box, below ? -1 : 1, false, false, position, m.estimates[i]));
             }
         });
         parts.push('<g class="chart-series" data-series="0">' + rects.join('') + '</g>');

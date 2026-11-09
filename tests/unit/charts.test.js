@@ -514,3 +514,49 @@ test('charts: "E after estimates": an estimate year gets an E on the chart (not 
         options: { estimateSuffix: true } }));
     assertEqual(texts(svg, '.chart-category-label'), ['2023', '2024E', '2025E']);
 });
+
+// ---------------------------------------------------------------------------
+// Data label numbers and positions (Phase 6 step 9)
+// ---------------------------------------------------------------------------
+
+test('charts: a units text after the number', () => {
+    assertEqual(App.charts.formatValue(702, { locale: 'pt-BR', decimals: 0, units: 'R$ mn' }), '702 R$ mn');
+});
+
+test('charts: label numbers as the chart\'s options say: decimals, locale, %, parentheses, units', () => {
+    const labels = (options, values) => texts(drawn(Object.assign({}, COLUMNS, {
+        series: [{ name: 'R', values: values || [1234, -50, 300] }], options: Object.assign({ dataLabels: true }, options),
+    })), '.chart-data-label');
+    assertEqual(labels({ labelDecimals: 1 }), ['1.234,0', '-50,0', '300,0']);
+    assertEqual(labels({ locale: 'en-US' }), ['1,234', '-50', '300']);
+    assertEqual(labels({ parens: true }), ['1.234', '(50)', '300']);
+    assertEqual(labels({ units: 'R$ mn' }), ['1.234 R$ mn', '-50 R$ mn', '300 R$ mn']);
+    assertEqual(labels({ percent: true }, [0.1, 0.25, 0.3]), ['10%', '25%', '30%']);
+    const axis = texts(drawn(Object.assign({}, COLUMNS, { series: [{ name: 'R', values: [0.1, 0.25, 0.3] }],
+        options: { percent: true } })), '.chart-value-label');
+    assert(axis.every((label) => /%$/.test(label)), 'the axis in % too: ' + axis.join(' '));
+});
+
+test('charts: label positions: outside end, inside end, centre, inside base', () => {
+    const where = (position) => {
+        const svg = drawn(Object.assign({}, COLUMNS, { options: { dataLabels: true, labelPosition: position } }), 600, 400);
+        const bar = bars(svg)[2];
+        const label = svg.querySelectorAll('.chart-data-label')[2];
+        return { y: Number(label.getAttribute('y')), fill: label.getAttribute('fill'), bar: bar };
+    };
+    const outside = where('outsideEnd');
+    assert(outside.y < outside.bar.y && outside.fill !== '#FFFFFF', 'above the column');
+    const insideEnd = where('insideEnd');
+    assert(insideEnd.y > insideEnd.bar.y && insideEnd.y < insideEnd.bar.y + 30 && insideEnd.fill === '#FFFFFF', 'inside its top');
+    const centre = where('center');
+    assert(near(centre.y - 4.55, centre.bar.y + centre.bar.height / 2) || Math.abs(centre.y - (centre.bar.y + centre.bar.height / 2)) < 6, 'in the middle');
+    const base = where('insideBase');
+    assert(base.y > base.bar.y + base.bar.height - 20 && base.y < base.bar.y + base.bar.height, 'inside its base');
+});
+
+test('charts: a number inside a lighter estimate bar is dark, so it can be read', () => {
+    const svg = drawn(Object.assign({}, COLUMNS, { estimates: [false, false, true],
+        options: { dataLabels: true, labelPosition: 'insideEnd' } }), 600, 400);
+    const fills = Array.from(svg.querySelectorAll('.chart-data-label'), (label) => label.getAttribute('fill'));
+    assertEqual([fills[0], fills[2]], ['#FFFFFF', '#404040']);
+});

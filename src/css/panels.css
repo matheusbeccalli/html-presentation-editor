@@ -168,8 +168,13 @@
 }
 .panel-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .panel-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
-#notes-text { padding-top: 4px; line-height: 1.45; white-space: pre-wrap; }
-#notes-text.empty { color: var(--text-muted); font-style: italic; }
+#notes-panel { display: flex; flex-direction: column; }
+#notes-text {
+    flex: 1; width: 100%; margin-top: 4px; padding: 2px 0; resize: none;
+    border: 0; background: transparent; color: var(--text); font: inherit; line-height: 1.45;
+}
+#notes-text:focus { outline: none; }
+#notes-text::placeholder { color: var(--text-muted); font-style: italic; }
 
 /* ---- Chart data (chartdata.js): in place of the notes, taller, while a chart's data is open ---- */
 #chart-data-panel {

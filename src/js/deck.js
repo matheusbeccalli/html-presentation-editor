@@ -202,9 +202,4 @@
     App.deck.previous = () => App.deck.goTo(currentIndex - 1);
     App.deck.first = () => App.deck.goTo(0);
     App.deck.last = () => App.deck.goTo(App.deck.getSlides().length - 1);
-
-    App.deck.notesOf = function notesOf(slide) {
-        const notes = slide && slide.querySelector('aside.notes');
-        return notes ? notes.textContent.trim() : '';
-    };
 })();

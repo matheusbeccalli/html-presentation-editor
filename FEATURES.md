@@ -270,8 +270,9 @@ Nested bullets are the top priority of this phase.
 - [ ] Slides: reorder by dragging thumbnails, hide slide
 - [ ] Slide master: logo, footer text, "Confidencial" label, automatic slide numbers; on every slide, edited in one place
 - [ ] Theme editor: edit `:root` CSS variables (colors, fonts) with live preview
-- [ ] Speaker notes panel under the canvas
+- [x] Speaker notes panel under the canvas *(plain text, as decided in the Phase 7 Q&A: type in the panel under the slide (line breaks kept), stored in the slide's <aside class="notes">; one undo step per typing run, Ctrl+Z / Ctrl+Y in the panel undo and redo; not searched by Find)*
 - [ ] **Done when:** a 15-slide deck can be restructured, aligned and rebranded in minutes.
+  - [ ] Speaker notes: click the panel under the slide and type, Enter for a new line: the notes are this slide's (another slide shows its own; an empty one says "Click to add speaker notes"). Ctrl+Z in the panel takes the typing back. Save, reopen: the notes are kept, line breaks too
 
 ## Phase 8: Present and export (section 7)
 

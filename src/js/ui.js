@@ -1,6 +1,6 @@
 /*
- * ui.js - the window frame around the slide: title bar, status bar, notes
- * area, welcome screen, drop zone and the "busy" overlay.
+ * ui.js - the window frame around the slide: title bar, status bar, welcome
+ * screen, drop zone and the "busy" overlay (the notes under the slide: notes.js).
  *
  * It mostly listens to events and updates text; it never changes the deck.
  *
@@ -61,7 +61,7 @@
     }
 
     App.ui.init = function init() {
-        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size', 'notes-text',
+        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size',
          'welcome', 'canvas-stage-box', 'drop-zone', 'drop-zone-text', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
@@ -160,9 +160,6 @@
         nodes['status-slide'].textContent = slides.length
             ? 'Slide ' + (index + 1) + ' of ' + slides.length + (hidden ? ' (hidden)' : '')
             : '';
-        const notes = App.deck.notesOf(slide);
-        nodes['notes-text'].textContent = notes || 'No speaker notes on this slide.';
-        nodes['notes-text'].classList.toggle('empty', !notes);
     }
 
     App.ui.setStatus = function setStatus(text) {

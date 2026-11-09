@@ -12,9 +12,9 @@
  * The "current" match is simply the one selected in the box being edited, so
  * moving the cursor away from it needs no bookkeeping.
  *
- * Text boxes and table cells are searched, in reading order (text.containersIn;
- * speaker notes join once they can be edited in Phase 7). All text work goes
- * through text.js.
+ * Text boxes, table cells and shapes' text are searched, in reading order
+ * (text.containersIn); speaker notes (plain text, notes.js) are not. All text
+ * work goes through text.js.
  *
  * Talks to: text.js (findMatches, matchRange, selectMatch, replaceText, replaceAll),
  *           deck.js, history.js, selection.js, commands.js (the find / replace commands).

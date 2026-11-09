@@ -3342,6 +3342,50 @@ def test_phase6_done_when(browser):
     editor.close()
 
 
+def test_speaker_notes(browser):
+    """Speaker notes typed in the panel under the slide: plain text with line breaks, stored in the slide's
+    <aside class="notes">; one undo step per typing run (Ctrl+Z works in the panel); each slide its own; saved."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    notes = "#notes-text"
+    aside = lambda: page.evaluate("App.deck.getCurrentSlide().querySelector('aside.notes').textContent")  # noqa: E731
+    page.evaluate("App.deck.goTo(1)")
+    check(page.input_value(notes) == "Reforçar o múltiplo de entrada abaixo da média dos comparáveis.", page.input_value(notes))
+
+    # Typing goes into the slide's notes; Enter makes a new line; one undo step.
+    page.click(notes)
+    page.keyboard.press("End")
+    page.keyboard.press("Enter")
+    page.keyboard.type("Citar Beta e Gama.")
+    check(aside() == "Reforçar o múltiplo de entrada abaixo da média dos comparáveis.\nCitar Beta e Gama.", repr(aside()))
+    check(page.evaluate("App.history.undoLabel()") == "Speaker notes", "an undo step")
+    page.keyboard.press("Control+z")
+    check(aside() == "Reforçar o múltiplo de entrada abaixo da média dos comparáveis." and
+          page.input_value(notes) == aside(), f"Ctrl+Z in the panel undoes the typing: {aside()!r}")
+    page.keyboard.press("Control+y")
+    check(aside().endswith("Citar Beta e Gama."), "Ctrl+Y: again")
+
+    # Each slide its own; a slide without notes starts empty (placeholder) and gets them.
+    page.evaluate("App.deck.goTo(4)")
+    check(page.input_value(notes) == "" and page.get_attribute(notes, "placeholder") == "Click to add speaker notes",
+          "slide 5 has none")
+    page.click(notes)
+    page.keyboard.type("Só para perguntas.")
+    page.evaluate("App.deck.goTo(1)")
+    check(page.input_value(notes).endswith("Citar Beta e Gama."), "slide 2's notes again")
+    page.screenshot(path=str(OUTPUT / "73-speaker-notes.png"))
+
+    # Saved and reopened: the notes are kept, line break and all.
+    saved = editor.save_as_download("notes-saved.html")
+    editor.open(saved)
+    page.evaluate("App.deck.goTo(4)")
+    check(page.input_value(notes) == "Só para perguntas.", page.input_value(notes))
+    page.evaluate("App.deck.goTo(1)")
+    check(page.input_value(notes).count("\n") == 1, "the line break kept")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4419,6 +4463,7 @@ TESTS = [
     test_chart_paste_from_excel,
     test_chart_label_numbers,
     test_phase6_done_when,
+    test_speaker_notes,
 ]
 
 

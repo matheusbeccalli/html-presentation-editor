@@ -503,8 +503,13 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 }
 .panel-label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
 .panel-hint { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text-muted); }
-#notes-text { padding-top: 4px; line-height: 1.45; white-space: pre-wrap; }
-#notes-text.empty { color: var(--text-muted); font-style: italic; }
+#notes-panel { display: flex; flex-direction: column; }
+#notes-text {
+    flex: 1; width: 100%; margin-top: 4px; padding: 2px 0; resize: none;
+    border: 0; background: transparent; color: var(--text); font: inherit; line-height: 1.45;
+}
+#notes-text:focus { outline: none; }
+#notes-text::placeholder { color: var(--text-muted); font-style: italic; }
 
 /* ---- Chart data (chartdata.js): in place of the notes, taller, while a chart's data is open ---- */
 #chart-data-panel {
@@ -750,8 +755,8 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
             <div class="chart-data-scroll"><table id="chart-data-grid"></table></div>
         </div>
         <div id="notes-panel">
-            <div class="panel-label">Speaker notes <span class="panel-hint">(editing arrives in Phase 7)</span></div>
-            <div id="notes-text" class="empty"></div>
+            <label class="panel-label" for="notes-text">Speaker notes</label>
+            <textarea id="notes-text" placeholder="Click to add speaker notes" spellcheck="true"></textarea>
         </div>
     </section>
 
@@ -1020,6 +1025,7 @@ App.start = function start() {
     App.shapeControls.init();   // its Format pane section
     App.chartControls.init();   // its Format pane section too
     App.chartData.init();       // the data grid under the slide
+    App.notes.init();           // the speaker notes under the slide
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
@@ -11306,11 +11312,6 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.deck.previous = () => App.deck.goTo(currentIndex - 1);
     App.deck.first = () => App.deck.goTo(0);
     App.deck.last = () => App.deck.goTo(App.deck.getSlides().length - 1);
-
-    App.deck.notesOf = function notesOf(slide) {
-        const notes = slide && slide.querySelector('aside.notes');
-        return notes ? notes.textContent.trim() : '';
-    };
 })();
 
 </script>
@@ -19002,6 +19003,94 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/notes.js ----
+/*
+ * notes.js - speaker notes (SPEC Phase 7).
+ *
+ *   <section class="slide"> … <aside class="notes">Abrir com o contexto.
+ *   Depois os números.</aside></section>
+ *
+ * Plain text (decided in the Phase 7 Q&A): line breaks kept, no formatting.
+ * The panel under the slide is a text box for the slide shown; typing writes
+ * the slide's <aside class="notes"> (made at the end of the slide if it has
+ * none) as one undo step per typing run (history mergeKey). Ctrl+Z / Ctrl+Y
+ * in the box run the editor's undo / redo, so the slide and the box agree.
+ * The deck never shows the notes (deck.js hides aside.notes); the presenter
+ * view and PowerPoint export read them (Phase 8).
+ *
+ * Talks to: deck.js, history.js, commands.js (undo / redo).
+ */
+
+(function () {
+    'use strict';
+
+    App.notes = {};
+
+    /* A slide's notes as plain text (the HTML's own indentation around them trimmed), or ''. */
+    App.notes.textOf = function textOf(slide) {
+        const aside = slide && slide.querySelector(':scope > aside.notes');
+        return aside ? aside.textContent.trim() : '';
+    };
+
+    /* Set a slide's notes to `text` (plain text, never markup); they stay the last thing in the slide. */
+    App.notes.write = function write(slide, text) {
+        let aside = slide.querySelector(':scope > aside.notes');
+        if (!aside) {
+            aside = slide.ownerDocument.createElement('aside');
+            aside.setAttribute('class', 'notes');
+        }
+        slide.appendChild(aside);
+        aside.textContent = text;
+    };
+
+    let box = null;
+    let typing = false;   // the box itself changed the notes: no need to show them again
+
+    function show() {
+        const slide = App.deck.getCurrentSlide();
+        box.disabled = !slide;
+        if (!typing) {
+            box.value = App.notes.textOf(slide);
+        }
+    }
+
+    function onInput() {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        const slideId = slide.getAttribute('data-slide-id');
+        typing = true;
+        try {
+            App.history.change('Speaker notes', { slideId: slideId }, () => App.notes.write(slide, box.value),
+                { mergeKey: 'notes:' + slideId });
+        } finally {
+            typing = false;
+        }
+    }
+
+    /* Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) in the box: the editor's undo and redo, not the text box's own. */
+    function onKey(event) {
+        const key = event.key.toLowerCase();
+        if (!(event.ctrlKey || event.metaKey) || (key !== 'z' && key !== 'y')) {
+            return;
+        }
+        event.preventDefault();
+        App.commands.run(key === 'y' || event.shiftKey ? 'redo' : 'undo');
+    }
+
+    /* Wiring, called once from App.start(). */
+    App.notes.init = function init() {
+        box = document.getElementById('notes-text');
+        box.addEventListener('input', onInput);
+        box.addEventListener('keydown', onKey);
+        ['deck-loaded', 'slide-changed', 'history-changed'].forEach((name) => App.events.on(name, show));
+        show();
+    };
+})();
+
+</script>
+<script>
 // ---- js/findreplace.js ----
 /*
  * findreplace.js - Home > Editing: Find (Ctrl+F) and Replace (Ctrl+H) across all slides (SPEC Phase 3).
@@ -19017,9 +19106,9 @@ App.template.newDeckHtml = function newDeckHtml() {
  * The "current" match is simply the one selected in the box being edited, so
  * moving the cursor away from it needs no bookkeeping.
  *
- * Text boxes and table cells are searched, in reading order (text.containersIn;
- * speaker notes join once they can be edited in Phase 7). All text work goes
- * through text.js.
+ * Text boxes, table cells and shapes' text are searched, in reading order
+ * (text.containersIn); speaker notes (plain text, notes.js) are not. All text
+ * work goes through text.js.
  *
  * Talks to: text.js (findMatches, matchRange, selectMatch, replaceText, replaceAll),
  *           deck.js, history.js, selection.js, commands.js (the find / replace commands).
@@ -19715,8 +19804,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 <script>
 // ---- js/ui.js ----
 /*
- * ui.js - the window frame around the slide: title bar, status bar, notes
- * area, welcome screen, drop zone and the "busy" overlay.
+ * ui.js - the window frame around the slide: title bar, status bar, welcome
+ * screen, drop zone and the "busy" overlay (the notes under the slide: notes.js).
  *
  * It mostly listens to events and updates text; it never changes the deck.
  *
@@ -19777,7 +19866,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     App.ui.init = function init() {
-        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size', 'notes-text',
+        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size',
          'welcome', 'canvas-stage-box', 'drop-zone', 'drop-zone-text', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
@@ -19876,9 +19965,6 @@ App.template.newDeckHtml = function newDeckHtml() {
         nodes['status-slide'].textContent = slides.length
             ? 'Slide ' + (index + 1) + ' of ' + slides.length + (hidden ? ' (hidden)' : '')
             : '';
-        const notes = App.deck.notesOf(slide);
-        nodes['notes-text'].textContent = notes || 'No speaker notes on this slide.';
-        nodes['notes-text'].classList.toggle('empty', !notes);
     }
 
     App.ui.setStatus = function setStatus(text) {

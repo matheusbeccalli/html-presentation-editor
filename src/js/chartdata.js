@@ -581,6 +581,7 @@
         }
         App.chartData.open(element);
         edit('Paste chart data', (copy) => pasteRows(copy, rows, 0, 0), { rebuild: true });
+        App.ui.setStatus('Pasted into the chart: ' + rows.length + ' rows (Ctrl+Z undoes it)');
         return true;
     };
 

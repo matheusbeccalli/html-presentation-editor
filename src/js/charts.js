@@ -27,6 +27,9 @@
  * SVG) is only redrawn when it is edited or resized, so opening and saving a
  * deck leaves it as it was.
  *
+ * A chart type not drawn here (a map, a radar …): copy it in Excel and paste
+ * it on the slide, where it comes in as a picture (images.js, Phase 5).
+ *
  * Talks to: importer.js (calls renderMissing during import), numbers.js, util.js.
  */
 

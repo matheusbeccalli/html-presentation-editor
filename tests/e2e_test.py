@@ -3225,6 +3225,123 @@ def test_chart_label_numbers(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def excel_cells(rows):
+    """Cells as Excel puts them on the clipboard: an HTML table and tab-separated text (fake numbers)."""
+    html = "<table>" + "".join("<tr>" + "".join(f"<td>{cell}</td>" for cell in row) + "</tr>" for row in rows) + "</table>"
+    return html, "".join("\t".join(row) + "\r\n" for row in rows)
+
+
+def pdf_drawing(path):
+    """What a PDF draws: (raster pictures, path-drawing operators) counted in its decompressed content streams."""
+    import zlib
+    data = path.read_bytes()
+    pictures = len(re.findall(rb"/Subtype\s*/Image", data))
+    operators = 0
+    for match in re.finditer(rb"stream\r?\n(.*?)\r?\nendstream", data, re.S):
+        try:
+            content = zlib.decompress(match.group(1))
+        except zlib.error:
+            continue
+        operators += len(re.findall(rb"(?:^|\s)(?:re|l|c|m)(?=\s)", content))
+    return pictures, operators
+
+
+def test_phase6_done_when(browser):
+    """
+    Phase 6 "done when", automated: an EBITDA bridge and a revenue-plus-margin combo are built from data pasted
+    from Excel (cells as Excel puts them on the clipboard, fake numbers), edited, saved, reopened (still editable),
+    and the saved deck printed to PDF with its charts drawn as lines (no pictures), so they stay sharp.
+    """
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
+    page = editor.page
+    page.evaluate("App.commands.run('newDeck')")
+    wait_until(page, "App.deck.getSlides().length === 2")
+    started = time.time()
+    grid = "#chart-data-grid"
+
+    def chart_from_excel(kind, rows, rect):
+        page.click(".ribbon-tab[data-tab='insert']")
+        page.click(".ribbon-button.chart-button")
+        page.click(f".chart-gallery-item[data-chart-type='{kind}']")
+        chart_id = page.evaluate("App.selection.selectedId()")
+        page.click("#chart-data-close")
+        put_on_clipboard(page, *excel_cells(rows))
+        page.keyboard.press("Control+v")   # on the selected chart: its data
+        for field, value in zip(["x", "y", "w", "h"], rect):
+            page.fill(f"#format-{field}", str(value))
+            page.keyboard.press("Enter")
+        return chart_id
+
+    # Slide 2: the body text goes; a bridge and a combo take its place.
+    page.evaluate("App.deck.goTo(1)")
+    page.mouse.click(*slide_to_screen(page, 600, 200))
+    page.keyboard.press("Delete")
+    bridge = chart_from_excel("waterfall", [["", "R$ mn"], ["EBITDA 2024", "240"], ["Novos parques", "95"], ["Eficiência", "30"],
+                                            ["Custos corporativos", "-25"], ["EBITDA 2026E", "340"]], (40, 140, 580, 440))
+    combo = chart_from_excel("combo", [["", "Receita (R$ mn)", "Margem EBITDA"], ["2022", "410", "18,0%"], ["2023", "498", "20,0%"],
+                                       ["2024", "587", "21,0%"], ["2025E", "702", "23,0%"]], (660, 140, 580, 440))
+    data = lambda id_: page.evaluate(CHART_DATA, id_)  # noqa: E731
+    labels = lambda id_: page.evaluate("id => Array.from(App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] .chart-data-label'), (t) => t.textContent)", id_)  # noqa: E731
+    check(data(bridge)["categories"][-1] == "EBITDA 2026E" and data(bridge)["estimates"][-1] is True, "the bridge from Excel")
+    check(data(combo)["series"][1].get("format") == "percent" and data(combo)["series"][1]["values"][-1] == 0.23, "the combo from Excel")
+
+    # Edit the bridge: Eficiência 30 -> 35, the end left empty (the running total); a title.
+    page.mouse.dblclick(*slide_to_screen(page, 330, 360))
+    page.fill(f"{grid} input.cell[data-row='2'][data-col='0']", "35")
+    page.fill(f"{grid} input.cell[data-row='4'][data-col='0']", "")
+    page.click("#chart-data-close")
+    page.fill("#format-chart-title", "Ponte do EBITDA (R$ mn)")
+    page.keyboard.press("Enter")
+    check(labels(bridge) == ["240", "+95", "+35", "-25", "345"], f"the bridge edited: {labels(bridge)}")
+
+    # Edit the combo: data labels and the CAGR from the ribbon.
+    page.mouse.click(*slide_to_screen(page, 950, 360))
+    page.click(".ribbon-tab[data-tab='chart-design']")
+    page.click(".ribbon-button[data-command='chartDataLabels']")
+    page.click(".ribbon-button[data-command='chartCagr']")
+    cagr = page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"] .chart-cagr-label').textContent", combo)
+    check(cagr == "CAGR 19,6%" and "23%" in labels(combo), f"CAGR and the margin labels: {cagr} {labels(combo)}")
+    elapsed = time.time() - started
+    check(elapsed < 60, f"built and edited in under a minute: {elapsed:.1f} s")
+    page.keyboard.press("Escape")
+    check(page.text_content("#status-message").startswith("Pasted into the chart"), page.text_content("#status-message"))
+    wait_until(page, """() => document.querySelector('.thumb[data-index="1"] iframe').contentDocument
+        .querySelectorAll('svg.chart-svg').length === 2""")   # thumbnails redraw a moment after a change
+    page.screenshot(path=str(OUTPUT / "72-phase6-done-when.png"))
+
+    # Saved and reopened: the same data, still editable.
+    before = (data(bridge), data(combo))
+    saved = editor.save_as_download("phase6-done-when.html")
+    editor.open(saved)
+    check(editor.report_dialog_text() is None, "a deck the editor saved opens without an import report")
+    page.evaluate("App.deck.goTo(1)")
+    check((data(bridge), data(combo)) == before, "both charts came back as saved")
+    page.mouse.dblclick(*slide_to_screen(page, 330, 360))
+    page.fill(f"{grid} input.cell[data-row='1'][data-col='0']", "100")
+    check(labels(bridge)[1] == "+100", f"still editable: {labels(bridge)}")
+
+    # The saved file on its own shows both, and prints them as lines (no pictures).
+    player, errors = play_saved_deck(browser, saved)
+    player.keyboard.press("ArrowRight")
+    shown = player.evaluate("""() => Array.from(document.querySelectorAll('section.slide[data-slide-id="s2"] svg.chart-svg'),
+        (svg) => svg.querySelectorAll('rect.chart-bar').length)""")
+    check(shown == [5, 4], f"the saved deck shows the bridge and the combo: {shown}")
+    pictures_in_deck = player.evaluate("document.querySelectorAll('img').length")
+    player.emulate_media(media="print")
+    pdf = OUTPUT / "phase6-done-when.pdf"
+    player.pdf(path=str(pdf), prefer_css_page_size=True, print_background=True)
+    pages = len(re.findall(rb"/Type\s*/Page[^s]", pdf.read_bytes()))
+    pictures, operators = pdf_drawing(pdf)
+    check(pages == 2, f"one page per slide: {pages}")
+    check(pictures == pictures_in_deck and operators > 100,
+          f"charts printed as lines and shapes, not pictures: {pictures} pictures ({pictures_in_deck} in the deck), {operators} drawing operators")
+    check(errors == [] and editor.errors == [], f"no errors: {errors} {editor.errors}")
+    player.context.close()
+    editor.close()
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4301,6 +4418,7 @@ TESTS = [
     test_chart_data_grid,
     test_chart_paste_from_excel,
     test_chart_label_numbers,
+    test_phase6_done_when,
 ]
 
 

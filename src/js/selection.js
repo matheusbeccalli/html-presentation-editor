@@ -213,8 +213,11 @@
     /* Redraw the box or outlines; drop selected ids whose element is gone (e.g. undo of a paste). */
     App.selection.refresh = function refresh() {
         const slide = App.deck.getCurrentSlide();
-        const present = slide ? selectedIds.filter((id) => elementWithId(slide, id)) : [];
-        if (present.length !== selectedIds.length) {
+        // What the slide sees: an element that is now inside a group (undo of an ungroup) becomes that group.
+        const present = slide ? selectedIds.map((id) => elementWithId(slide, id)).filter(Boolean)
+            .map((element) => App.groups.topOf(element).getAttribute('data-id'))
+            .filter((id, index, all) => all.indexOf(id) === index) : [];
+        if (present.join(',') !== selectedIds.join(',')) {
             selectedIds = present;
             App.events.emit('selection-changed', { id: App.selection.selectedId(), ids: selectedIds.slice() });
         }
@@ -275,7 +278,18 @@
      */
     function onDoubleClick(event) {
         const point = toSlidePoint(event);
-        const element = App.selection.elementAt(point.x, point.y);
+        const found = App.selection.elementAt(point.x, point.y);
+        if (App.groups.isGroup(found)) {
+            // Text in a group: type in that part; the group stays selected (groups.js).
+            const part = App.groups.childAt(found, point.x, point.y);
+            if (part && (part.getAttribute('data-type') === 'text' || App.shapes.canHoldText(part))) {
+                App.selection.select(found);
+                App.text.enterEdit(part.getAttribute('data-type') === 'text' ? part : App.shapes.textOf(part, { create: true }),
+                    { point: point });
+            }
+            return;   // nothing else to do in a group by double-clicking
+        }
+        const element = found;
         if (element && element.getAttribute('data-type') === 'text') {
             App.selection.select(element);
             App.text.enterEdit(element, { point: point });
@@ -548,6 +562,7 @@
         const startRects = elements.map((item) => App.transform.readRect(item));
         const startRect = startRects[0];
         const startFlip = element.getAttribute('data-flip') || '';
+        const startParts = kind === 'resize' && App.groups.isGroup(element) ? App.groups.partsOf(element) : null;
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
         // Smart guides (snap.js): moves and resizes snap to the slide and the other elements; Alt turns it off.
@@ -594,6 +609,9 @@
                     guides = snapped.guides;
                 }
                 App.transform.writeRect(element, rect);
+                if (startParts) {
+                    App.groups.scaleParts(startParts, startRect, rect);   // a group's parts follow, scaled
+                }
             }
             if (targets) {
                 App.snap.showGuides(guides);

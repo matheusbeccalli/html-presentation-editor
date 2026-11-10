@@ -873,7 +873,8 @@
 
     /* The slide element around a container: the text box itself, the table of a cell, the shape of its text. */
     function boxOf(container) {
-        return isInner(container) ? container.closest('.el') : container;
+        // A part of a group: the group is what the slide selects (groups.js).
+        return App.groups.topOf(isInner(container) ? container.closest('.el') : container);
     }
 
     /* Every text box, table cell and shape text inside `root`, in reading order (find & replace walks them). */

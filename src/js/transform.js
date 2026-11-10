@@ -220,7 +220,7 @@
 
     /*
      * The elements that can be selected on a slide: its direct .el children
-     * (elements inside a group belong to the group; groups arrive in Phase 7),
+     * (elements inside a group belong to the group: groups.js),
      * sorted back to front: by z-index, then by their order in the slide.
      */
     App.transform.topLevelElements = function topLevelElements(slide) {

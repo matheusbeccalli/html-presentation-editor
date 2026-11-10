@@ -3822,6 +3822,94 @@ def test_smart_guides_gridlines_and_rulers(browser):
           "nothing of it in the deck")
 
 
+def test_group_and_ungroup(browser):
+    """Phase 7: Ctrl+G groups the selected elements into one (it moves, resizes with its parts scaled, copies as one;
+    double-click types in a part), Ctrl+Shift+G ungroups; each one undo step; saved and reopened, it stays a group."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    ids = lambda: page.evaluate("App.selection.selectedIds()")  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    rect = lambda name: element_rect(page, name)  # noqa: E731
+    on_slide = lambda name: page.evaluate("""id => {  // where the part really is on the slide (slide px)
+        const r = App.deck.getDocument().querySelector('[data-id="' + id + '"]').getBoundingClientRect();
+        return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }""", name)  # noqa: E731
+    button = lambda name: "button[data-command='" + name + "']"  # noqa: E731
+    # Slide 1: e1 logo (64,56 120x40), e2 title (64,230 1100x120), e3 bar (64,350 140x8), e4 subtitle (64,378 1100x70).
+
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.mouse.click(*slide_to_screen(page, 600, 280))
+    check(page.is_disabled(button("group")) and page.is_disabled(button("ungroup")), "one element: nothing to group")
+    page.keyboard.down("Shift")
+    page.mouse.click(*slide_to_screen(page, 600, 410))
+    page.keyboard.up("Shift")
+    page.keyboard.press("Control+g")
+    group = ids()
+    check(len(group) == 1 and group[0] not in ("e2", "e4") and label() == "Group", f"one group selected: {group}")
+    group = group[0]
+    check(page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').getAttribute('data-type')", group)
+          == "group", "a group element")
+    check(rect(group) == {"left": 64, "top": 230, "width": 1100, "height": 218}, f"around both: {rect(group)}")
+    check(on_slide("e4") == [64, 378, 1100, 70], f"the subtitle has not moved on the slide: {on_slide('e4')}")
+    check(page.is_enabled(button("ungroup")) and page.is_disabled(button("group")), "a group: Ungroup")
+    page.screenshot(path=str(OUTPUT / "85-grouped.png"))
+
+    # Moves as one.
+    page.keyboard.press("Shift+ArrowRight")
+    check(on_slide("e2")[0] == 74 and on_slide("e4")[0] == 74, f"both 10 px right: {on_slide('e2')} {on_slide('e4')}")
+    page.keyboard.press("Control+z")
+
+    # Resizing the group scales its parts: the right handle to half the width.
+    side = page.locator("#overlay .selection-handle[data-handle='e']").bounding_box()
+    start = [side["x"] + side["width"] / 2, side["y"] + side["height"] / 2]
+    zoom = page.evaluate("App.canvas.getZoom()")
+    page.keyboard.down("Alt")
+    drag(page, start, [start[0] - 550 * zoom, start[1]], steps=10)
+    page.keyboard.up("Alt")
+    check(abs(rect(group)["width"] - 550) <= 1, f"the group is half as wide: {rect(group)}")
+    check(abs(on_slide("e2")[2] - 550) <= 1 and abs(on_slide("e4")[2] - 550) <= 1, f"so are its parts: {on_slide('e2')}")
+    check(label() == "Resize", label())
+    page.keyboard.press("Control+z")
+    check(on_slide("e2") == [64, 230, 1100, 120], f"undo: back: {on_slide('e2')}")
+
+    # Double-click the subtitle: typing in that part; Esc: the group is selected again.
+    page.mouse.dblclick(*slide_to_screen(page, 300, 400))
+    check(page.evaluate("App.text.isEditing() && App.text.editingElement().getAttribute('data-id')") == "e4", "typing in the subtitle")
+    page.keyboard.press("End")
+    page.keyboard.type(" X")
+    page.keyboard.press("Escape")
+    check(ids() == [group], f"Esc: the group selected: {ids()}")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e4\"]').textContent").endswith(" X"), "typed")
+
+    # Ctrl+D copies the group with new ids inside too.
+    page.keyboard.press("Control+d")
+    copy = ids()[0]
+    inner = page.evaluate("id => Array.from(App.deck.getDocument().querySelectorAll('[data-id=\"' + id + '\"] .el'), "
+                          "(e) => e.getAttribute('data-id'))", copy)
+    check(len(inner) == 2 and not set(inner) & {"e2", "e4"}, f"fresh ids inside the copy: {inner}")
+    page.keyboard.press("Control+z")
+
+    # Ctrl+Shift+G ungroups: the parts selected, on the slide again, in place.
+    page.click("#overlay", position={"x": 5, "y": 5})
+    page.mouse.click(*slide_to_screen(page, 600, 280))
+    check(ids() == [group], "a click on a part selects the whole group")
+    page.keyboard.press("Control+Shift+g")
+    check(sorted(ids()) == ["e2", "e4"] and label() == "Ungroup", f"ungrouped: {ids()}")
+    check(rect("e2") == {"left": 64, "top": 230, "width": 1100, "height": 120} and rect("e4")["top"] == 378, "slide px again")
+    stack = page.evaluate("App.transform.topLevelElements(App.deck.getCurrentSlide()).map((e) => e.getAttribute('data-id'))")
+    # The group took the subtitle's place (the topmost part), so the bar is now under both, as in PowerPoint.
+    check(stack == ["e1", "e3", "e2", "e4"], f"in the group's place in the stack: {stack}")
+    page.keyboard.press("Control+z")
+    check(ids() == [group], f"undo: grouped again, the group selected: {ids()}")
+
+    # Saved and reopened: still a group, its parts where they were.
+    saved = editor.save_as_download("grouped.html")
+    check('data-deck-groups' in saved.read_text(encoding="utf-8"), "the deck carries the group stylesheet")
+    editor.open(saved)
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('[data-type=\"group\"]').length") == 1, "one group")
+    check(on_slide("e4") == [64, 378, 1100, 70], f"the part in place after reopening: {on_slide('e4')}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4912,6 +5000,7 @@ TESTS = [
     test_multi_select,
     test_align_and_distribute,
     test_smart_guides_gridlines_and_rulers,
+    test_group_and_ungroup,
 ]
 
 

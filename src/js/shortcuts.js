@@ -233,6 +233,9 @@
         ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
         // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).
         ['Ctrl+M', 'newSlide', { blockBrowserDefault: true }],
+        // Group / ungroup, as in PowerPoint (in the browser: find next / previous).
+        ['Ctrl+G', 'group', { blockBrowserDefault: true }],
+        ['Ctrl+Shift+G', 'ungroup', { blockBrowserDefault: true }],
         ['Shift+F10', 'contextMenu'],
         ['Shift+F9', 'toggleGridlines'],
         ['ContextMenu', 'contextMenu'],

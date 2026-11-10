@@ -144,9 +144,11 @@
                         ['alignObjectsBottom', 'alignObjectsBottom'], ['distributeVertically', 'distributeVertically']],
                     [{ command: 'alignToSlide', icon: 'alignToSlide' }]],
                 },
+                { label: 'Group', rows: [[{ command: 'group', icon: 'group' }], [{ command: 'ungroup', icon: 'ungroup' }]] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
-                'Distribute: equal gaps between three or more. Group and rotate arrive later in Phase 7.',
+                'Distribute: equal gaps between three or more. Group: one element of several; double-click text in it to type. ' +
+                'Rotate arrives later in Phase 7.',
         },
         {
             id: 'slideshow', label: 'Slide Show',

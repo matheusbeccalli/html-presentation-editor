@@ -395,6 +395,15 @@
         doc.head.appendChild(style);
     }
 
+    /* Every deck carries the current group stylesheet (groups.js), so a group's parts sit inside it. */
+    function finishGroups(doc) {
+        doc.head.querySelectorAll('style[data-deck-groups]').forEach((old) => old.remove());
+        const style = doc.createElement('style');
+        style.setAttribute('data-deck-groups', '');
+        style.textContent = App.groups.GROUP_CSS;
+        doc.head.appendChild(style);
+    }
+
     /*
      * Every deck leaves the importer in the text model (SPEC Phase 3): text is
      * tidied by the normalizer (it was converted already if the deck was older),
@@ -446,6 +455,7 @@
 
         report.chartsRendered = App.charts.renderMissing(deckDoc);
         finishTables(deckDoc);
+        finishGroups(deckDoc);   // before the text model: the bullet stylesheet stays last
         finishTextModel(deckDoc);
         ensureDeckFormatMeta(deckDoc);
 

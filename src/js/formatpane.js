@@ -139,8 +139,12 @@
         }
         const label = (field === 'left' || field === 'top') ? 'Move' : 'Resize';
         const scope = { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
+        const parts = App.groups.isGroup(element) ? App.groups.partsOf(element) : null;
         App.history.change(label, scope, () => {
             App.transform.writeRect(element, next);
+            if (parts) {
+                App.groups.scaleParts(parts, rect, next);   // a group's parts follow its size
+            }
             App.text.fitText(element);   // autofit follows a new size
             App.tables.fitTable(element, { resized: true });   // so do a table's columns and rows
             App.shapes.render(element);   // and a shape's drawing

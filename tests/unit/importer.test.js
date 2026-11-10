@@ -199,6 +199,9 @@ test('import: every deck gets the list theme variables and the bullet stylesheet
         assertEqual(doc.head.querySelectorAll('style[data-deck-text]').length, 1);
         assertEqual(styles[styles.length - 1].getAttribute('data-deck-text'), '', 'bullet stylesheet comes last');
         assertEqual(doc.head.querySelector('style[data-deck-text]').textContent, App.text.deckTextCss(), 'always the current one');
+        const groups = doc.head.querySelectorAll('style[data-deck-groups]');
+        assertEqual(groups.length, 1, 'the group stylesheet (Phase 7), once');
+        assertEqual(groups[0].textContent, App.groups.GROUP_CSS);
     }
 });
 

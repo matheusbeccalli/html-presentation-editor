@@ -378,6 +378,9 @@
                 label: 'Distribute ' + axis + 'ly', isEnabled: () => App.elements.canDistribute(), run: () => App.elements.distribute(axis),
             });
         });
+        // Arrange > Group (groups.js).
+        App.commands.define('group', { label: 'Group', isEnabled: () => App.groups.canGroup(), run: () => App.groups.group() });
+        App.commands.define('ungroup', { label: 'Ungroup', isEnabled: () => App.groups.canUngroup(), run: () => App.groups.ungroup() });
         // View tab (rulers.js): remembered in the settings.
         App.commands.define('toggleGridlines', {
             label: 'Gridlines', isEnabled: hasDeck, isChecked: () => App.settings.get().showGridlines,

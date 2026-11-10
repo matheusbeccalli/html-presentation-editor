@@ -1514,6 +1514,9 @@ App.createEventBus = function createEventBus() {
         ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
         // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).
         ['Ctrl+M', 'newSlide', { blockBrowserDefault: true }],
+        // Group / ungroup, as in PowerPoint (in the browser: find next / previous).
+        ['Ctrl+G', 'group', { blockBrowserDefault: true }],
+        ['Ctrl+Shift+G', 'ungroup', { blockBrowserDefault: true }],
         ['Shift+F10', 'contextMenu'],
         ['Shift+F9', 'toggleGridlines'],
         ['ContextMenu', 'contextMenu'],
@@ -4075,7 +4078,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* The slide element around a container: the text box itself, the table of a cell, the shape of its text. */
     function boxOf(container) {
-        return isInner(container) ? container.closest('.el') : container;
+        // A part of a group: the group is what the slide selects (groups.js).
+        return App.groups.topOf(isInner(container) ? container.closest('.el') : container);
     }
 
     /* Every text box, table cell and shape text inside `root`, in reading order (find & replace walks them). */
@@ -9566,6 +9570,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         doc.head.appendChild(style);
     }
 
+    /* Every deck carries the current group stylesheet (groups.js), so a group's parts sit inside it. */
+    function finishGroups(doc) {
+        doc.head.querySelectorAll('style[data-deck-groups]').forEach((old) => old.remove());
+        const style = doc.createElement('style');
+        style.setAttribute('data-deck-groups', '');
+        style.textContent = App.groups.GROUP_CSS;
+        doc.head.appendChild(style);
+    }
+
     /*
      * Every deck leaves the importer in the text model (SPEC Phase 3): text is
      * tidied by the normalizer (it was converted already if the deck was older),
@@ -9617,6 +9630,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
         report.chartsRendered = App.charts.renderMissing(deckDoc);
         finishTables(deckDoc);
+        finishGroups(deckDoc);   // before the text model: the bullet stylesheet stays last
         finishTextModel(deckDoc);
         ensureDeckFormatMeta(deckDoc);
 
@@ -10920,6 +10934,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         alignObjectsBottom: '<path d="M2.5 17h15"/><rect x="5" y="4" width="3.5" height="11"/><rect x="11.5" y="8" width="3.5" height="7"/>',
         distributeHorizontally: '<path d="M2.5 3v14M17.5 3v14"/><rect x="5" y="7" width="2.5" height="6"/><rect x="8.75" y="7" width="2.5" height="6"/><rect x="12.5" y="7" width="2.5" height="6"/>',
         distributeVertically: '<path d="M3 2.5h14M3 17.5h14"/><rect x="7" y="5" width="6" height="2.5"/><rect x="7" y="8.75" width="6" height="2.5"/><rect x="7" y="12.5" width="6" height="2.5"/>',
+        group: '<rect x="2.5" y="2.5" width="15" height="15" stroke-dasharray="2 1.5"/><rect x="5" y="5" width="6" height="5"/><rect x="9" y="9" width="6" height="6" fill="currentColor" fill-opacity="0.25"/>',
+        ungroup: '<rect x="2.5" y="2.5" width="7" height="6"/><rect x="10.5" y="11.5" width="7" height="6" fill="currentColor" fill-opacity="0.25"/><path d="M11 4.5l5 5M16 4.5l-5 5"/>',
         grid: '<rect x="3" y="3" width="14" height="14"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14"/>',
         ruler: '<rect x="2.5" y="6.5" width="15" height="7" rx="0.5"/><path d="M5.5 6.5v3M8.5 6.5v2M11.5 6.5v3M14.5 6.5v2"/>',
         alignToSlide: '<rect x="2.5" y="4" width="15" height="12" rx="1"/><rect x="7" y="8" width="6" height="4" fill="currentColor" fill-opacity="0.25"/>',
@@ -11844,7 +11860,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /*
      * The elements that can be selected on a slide: its direct .el children
-     * (elements inside a group belong to the group; groups arrive in Phase 7),
+     * (elements inside a group belong to the group: groups.js),
      * sorted back to front: by z-index, then by their order in the slide.
      */
     App.transform.topLevelElements = function topLevelElements(slide) {
@@ -12147,6 +12163,217 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/groups.js ----
+/*
+ * groups.js - group / ungroup (SPEC Phase 7; Ctrl+G / Ctrl+Shift+G).
+ *
+ * A group is an element of its own that holds its parts (SPEC 3.3, element
+ * type "group"):
+ *
+ *   <div class="el" data-type="group" data-id="e9" style="left: 100px; top: 200px; width: 500px; height: 200px; z-index: 2;">
+ *     <div class="el" data-type="text" data-id="e2" style="left: 0px; top: 0px; …; z-index: 1;">…</div>
+ *     <div class="el" data-type="shape" data-id="e3" style="left: 400px; top: 100px; …; z-index: 2;">…</div>
+ *   </div>
+ *
+ * The parts are measured from the group's top left corner, so a group moves
+ * as one by changing only its own left / top. Resizing it scales every part
+ * (their text keeps its size, as in PowerPoint). Groups can hold groups.
+ * The deck's <style data-deck-groups> (GROUP_CSS, added on open by
+ * importer.js) places the parts inside their group.
+ *
+ * On the slide a group is one element: selection, snapping, align, copy /
+ * paste, delete and the stacking order see only the outermost group.
+ * Double-clicking text inside a group types in that part (selection.js).
+ *
+ * The maths and the slide operations at the top are tested in
+ * tests/unit/groups.test.js (no page state).
+ *
+ * Talks to: transform.js, selection.js, history.js, deck.js, elements.js (fresh ids).
+ */
+
+(function () {
+    'use strict';
+
+    App.groups = {};
+
+    App.groups.GROUP_CSS = '.el[data-type="group"] > .el { position: absolute; box-sizing: border-box; }\n';
+
+    const hundredths = (value) => Math.round(value * 100) / 100;
+
+    // ---------------------------------------------------------------
+    // Pure helpers
+    // ---------------------------------------------------------------
+
+    /* The box around `rects`, and each rect measured from its top left corner. */
+    App.groups.layout = function layout(rects) {
+        const bounds = App.transform.boundsOf(rects);
+        return {
+            bounds: bounds,
+            inner: rects.map((rect) => ({ left: rect.left - bounds.left, top: rect.top - bounds.top, width: rect.width, height: rect.height })),
+        };
+    };
+
+    /* A part's rect when its group is scaled by sx across and sy down (the corner stays at 0, 0). */
+    App.groups.scaleRect = function scaleRect(rect, sx, sy) {
+        return { left: hundredths(rect.left * sx), top: hundredths(rect.top * sy),
+            width: hundredths(rect.width * sx), height: hundredths(rect.height * sy) };
+    };
+
+    // ---------------------------------------------------------------
+    // Groups in a slide (DOM, no page state)
+    // ---------------------------------------------------------------
+
+    App.groups.isGroup = function isGroup(element) {
+        return Boolean(element && element.classList && element.classList.contains('el') &&
+            element.getAttribute('data-type') === 'group');
+    };
+
+    /* The element as the slide sees it: the outermost group it is in, or itself. */
+    App.groups.topOf = function topOf(element) {
+        let top = element;
+        while (top && App.groups.isGroup(top.parentElement)) {
+            top = top.parentElement;
+        }
+        return top;
+    };
+
+    /* z-index 1, 2, 3 … in `order` (back to front). */
+    function renumber(order) {
+        order.forEach((element, index) => {
+            element.style.zIndex = String(index + 1);
+        });
+    }
+
+    /*
+     * Wrap `elements` (on `slide`, not in a group) in a new group with this
+     * data-id. It takes the place of the topmost of them in the stack; inside,
+     * they keep their order. Returns the group.
+     */
+    App.groups.makeGroup = function makeGroup(slide, elements, id) {
+        const order = App.transform.topLevelElements(slide);
+        const parts = order.filter((element) => elements.indexOf(element) !== -1);
+        const topmost = parts[parts.length - 1];
+        const { bounds, inner } = App.groups.layout(parts.map(App.transform.readRect));
+        const group = slide.ownerDocument.createElement('div');
+        group.className = 'el';
+        group.setAttribute('data-type', 'group');
+        group.setAttribute('data-id', id);
+        App.transform.writeRect(group, bounds);
+        slide.insertBefore(group, topmost);
+        parts.forEach((part, index) => {
+            App.transform.writeRect(part, inner[index]);
+            group.appendChild(part);
+        });
+        renumber(parts);
+        renumber(order.filter((element) => element === topmost || parts.indexOf(element) === -1)
+            .map((element) => (element === topmost ? group : element)));
+        return group;
+    };
+
+    /* Put a group's parts back on its slide, in its place in the stack, in slide pixels. Returns the parts. */
+    App.groups.breakGroup = function breakGroup(group) {
+        const slide = group.parentElement;
+        const order = App.transform.topLevelElements(slide);
+        const offset = App.transform.readRect(group);
+        const parts = App.transform.topLevelElements(group);
+        parts.forEach((part) => {
+            const rect = App.transform.readRect(part);
+            rect.left = hundredths(rect.left + offset.left);
+            rect.top = hundredths(rect.top + offset.top);
+            App.transform.writeRect(part, rect);
+            slide.insertBefore(part, group);
+        });
+        group.remove();
+        const index = order.indexOf(group);
+        renumber(order.slice(0, index).concat(parts, order.slice(index + 1)));
+        return parts;
+    };
+
+    /* The part (not a group) of `group` under slide point (x, y), the topmost one; null if none. */
+    App.groups.childAt = function childAt(group, x, y) {
+        const offset = App.transform.readRect(group);
+        const parts = App.transform.topLevelElements(group).reverse();   // front first
+        for (const part of parts) {
+            const rect = App.transform.readRect(part);
+            const px = x - offset.left;
+            const py = y - offset.top;
+            if (px >= rect.left && px <= rect.left + rect.width && py >= rect.top && py <= rect.top + rect.height) {
+                return App.groups.isGroup(part) ? App.groups.childAt(part, px, py) : part;
+            }
+        }
+        return null;
+    };
+
+    /* Every part inside `group` (groups within included) with its rect now: to scale them during a resize. */
+    App.groups.partsOf = function partsOf(group) {
+        return Array.from(group.querySelectorAll('.el'), (part) => ({ element: part, rect: App.transform.readRect(part) }));
+    };
+
+    /*
+     * The group went from `from` to `to` (rects): scale the parts as they were
+     * (`parts` from partsOf before the resize). Each level of nested groups is
+     * measured from its own corner, so the same factors work at every level.
+     */
+    App.groups.scaleParts = function scaleParts(parts, from, to) {
+        const sx = from.width ? to.width / from.width : 1;
+        const sy = from.height ? to.height / from.height : 1;
+        parts.forEach(({ element, rect }) => {
+            App.transform.writeRect(element, App.groups.scaleRect(rect, sx, sy));
+            App.text.fitText(element);
+            App.tables.fitTable(element, { resized: true });
+            App.shapes.render(element);
+            App.charts.redraw(element);
+        });
+    };
+
+    // ---------------------------------------------------------------
+    // Commands
+    // ---------------------------------------------------------------
+
+    function slideScope() {
+        return { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
+    }
+
+    App.groups.canGroup = function canGroup() {
+        return App.selection.count() > 1 && !App.text.isEditing() && Boolean(App.deck.getCurrentSlide());
+    };
+
+    App.groups.canUngroup = function canUngroup() {
+        return !App.text.isEditing() && App.selection.getElements().some(App.groups.isGroup);
+    };
+
+    App.groups.group = function group() {
+        if (!App.groups.canGroup()) {
+            return;
+        }
+        const slide = App.deck.getCurrentSlide();
+        const elements = App.selection.getElements();
+        let made = null;
+        App.history.change('Group', slideScope(), () => {
+            const used = new Set(Array.from(App.deck.getDocument().querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+            made = App.groups.makeGroup(slide, elements, App.util.uniqueId('e', used));
+        });
+        App.selection.select(made);
+    };
+
+    /* Ungroup every selected group; its parts end up selected, with the other selected elements. */
+    App.groups.ungroup = function ungroup() {
+        if (!App.groups.canUngroup()) {
+            return;
+        }
+        const elements = App.selection.getElements();
+        let selected = [];
+        App.history.change('Ungroup', slideScope(), () => {
+            elements.forEach((element) => {
+                selected = selected.concat(App.groups.isGroup(element) ? App.groups.breakGroup(element) : [element]);
+            });
+        });
+        App.selection.selectMany(selected);
+    };
+})();
+
+</script>
+<script>
 // ---- js/selection.js ----
 /*
  * selection.js - click to select, drag to move, handles to resize (SPEC 4, Phase 2).
@@ -12363,8 +12590,11 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* Redraw the box or outlines; drop selected ids whose element is gone (e.g. undo of a paste). */
     App.selection.refresh = function refresh() {
         const slide = App.deck.getCurrentSlide();
-        const present = slide ? selectedIds.filter((id) => elementWithId(slide, id)) : [];
-        if (present.length !== selectedIds.length) {
+        // What the slide sees: an element that is now inside a group (undo of an ungroup) becomes that group.
+        const present = slide ? selectedIds.map((id) => elementWithId(slide, id)).filter(Boolean)
+            .map((element) => App.groups.topOf(element).getAttribute('data-id'))
+            .filter((id, index, all) => all.indexOf(id) === index) : [];
+        if (present.join(',') !== selectedIds.join(',')) {
             selectedIds = present;
             App.events.emit('selection-changed', { id: App.selection.selectedId(), ids: selectedIds.slice() });
         }
@@ -12425,7 +12655,18 @@ App.template.newDeckHtml = function newDeckHtml() {
      */
     function onDoubleClick(event) {
         const point = toSlidePoint(event);
-        const element = App.selection.elementAt(point.x, point.y);
+        const found = App.selection.elementAt(point.x, point.y);
+        if (App.groups.isGroup(found)) {
+            // Text in a group: type in that part; the group stays selected (groups.js).
+            const part = App.groups.childAt(found, point.x, point.y);
+            if (part && (part.getAttribute('data-type') === 'text' || App.shapes.canHoldText(part))) {
+                App.selection.select(found);
+                App.text.enterEdit(part.getAttribute('data-type') === 'text' ? part : App.shapes.textOf(part, { create: true }),
+                    { point: point });
+            }
+            return;   // nothing else to do in a group by double-clicking
+        }
+        const element = found;
         if (element && element.getAttribute('data-type') === 'text') {
             App.selection.select(element);
             App.text.enterEdit(element, { point: point });
@@ -12698,6 +12939,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const startRects = elements.map((item) => App.transform.readRect(item));
         const startRect = startRects[0];
         const startFlip = element.getAttribute('data-flip') || '';
+        const startParts = kind === 'resize' && App.groups.isGroup(element) ? App.groups.partsOf(element) : null;
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
         // Smart guides (snap.js): moves and resizes snap to the slide and the other elements; Alt turns it off.
@@ -12744,6 +12986,9 @@ App.template.newDeckHtml = function newDeckHtml() {
                     guides = snapped.guides;
                 }
                 App.transform.writeRect(element, rect);
+                if (startParts) {
+                    App.groups.scaleParts(startParts, startRect, rect);   // a group's parts follow, scaled
+                }
             }
             if (targets) {
                 App.snap.showGuides(guides);
@@ -13684,8 +13929,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const label = (field === 'left' || field === 'top') ? 'Move' : 'Resize';
         const scope = { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
+        const parts = App.groups.isGroup(element) ? App.groups.partsOf(element) : null;
         App.history.change(label, scope, () => {
             App.transform.writeRect(element, next);
+            if (parts) {
+                App.groups.scaleParts(parts, rect, next);   // a group's parts follow its size
+            }
             App.text.fitText(element);   // autofit follows a new size
             App.tables.fitTable(element, { resized: true });   // so do a table's columns and rows
             App.shapes.render(element);   // and a shape's drawing
@@ -13752,7 +14001,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.contextMenu = {};
 
     const ELEMENT_ITEMS = ['cut', 'copy', 'paste', 'duplicate', 'delete', '-',
-        'bringToFront', 'bringForward', 'sendBackward', 'sendToBack'];
+        'bringToFront', 'bringForward', 'sendBackward', 'sendToBack', '-', 'group', 'ungroup'];
     const PICTURE_ITEMS = ELEMENT_ITEMS.concat(['-', 'changePicture']);
     const EMPTY_SLIDE_ITEMS = ['paste'];
 
@@ -16539,6 +16788,9 @@ App.template.newDeckHtml = function newDeckHtml() {
                 label: 'Distribute ' + axis + 'ly', isEnabled: () => App.elements.canDistribute(), run: () => App.elements.distribute(axis),
             });
         });
+        // Arrange > Group (groups.js).
+        App.commands.define('group', { label: 'Group', isEnabled: () => App.groups.canGroup(), run: () => App.groups.group() });
+        App.commands.define('ungroup', { label: 'Ungroup', isEnabled: () => App.groups.canUngroup(), run: () => App.groups.ungroup() });
         // View tab (rulers.js): remembered in the settings.
         App.commands.define('toggleGridlines', {
             label: 'Gridlines', isEnabled: hasDeck, isChecked: () => App.settings.get().showGridlines,
@@ -21062,9 +21314,11 @@ App.template.newDeckHtml = function newDeckHtml() {
                         ['alignObjectsBottom', 'alignObjectsBottom'], ['distributeVertically', 'distributeVertically']],
                     [{ command: 'alignToSlide', icon: 'alignToSlide' }]],
                 },
+                { label: 'Group', rows: [[{ command: 'group', icon: 'group' }], [{ command: 'ungroup', icon: 'ungroup' }]] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
-                'Distribute: equal gaps between three or more. Group and rotate arrive later in Phase 7.',
+                'Distribute: equal gaps between three or more. Group: one element of several; double-click text in it to type. ' +
+                'Rotate arrives later in Phase 7.',
         },
         {
             id: 'slideshow', label: 'Slide Show',

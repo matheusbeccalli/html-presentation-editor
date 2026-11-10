@@ -1,7 +1,8 @@
 /*
- * elements.js - actions on the selected element (SPEC 4, Phase 2):
- * nudge with the arrow keys, delete, cut / copy / paste / duplicate (also
- * across slides), and the stacking order (bring forward, send to back ...).
+ * elements.js - actions on the selected element(s) (SPEC 4, Phase 2; several
+ * at once since Phase 7's multi-select): nudge with the arrow keys, delete,
+ * cut / copy / paste / duplicate (also across slides), and the stacking order
+ * (bring forward, send to back ...).
  *
  * Every action is one undoable step on the current slide (history.js).
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
@@ -36,19 +37,39 @@
      * 'front' / 'back' to the end / start, 'forward' / 'backward' one place.
      */
     App.elements.restack = function restack(order, id, action) {
-        const result = order.filter((item) => item !== id);
-        const index = order.indexOf(id);
-        let target = index;
+        return App.elements.restackMany(order, [id], action);
+    };
+
+    /*
+     * The same for several ids (multi-select): 'front' / 'back' move them all to
+     * the end / start in their own order; 'forward' / 'backward' move each one
+     * place, so a block of selected ids moves together past one other element.
+     */
+    App.elements.restackMany = function restackMany(order, ids, action) {
+        const chosen = new Set(ids);
+        const others = order.filter((id) => !chosen.has(id));
+        const picked = order.filter((id) => chosen.has(id));
         if (action === 'front') {
-            target = result.length;
-        } else if (action === 'back') {
-            target = 0;
-        } else if (action === 'forward') {
-            target = Math.min(result.length, index + 1);
-        } else if (action === 'backward') {
-            target = Math.max(0, index - 1);
+            return others.concat(picked);
         }
-        result.splice(target, 0, id);
+        if (action === 'back') {
+            return picked.concat(others);
+        }
+        const result = order.slice();
+        const swap = (i, j) => { [result[i], result[j]] = [result[j], result[i]]; };
+        if (action === 'forward') {
+            for (let i = result.length - 2; i >= 0; i--) {
+                if (chosen.has(result[i]) && !chosen.has(result[i + 1])) {
+                    swap(i, i + 1);
+                }
+            }
+        } else if (action === 'backward') {
+            for (let i = 1; i < result.length; i++) {
+                if (chosen.has(result[i]) && !chosen.has(result[i - 1])) {
+                    swap(i, i - 1);
+                }
+            }
+        }
         return result;
     };
 
@@ -161,48 +182,57 @@
     // Actions on the live deck
     // ---------------------------------------------------------------
 
-    let clipboardHtml = null;
+    let clipboardHtml = null;   // the copied elements' HTML, back to front (an array: several can be copied)
 
     function currentSlideScope() {
         return { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
     }
 
     App.elements.hasSelection = function hasSelection() {
-        return !!App.selection.getElement();
+        return App.selection.count() > 0;
     };
+
+    /* The selected elements, back to front (their stacking order on the slide), so copies stack the same way. */
+    function selectedBackToFront() {
+        const chosen = App.selection.getElements();
+        const slide = App.deck.getCurrentSlide();
+        return slide ? App.transform.topLevelElements(slide).filter((element) => chosen.includes(element)) : [];
+    }
 
     App.elements.canPaste = function canPaste() {
         return clipboardHtml !== null && !!App.deck.getCurrentSlide();
     };
 
-    /* Move the selected element by (dx, dy) px; a held key is one undo step. */
+    /* Move the selected elements by (dx, dy) px; a held key is one undo step. */
     App.elements.nudge = function nudge(dx, dy) {
-        const element = App.selection.getElement();
-        if (!element) {
+        const elements = App.selection.getElements();
+        if (!elements.length) {
             return;
         }
         App.history.change('Move', currentSlideScope(), () => {
-            App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element), dx, dy));
-        }, { mergeKey: 'nudge:' + element.getAttribute('data-id') });
+            elements.forEach((element) => {
+                App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element), dx, dy));
+            });
+        }, { mergeKey: 'nudge:' + App.selection.selectedIds().join(',') });
     };
 
     App.elements.remove = function remove(label) {
-        const element = App.selection.getElement();
-        if (!element) {
+        const elements = App.selection.getElements();
+        if (!elements.length) {
             return;
         }
-        App.history.change(label || 'Delete', currentSlideScope(), () => element.remove());
+        App.history.change(label || 'Delete', currentSlideScope(), () => elements.forEach((element) => element.remove()));
         App.selection.clear();
     };
 
     App.elements.copy = function copy() {
-        const element = App.selection.getElement();
-        if (element) {
-            clipboardHtml = element.outerHTML;
+        const elements = selectedBackToFront();
+        if (elements.length) {
+            clipboardHtml = elements.map((element) => element.outerHTML);
             copyMark = 'deck-editor-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
             App.events.emit('clipboard-changed');   // Paste buttons become enabled
             if (!inClipboardEvent) {
-                writeMark(element);   // the ribbon's Copy: no copy event to write it in
+                writeMark(elements);   // the ribbon's Copy: no copy event to write it in
             }
         }
     };
@@ -213,33 +243,40 @@
     };
 
     /*
-     * Put a copy of `html` (one element) on the current slide, on top of the
-     * others, with fresh ids; select it. Returns the new element.
+     * Put copies of `htmlList` (elements' HTML, back to front) on the current
+     * slide, on top of the others in that order, with fresh ids; select them.
+     * They all move by the same step (pastePosition of the first), so several
+     * keep their arrangement. Returns the new elements.
      */
-    function insertCopy(html, label) {
+    function insertCopy(htmlList, label) {
         const doc = App.deck.getDocument();
         const slide = App.deck.getCurrentSlide();
-        const template = doc.createElement('template');
-        template.innerHTML = html.trim();
-        const element = template.content.firstElementChild;
-        if (!element) {
-            return null;
+        const elements = htmlList.map((html) => {
+            const template = doc.createElement('template');
+            template.innerHTML = html.trim();
+            return template.content.firstElementChild;
+        }).filter(Boolean);
+        if (!elements.length) {
+            return [];
         }
         App.history.change(label, currentSlideScope(), () => {
             const usedIds = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
-            App.elements.giveFreshIds(element, usedIds);
-
             const others = App.transform.topLevelElements(slide);
             const taken = others.map((other) => App.transform.readRect(other));
-            App.transform.writeRect(element, App.elements.pastePosition(App.transform.readRect(element), taken));
+            const first = App.transform.readRect(elements[0]);
+            const spot = App.elements.pastePosition(first, taken);
             const topZ = others.reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
-            element.style.zIndex = String(topZ + 1);
-
-            // Speaker notes stay the last thing in the slide.
-            slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+            elements.forEach((element, index) => {
+                App.elements.giveFreshIds(element, usedIds);
+                App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element),
+                    spot.left - first.left, spot.top - first.top));
+                element.style.zIndex = String(topZ + 1 + index);
+                // Speaker notes stay the last thing in the slide.
+                slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+            });
         });
-        App.selection.select(element);
-        return element;
+        App.selection.selectMany(elements);
+        return elements;
     }
 
     // ---- The system clipboard (Ctrl+C / Ctrl+X / Ctrl+V) ----
@@ -260,9 +297,13 @@
         return (element.innerText || element.textContent || '').trim();
     }
 
+    function textOfAll(elements) {
+        return elements.map(textOf).filter(Boolean).join('\n');
+    }
+
     /* Best effort: if the browser refuses, a table copied earlier in Excel could win over this copy at Ctrl+V. */
-    function writeMark(element) {
-        const data = markData(textOf(element));
+    function writeMark(elements) {
+        const data = markData(textOfAll(elements));
         if (navigator.clipboard && window.ClipboardItem) {
             navigator.clipboard.write([new ClipboardItem({
                 'text/html': new Blob([data.html], { type: 'text/html' }),
@@ -278,14 +319,14 @@
             !(target && target.closest && target.closest('dialog')) && !!App.deck.getCurrentSlide();
     }
 
-    /* Ctrl+C / Ctrl+X with an element selected: our copy, and its mark on the system clipboard. */
+    /* Ctrl+C / Ctrl+X with elements selected: our copy, and its mark on the system clipboard. */
     function onCopyEvent(event) {
-        const element = App.selection.getElement();
-        if (!forTheSlide(event) || !element) {
+        const elements = selectedBackToFront();
+        if (!forTheSlide(event) || !elements.length) {
             return;
         }
         event.preventDefault();
-        const text = textOf(element);
+        const text = textOfAll(elements);
         inClipboardEvent = true;
         try {
             App.commands.run(event.type);   // 'copy' or 'cut'
@@ -344,9 +385,9 @@
     };
 
     App.elements.duplicate = function duplicate() {
-        const element = App.selection.getElement();
-        if (element) {
-            insertCopy(element.outerHTML, 'Duplicate');
+        const elements = selectedBackToFront();
+        if (elements.length) {
+            insertCopy(elements.map((element) => element.outerHTML), 'Duplicate');
         }
     };
 
@@ -354,15 +395,19 @@
         front: 'Bring to front', forward: 'Bring forward', backward: 'Send backward', back: 'Send to back',
     };
 
-    /* Can the selected element move in this direction? (false at the top/bottom of the stack) */
+    /* The slide's elements back to front after `action` on the selected ones (several move as a block). */
+    function arranged(action) {
+        const order = App.transform.topLevelElements(App.deck.getCurrentSlide());
+        return { order: order, newOrder: App.elements.restackMany(order, App.selection.getElements(), action) };
+    }
+
+    /* Can the selected elements move in this direction? (false at the top/bottom of the stack) */
     App.elements.canArrange = function canArrange(action) {
-        const element = App.selection.getElement();
-        if (!element) {
+        if (!App.selection.count() || !App.deck.getCurrentSlide()) {
             return false;
         }
-        const order = App.transform.topLevelElements(App.deck.getCurrentSlide());
-        const index = order.indexOf(element);
-        return (action === 'front' || action === 'forward') ? index < order.length - 1 : index > 0;
+        const { order, newOrder } = arranged(action);
+        return newOrder.some((element, index) => element !== order[index]);
     };
 
     /*
@@ -374,9 +419,7 @@
         if (!App.elements.canArrange(action)) {
             return;
         }
-        const element = App.selection.getElement();
-        const order = App.transform.topLevelElements(App.deck.getCurrentSlide());
-        const newOrder = App.elements.restack(order, element, action);
+        const newOrder = arranged(action).newOrder;
         App.history.change(ARRANGE_LABELS[action], currentSlideScope(), () => {
             newOrder.forEach((item, index) => {
                 item.style.zIndex = String(index + 1);

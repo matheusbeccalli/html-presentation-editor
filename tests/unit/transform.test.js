@@ -87,3 +87,21 @@ test('transform: a picture keeps its proportions by its corners; anything does w
     assertEqual(App.transform.keepsAspect('text', 'se', false), false);
     assertEqual(App.transform.keepsAspect('text', 'e', true), true);
 });
+
+test('transform: the rubber band rect from its two corners, whichever way it was dragged', () => {
+    assertEqual(App.transform.bandRect({ x: 100, y: 50 }, { x: 20, y: 80 }), { left: 20, top: 50, width: 80, height: 30 });
+    assertEqual(App.transform.bandRect({ x: 10, y: 90 }, { x: 40, y: 20 }), { left: 10, top: 20, width: 30, height: 70 });
+});
+
+test('transform: an element is caught by the rubber band only when wholly inside it', () => {
+    const band = { left: 100, top: 100, width: 300, height: 200 };
+    assert(App.transform.containsRect(band, { left: 100, top: 120, width: 300, height: 50 }), 'touching the edges counts');
+    assert(!App.transform.containsRect(band, { left: 90, top: 120, width: 50, height: 50 }), 'sticks out left');
+    assert(!App.transform.containsRect(band, { left: 150, top: 250, width: 50, height: 60 }), 'sticks out below');
+});
+
+test('transform: the bounds of several rects', () => {
+    assertEqual(App.transform.boundsOf([{ left: 10, top: 40, width: 20, height: 10 }, { left: 50, top: 5, width: 10, height: 10 }]),
+        { left: 10, top: 5, width: 50, height: 45 });
+    assertEqual(App.transform.boundsOf([]), null);
+});

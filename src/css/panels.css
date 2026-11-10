@@ -93,6 +93,20 @@
     outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
     pointer-events: none;                    /* clicks go through to the overlay's hit test */
 }
+/* Several selected (Phase 7): an outline round each; the rubber band while dragging on empty slide. */
+.selection-outline {
+    position: absolute;
+    outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;
+}
+.selection-outline[hidden] { display: none; }
+#overlay.editing .selection-outline, #overlay.cropping .selection-outline { display: none; }
+.rubber-band {
+    position: absolute;
+    background: rgba(0, 120, 212, 0.08);
+    outline: calc(1px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;
+}
 /* Selected table cells (tablecontrols.js): one shaded rectangle over them. */
 .cell-block {
     position: absolute;

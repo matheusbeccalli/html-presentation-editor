@@ -12,7 +12,7 @@
  *   'saved'            the deck was written to disk          (fileio.js)
  *
  * Added in Phase 2:
- *   'selection-changed' another element (or none) was selected (selection.js)
+ *   'selection-changed' another element (or none, or several: { id, ids }) was selected (selection.js)
  *   'clipboard-changed' something was copied, Paste can run    (elements.js)
  *   'selection-dragged' the selected element moves during a drag (selection.js)
  *   'zoom-changed'      the canvas zoom changed                (canvas.js)

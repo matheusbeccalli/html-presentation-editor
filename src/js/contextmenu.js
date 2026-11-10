@@ -54,8 +54,8 @@
 
     /* Open the menu with its top-left corner at screen point (x, y). */
     App.contextMenu.open = function open(x, y) {
-        const element = App.selection.getElement();
-        App.contextMenu.openWith(!element ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS, x, y);
+        const items = App.selection.count() === 0 ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS;
+        App.contextMenu.openWith(items, x, y);
     };
 
     /* Open the menu listing `commands` ('-' = a line) at screen point (x, y); the slide rail's menu. */
@@ -72,8 +72,8 @@
     App.contextMenu.openForSelection = function openForSelection() {
         const overlayRect = document.getElementById('overlay').getBoundingClientRect();
         const zoom = App.canvas.getZoom();
-        const element = App.selection.getElement();
-        const rect = element ? App.transform.readRect(element) : { left: 0, top: 0, width: 1280, height: 720 };
+        const rect = App.transform.boundsOf(App.selection.getElements().map(App.transform.readRect)) ||
+            { left: 0, top: 0, width: 1280, height: 720 };
         App.contextMenu.open(overlayRect.left + (rect.left + rect.width / 2) * zoom,
             overlayRect.top + (rect.top + rect.height / 2) * zoom);
     };

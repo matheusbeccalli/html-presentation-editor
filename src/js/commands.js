@@ -160,6 +160,10 @@
             });
         });
         App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
+        // Ctrl+A: every element on the slide (Phase 7 multi-select); while typing it stays the text's own Select All.
+        App.commands.define('selectAll', {
+            label: 'Select all', isEnabled: () => hasDeck() && !App.text.isEditing(), run: () => App.selection.selectAll(),
+        });
 
         // ---- Text (text.js) ----
         // Enter / F2: type in the selected text box or shape, or in the first cell of the selected table.
@@ -370,7 +374,7 @@
 
         App.commands.define('deselect', {
             label: 'Deselect',
-            isEnabled: () => !!App.selection.selectedId(),
+            isEnabled: () => App.selection.count() > 0,
             run: () => App.selection.clear(),
         });
 

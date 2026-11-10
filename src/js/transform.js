@@ -109,6 +109,32 @@
         return best ? best.id : null;
     };
 
+    // ---- Several elements (Phase 7: multi-select) ----
+
+    /* The rubber band's rect from the point where the drag began to where the pointer is now. */
+    App.transform.bandRect = function bandRect(start, end) {
+        return { left: Math.min(start.x, end.x), top: Math.min(start.y, end.y),
+            width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) };
+    };
+
+    /* Is `rect` wholly inside `outer`? (A rubber band catches only elements it covers completely, as in PowerPoint.) */
+    App.transform.containsRect = function containsRect(outer, rect) {
+        return rect.left >= outer.left && rect.top >= outer.top &&
+            rect.left + rect.width <= outer.left + outer.width && rect.top + rect.height <= outer.top + outer.height;
+    };
+
+    /* The smallest rect around all `rects` (null for none). */
+    App.transform.boundsOf = function boundsOf(rects) {
+        if (!rects.length) {
+            return null;
+        }
+        const left = Math.min(...rects.map((r) => r.left));
+        const top = Math.min(...rects.map((r) => r.top));
+        const right = Math.max(...rects.map((r) => r.left + r.width));
+        const bottom = Math.max(...rects.map((r) => r.top + r.height));
+        return { left: left, top: top, width: right - left, height: bottom - top };
+    };
+
     // ---- Reading and writing elements (DOM, but no page state) ----
 
     App.transform.readRect = function readRect(element) {

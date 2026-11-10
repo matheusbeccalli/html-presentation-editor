@@ -205,6 +205,7 @@
         ['Shift+ArrowUp', 'nudgeUpFar'],
         ['Shift+ArrowDown', 'nudgeDownFar'],
         ['Delete', 'delete'],
+        ['Ctrl+A', 'selectAll'],
         ['Backspace', 'delete'],
         ['Ctrl+X', 'cut', { clipboardEvent: true }],
         ['Ctrl+C', 'copy', { clipboardEvent: true }],

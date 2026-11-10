@@ -259,7 +259,7 @@ Nested bullets are the top priority of this phase.
 
 ## Phase 7: Arrange and slides
 
-- [ ] Multi-select (Shift+click, or drag a rectangle on empty canvas)
+- [x] Multi-select (Shift+click, or drag a rectangle on empty canvas) *(Shift+click or Ctrl+click adds an element or takes it out; a drag from an empty part of the slide draws a rectangle that selects what it covers completely (Shift: adds); Ctrl+A selects all; several selected move, nudge, delete, copy / paste, duplicate and restack together, each one undo step; the Format pane says how many are selected)*
 - [ ] Align left / center / right / top / middle / bottom; distribute horizontally / vertically
 - [ ] Smart guides and snapping to slide edges, center lines and other elements (5 px threshold); Alt while dragging disables snapping
 - [ ] Optional gridlines and rulers
@@ -275,6 +275,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Speaker notes: click the panel under the slide and type, Enter for a new line: the notes are this slide's (another slide shows its own; an empty one says "Click to add speaker notes"). Ctrl+Z in the panel takes the typing back. Save, reopen: the notes are kept, line breaks too
   - [ ] Slides: Home > New Slide ▾ > Title and Content (and the other three): the new slide comes after the one shown, its title where your titles are. Ctrl+M adds one too. Right-click a thumbnail > Duplicate Slide; click a thumbnail and press Delete: gone, the next one shown. Ctrl+Z after each: undone, and the slide it was about is shown. Save, reopen: the slides are there
   - [ ] Reorder and hide: drag slide 1's thumbnail down between two others (a red line shows where): it moves there; Ctrl+Z puts it back. Click a thumbnail, Ctrl+Down: one place down. Right-click a thumbnail > Hide Slide: dimmed, crossed-out eye; Slide Show tab > Hide Slide is lit and turns it off. Save, open the saved file in Edge and present with the arrow keys: the hidden slide is skipped
+  - [ ] Multi-select: click the title, Shift+click the subtitle: both outlined; drag one of them: both move; Ctrl+Z. Drag a rectangle from an empty corner over several boxes: those wholly inside are selected. Ctrl+A, then Delete: all gone; Ctrl+Z. Select two, Ctrl+C, go to another slide, Ctrl+V: both pasted where they were
 
 ## Phase 8: Present and export (section 7)
 

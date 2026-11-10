@@ -54,6 +54,7 @@
     // ---------------------------------------------------------------
 
     let hint = null;
+    let HINT = '';   // the hint's own text from index.html (nothing selected)
     let section = null;
     let typeLabel = null;
     let inputs = [];
@@ -63,6 +64,7 @@
 
     App.formatPane.init = function init() {
         hint = document.getElementById('format-hint');
+        HINT = hint.textContent;
         section = document.getElementById('format-size');
         typeLabel = document.getElementById('format-type');
         inputs = Array.from(section.querySelectorAll('input[data-field]'));
@@ -89,6 +91,9 @@
     App.formatPane.refresh = function refresh() {
         const element = App.selection.getElement();
         hint.hidden = !!element;
+        // Several selected (Phase 7): no fields, just how many.
+        const count = App.selection.count();
+        hint.textContent = count > 1 ? count + ' objects selected' : HINT;
         section.hidden = !element;
         const isText = !!element && element.getAttribute('data-type') === 'text';
         textSection.hidden = !isText;

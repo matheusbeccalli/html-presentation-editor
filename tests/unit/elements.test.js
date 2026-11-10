@@ -32,3 +32,18 @@ test('elements: pastePosition keeps the spot when it is free, else steps 10 px d
     const taken = [{ left: 100, top: 50 }, { left: 110, top: 60 }];
     assertEqual(App.elements.pastePosition(rect, taken), { left: 120, top: 70, width: 200, height: 80 });
 });
+
+test('elements: restackMany moves several ids together, keeping their own order', () => {
+    const order = ['a', 'b', 'c', 'd', 'e'];
+    assertEqual(App.elements.restackMany(order, ['b', 'd'], 'front'), ['a', 'c', 'e', 'b', 'd']);
+    assertEqual(App.elements.restackMany(order, ['b', 'd'], 'back'), ['b', 'd', 'a', 'c', 'e']);
+    assertEqual(App.elements.restackMany(order, ['b', 'd'], 'forward'), ['a', 'c', 'b', 'e', 'd']);
+    assertEqual(App.elements.restackMany(order, ['b', 'd'], 'backward'), ['b', 'a', 'd', 'c', 'e']);
+    assertEqual(App.elements.restackMany(order, ['d'], 'forward'), App.elements.restack(order, 'd', 'forward'), 'one id: as restack');
+});
+
+test('elements: restackMany - a block already at the top or bottom stays', () => {
+    assertEqual(App.elements.restackMany(['a', 'b', 'c'], ['b', 'c'], 'forward'), ['a', 'b', 'c']);
+    assertEqual(App.elements.restackMany(['a', 'b', 'c', 'd'], ['b', 'c'], 'forward'), ['a', 'd', 'b', 'c'], 'the block passes d');
+    assertEqual(App.elements.restackMany(['a', 'b', 'c'], ['a', 'b'], 'backward'), ['a', 'b', 'c']);
+});

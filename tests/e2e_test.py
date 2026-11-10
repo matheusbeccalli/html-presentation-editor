@@ -3564,6 +3564,120 @@ def test_reorder_and_hide_slides(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_multi_select(browser):
+    """Phase 7: several elements selected (Shift/Ctrl+click toggles, a rubber band on empty slide catches what it covers
+    wholly, Ctrl+A all); they move, nudge, duplicate, copy / paste, restack and delete together, each one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    ids = lambda: page.evaluate("App.selection.selectedIds()")  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    rects = lambda names: [element_rect(page, name) for name in names]  # noqa: E731
+
+    def click(x, y, modifiers=(), button="left"):
+        for key in modifiers:
+            page.keyboard.down(key)
+        page.mouse.click(*slide_to_screen(page, x, y), button=button)
+        for key in modifiers:
+            page.keyboard.up(key)
+    outlines = lambda: page.locator(".selection-outline:visible").count()  # noqa: E731
+    # Slide 1: e1 logo (64,56 120x40), e2 title (64,230 1100x120), e3 bar (64,350 140x8), e4 subtitle (64,378 1100x70).
+
+    # Shift+click adds, Shift+click again takes out; Ctrl+click too.
+    click(600, 280)
+    click(600, 410, modifiers=["Shift"])
+    check(ids() == ["e2", "e4"], f"two selected: {ids()}")
+    check(outlines() == 2 and page.locator(".selection-box:visible").count() == 0, "an outline each, no handles")
+    check(page.inner_text("#format-hint") == "2 objects selected", page.inner_text("#format-hint"))
+    click(600, 280, modifiers=["Control"])
+    check(ids() == ["e4"], f"Ctrl+click took e2 out: {ids()}")
+    page.keyboard.press("Escape")
+    check(ids() == [], "Esc: none")
+
+    # A rubber band from empty slide: what it covers wholly (not the logo, partly outside it).
+    start = slide_to_screen(page, 30, 200)
+    end = slide_to_screen(page, 1220, 470)
+    page.mouse.move(*start)
+    page.mouse.down()
+    page.mouse.move(end[0], end[1], steps=8)
+    check(page.is_visible(".rubber-band"), "the band shows")
+    page.screenshot(path=str(OUTPUT / "79-rubber-band.png"))
+    page.mouse.up()
+    check(sorted(ids()) == ["e2", "e3", "e4"] and page.locator(".rubber-band").count() == 0, f"band: {ids()}")
+    page.screenshot(path=str(OUTPUT / "80-multi-selected.png"))
+
+    # Dragging one of them moves all three: one undo step.
+    before = rects(["e2", "e3", "e4"])
+    drag(page, slide_to_screen(page, 600, 410), slide_to_screen(page, 640, 430))
+    moved = rects(["e2", "e3", "e4"])
+    check(all(m["left"] == b["left"] + 40 and m["top"] == b["top"] + 20 for m, b in zip(moved, before)), f"all moved: {moved}")
+    check(label() == "Move" and sorted(ids()) == ["e2", "e3", "e4"], "still all selected")
+    page.keyboard.press("Control+z")
+    check(rects(["e2", "e3", "e4"]) == before, "undo: all back")
+    check(sorted(ids()) == ["e2", "e3", "e4"], f"the selection survives undo: {ids()}")
+
+    # Arrow keys nudge them all.
+    page.keyboard.press("ArrowRight")
+    check([r["left"] for r in rects(["e2", "e3", "e4"])] == [b["left"] + 1 for b in before], "nudged")
+    page.keyboard.press("Control+z")
+
+    # Send to Back / Bring to Front move the three as a block, in their own order (already in front: greyed out).
+    stack = lambda: page.evaluate(  # noqa: E731
+        "App.transform.topLevelElements(App.deck.getCurrentSlide()).map((e) => e.getAttribute('data-id'))")
+    page.click(".ribbon-tab[data-tab='arrange']")
+    check(page.is_disabled("button[data-command='bringToFront']"), "already in front")
+    page.click("button[data-command='sendToBack']")
+    check(stack() == ["e2", "e3", "e4", "e1"] and label() == "Send to back", f"back: {stack()}")
+    page.click("button[data-command='bringForward']")
+    check(stack() == ["e1", "e2", "e3", "e4"], f"forward past the logo: {stack()}")
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(stack() == ["e1", "e2", "e3", "e4"], "undone")
+
+    # Ctrl+D duplicates all three, 10 px down-right, the copies selected.
+    page.keyboard.press("Control+d")
+    copies = ids()
+    check(len(copies) == 3 and not set(copies) & {"e2", "e3", "e4"} and label() == "Duplicate", f"copies: {copies}")
+    check(sorted(r["left"] for r in rects(copies)) == sorted(b["left"] + 10 for b in before), "10 px right")
+    page.keyboard.press("Control+z")
+    check(ids() == [], f"undo: the copies and their selection go: {ids()}")
+
+    # Ctrl+A selects everything on the slide; right-click one keeps them all and offers Delete; Delete: one step.
+    page.click("#overlay", position={"x": 5, "y": 5})
+    page.keyboard.press("Control+a")
+    check(sorted(ids()) == ["e1", "e2", "e3", "e4"], f"Ctrl+A: {ids()}")
+    click(600, 280, button="right")
+    check(sorted(ids()) == ["e1", "e2", "e3", "e4"] and page.is_enabled(".context-menu .menu-item[data-command='delete']"),
+          "right-click keeps the selection")
+    page.click(".context-menu .menu-label:text-is('Delete')")
+    check(page.evaluate("App.deck.getCurrentSlide().querySelectorAll(':scope > .el').length") == 0 and label() == "Delete",
+          "all deleted")
+    page.keyboard.press("Control+z")
+    check(page.evaluate("App.deck.getCurrentSlide().querySelectorAll(':scope > .el').length") == 4, "undo: all back")
+
+    # Copy two, paste on slide 2: both, where they were, selected.
+    page.keyboard.press("Escape")
+    click(600, 280)
+    click(110, 75, modifiers=["Shift"])
+    check(sorted(ids()) == ["e1", "e2"], f"{ids()}")
+    page.keyboard.press("Control+c")
+    page.evaluate("App.deck.goTo(1)")
+    page.keyboard.press("Control+v")
+    pasted = ids()
+    check(len(pasted) == 2 and label() == "Paste", f"pasted: {pasted}")
+    check(sorted((r["left"], r["top"]) for r in rects(pasted)) == [(64, 56), (64, 230)], f"same spots: {rects(pasted)}")
+
+    # Shift + rubber band adds to the selection.
+    page.keyboard.press("Escape")
+    click(600, 80)
+    page.keyboard.down("Shift")
+    drag(page, slide_to_screen(page, 30, 140), slide_to_screen(page, 1250, 700))
+    page.keyboard.up("Shift")
+    # Slide 2: e5 title (64,48), e7 body (64,150 1152x480), and the pasted title copy (64,230) are covered; the title stays.
+    check(ids()[0] == "e5" and "e7" in ids() and len(ids()) == 3, f"added: {ids()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4648,6 +4762,7 @@ TESTS = [
     test_speaker_notes,
     test_add_duplicate_delete_slides,
     test_reorder_and_hide_slides,
+    test_multi_select,
 ]
 
 

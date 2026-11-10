@@ -438,6 +438,20 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
     pointer-events: none;                    /* clicks go through to the overlay's hit test */
 }
+/* Several selected (Phase 7): an outline round each; the rubber band while dragging on empty slide. */
+.selection-outline {
+    position: absolute;
+    outline: calc(1.5px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;
+}
+.selection-outline[hidden] { display: none; }
+#overlay.editing .selection-outline, #overlay.cropping .selection-outline { display: none; }
+.rubber-band {
+    position: absolute;
+    background: rgba(0, 120, 212, 0.08);
+    outline: calc(1px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;
+}
 /* Selected table cells (tablecontrols.js): one shaded rectangle over them. */
 .cell-block {
     position: absolute;
@@ -1446,6 +1460,7 @@ App.createEventBus = function createEventBus() {
         ['Shift+ArrowUp', 'nudgeUpFar'],
         ['Shift+ArrowDown', 'nudgeDownFar'],
         ['Delete', 'delete'],
+        ['Ctrl+A', 'selectAll'],
         ['Backspace', 'delete'],
         ['Ctrl+X', 'cut', { clipboardEvent: true }],
         ['Ctrl+C', 'copy', { clipboardEvent: true }],
@@ -11680,6 +11695,32 @@ App.template.newDeckHtml = function newDeckHtml() {
         return best ? best.id : null;
     };
 
+    // ---- Several elements (Phase 7: multi-select) ----
+
+    /* The rubber band's rect from the point where the drag began to where the pointer is now. */
+    App.transform.bandRect = function bandRect(start, end) {
+        return { left: Math.min(start.x, end.x), top: Math.min(start.y, end.y),
+            width: Math.abs(end.x - start.x), height: Math.abs(end.y - start.y) };
+    };
+
+    /* Is `rect` wholly inside `outer`? (A rubber band catches only elements it covers completely, as in PowerPoint.) */
+    App.transform.containsRect = function containsRect(outer, rect) {
+        return rect.left >= outer.left && rect.top >= outer.top &&
+            rect.left + rect.width <= outer.left + outer.width && rect.top + rect.height <= outer.top + outer.height;
+    };
+
+    /* The smallest rect around all `rects` (null for none). */
+    App.transform.boundsOf = function boundsOf(rects) {
+        if (!rects.length) {
+            return null;
+        }
+        const left = Math.min(...rects.map((r) => r.left));
+        const top = Math.min(...rects.map((r) => r.top));
+        const right = Math.max(...rects.map((r) => r.left + r.width));
+        const bottom = Math.max(...rects.map((r) => r.top + r.height));
+        return { left: left, top: top, width: right - left, height: bottom - top };
+    };
+
     // ---- Reading and writing elements (DOM, but no page state) ----
 
     App.transform.readRect = function readRect(element) {
@@ -11739,6 +11780,14 @@ App.template.newDeckHtml = function newDeckHtml() {
  * the element: undo rebuilds the whole slide from a snapshot (history.js), so
  * the old element object no longer exists afterwards.
  *
+ * Multi-select (Phase 7): the selection is a list of ids. Shift+click (or
+ * Ctrl+click) adds an element or takes it out; a drag on empty slide draws a
+ * rubber band that selects what it covers wholly (with Shift: added); Ctrl+A
+ * all. Several selected: each gets an outline (no handles), and a drag on one
+ * of them moves them all. getElement() is the element only when exactly one
+ * is selected, so everything made for one element (typing, the Format pane,
+ * the contextual tabs) simply stays off; getElements() is all of them.
+ *
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
@@ -11766,8 +11815,10 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     let overlay = null;
     let box = null;
-    let selectedId = null;
+    let selectedIds = [];          // in the order they were picked
     let selectedSlideIndex = -1;
+    let outlines = [];             // one .selection-outline per element while several are selected
+    let band = null;               // the rubber band while it is dragged
     let dragging = false;
     let insertCallback = null;   // set by armInsert: the next click/drag places something
     let insertPreview = null;    // armInsert's options.preview: a drag in both directions (shapes)
@@ -11830,52 +11881,119 @@ App.template.newDeckHtml = function newDeckHtml() {
     // Selection state
     // ---------------------------------------------------------------
 
+    /* Shift+click: `id` joins the selected ids, or leaves them if it was in (a new array). */
+    App.selection.toggleId = function toggleId(ids, id) {
+        return ids.includes(id) ? ids.filter((item) => item !== id) : ids.concat([id]);
+    };
+
+    /* The id of the one selected element, or null (none, or several). */
     App.selection.selectedId = function selectedIdFn() {
-        return selectedId;
+        return selectedIds.length === 1 ? selectedIds[0] : null;
+    };
+
+    /* The ids of every selected element (a copy). */
+    App.selection.selectedIds = function selectedIdsFn() {
+        return selectedIds.slice();
+    };
+
+    App.selection.count = function count() {
+        return selectedIds.length;
     };
 
     App.selection.isDragging = function isDragging() {
         return dragging;
     };
 
-    /* The selected element in the live deck, or null. */
+    function elementWithId(slide, id) {
+        return slide.querySelector('[data-id="' + CSS.escape(id) + '"]');
+    }
+
+    /* The selected element in the live deck when exactly one is selected, else null. */
     App.selection.getElement = function getElement() {
         const slide = App.deck.getCurrentSlide();
-        if (!selectedId || !slide) {
-            return null;
-        }
-        return slide.querySelector('[data-id="' + CSS.escape(selectedId) + '"]');
+        const id = App.selection.selectedId();
+        return id && slide ? elementWithId(slide, id) : null;
     };
 
-    App.selection.select = function select(element) {
-        const id = element ? element.getAttribute('data-id') : null;
-        if (id === selectedId) {
+    /* Every selected element in the live deck, in the order they were picked. */
+    App.selection.getElements = function getElements() {
+        const slide = App.deck.getCurrentSlide();
+        return slide ? selectedIds.map((id) => elementWithId(slide, id)).filter(Boolean) : [];
+    };
+
+    App.selection.isSelected = function isSelected(element) {
+        return !!element && selectedIds.includes(element.getAttribute('data-id'));
+    };
+
+    function setIds(ids) {
+        const same = ids.length === selectedIds.length && ids.every((id, i) => id === selectedIds[i]);
+        if (same) {
             App.selection.refresh();
             return;
         }
-        selectedId = id;
+        selectedIds = ids.slice();
         selectedSlideIndex = App.deck.getCurrentIndex();
         App.selection.refresh();
-        App.events.emit('selection-changed', { id: selectedId });
+        App.events.emit('selection-changed', { id: App.selection.selectedId(), ids: selectedIds.slice() });
+    }
+
+    App.selection.select = function select(element) {
+        setIds(element ? [element.getAttribute('data-id')] : []);
+    };
+
+    /* Select all of `elements` (several pasted, Ctrl+A ...). */
+    App.selection.selectMany = function selectMany(elements) {
+        setIds(elements.map((element) => element.getAttribute('data-id')));
+    };
+
+    /* Shift+click: `element` joins the selection, or leaves it. */
+    App.selection.toggle = function toggle(element) {
+        setIds(App.selection.toggleId(selectedIds, element.getAttribute('data-id')));
+    };
+
+    /* Ctrl+A: everything on the slide. */
+    App.selection.selectAll = function selectAll() {
+        const slide = App.deck.getCurrentSlide();
+        if (slide) {
+            App.selection.selectMany(App.transform.topLevelElements(slide));
+        }
     };
 
     App.selection.clear = function clear() {
-        App.selection.select(null);
+        setIds([]);
     };
 
-    /* Redraw the box; drop the selection if its element is gone (e.g. undo of a paste). */
-    App.selection.refresh = function refresh() {
-        const element = App.selection.getElement();
-        if (selectedId && !element) {
-            selectedId = null;
-            App.events.emit('selection-changed', { id: null });
+    /* Several selected: a plain outline round each (handles only for one, as resizing is one at a time). */
+    function drawOutlines(elements) {
+        while (outlines.length < elements.length) {
+            const outline = App.util.el('div', { class: 'selection-outline' });
+            overlay.appendChild(outline);
+            outlines.push(outline);
         }
+        outlines.forEach((outline, i) => {
+            outline.hidden = i >= elements.length;
+            if (i < elements.length) {
+                App.transform.writeRect(outline, App.transform.readRect(elements[i]));
+            }
+        });
+    }
+
+    /* Redraw the box or outlines; drop selected ids whose element is gone (e.g. undo of a paste). */
+    App.selection.refresh = function refresh() {
+        const slide = App.deck.getCurrentSlide();
+        const present = slide ? selectedIds.filter((id) => elementWithId(slide, id)) : [];
+        if (present.length !== selectedIds.length) {
+            selectedIds = present;
+            App.events.emit('selection-changed', { id: App.selection.selectedId(), ids: selectedIds.slice() });
+        }
+        const element = App.selection.getElement();
         box.hidden = !element;
         if (element) {
             const rect = App.transform.readRect(element);
             App.transform.writeRect(box, rect);
             placeShapeHandles(element, rect);
         }
+        drawOutlines(selectedIds.length > 1 ? App.selection.getElements() : []);
     };
 
     // ---------------------------------------------------------------
@@ -12002,6 +12120,22 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
             App.text.stopPainter();
         }
+        // Shift / Ctrl + click: add the element or take it out (on empty slide: a rubber band that adds).
+        if ((event.shiftKey || event.ctrlKey || event.metaKey) && event.button === 0) {
+            if (element) {
+                App.selection.toggle(element);
+            } else {
+                startBand(event, true);
+            }
+            return;
+        }
+        // One of several selected: a drag moves them all; a right-click keeps them for the menu.
+        if (element && selectedIds.length > 1 && App.selection.isSelected(element)) {
+            if (event.button === 0) {
+                startDrag(event, 'move', null);
+            }
+            return;
+        }
         // In a table: a column border drags; in its cells a click types in the cell, a drag selects cells (tablecontrols.js).
         const border = event.button === 0 && inTableCells(element, point) ? App.tableControls.borderAt(element, point) : -1;
         if (border >= 0) {
@@ -12018,7 +12152,67 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.selection.select(element);
         if (element && event.button === 0) {
             startDrag(event, 'move', null);
+        } else if (!element && event.button === 0) {
+            startBand(event, false);
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Rubber band: a drag from empty slide selects what it covers wholly
+    // ---------------------------------------------------------------
+
+    function startBand(downEvent, adding) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        const start = toSlidePoint(downEvent);
+        const zoom = App.canvas.getZoom();
+        const kept = adding ? selectedIds.slice() : [];   // Shift: the band adds to these
+        overlay.setPointerCapture(downEvent.pointerId);
+
+        function onMove(event) {
+            const point = toSlidePoint(event);
+            if (!band) {
+                if (Math.hypot(point.x - start.x, point.y - start.y) * zoom < DRAG_THRESHOLD) {
+                    return;
+                }
+                band = App.util.el('div', { class: 'rubber-band' });
+                overlay.appendChild(band);
+            }
+            const rect = App.transform.bandRect(start, point);
+            App.transform.writeRect(band, rect);
+            const caught = App.transform.topLevelElements(slide)
+                .filter((element) => App.transform.containsRect(rect, App.transform.readRect(element)))
+                .map((element) => element.getAttribute('data-id'))
+                .filter((id) => !kept.includes(id));
+            setIds(kept.concat(caught));
+        }
+
+        function finish() {
+            overlay.removeEventListener('pointermove', onMove);
+            overlay.removeEventListener('pointerup', finish);
+            overlay.removeEventListener('pointercancel', finish);
+            window.removeEventListener('keydown', onKey, true);
+            if (band) {
+                band.remove();
+                band = null;
+            }
+        }
+
+        function onKey(event) {
+            if (event.key === 'Escape' && band) {
+                event.stopPropagation();
+                event.preventDefault();
+                setIds(kept);
+                finish();
+            }
+        }
+
+        overlay.addEventListener('pointermove', onMove);
+        overlay.addEventListener('pointerup', finish);
+        overlay.addEventListener('pointercancel', finish);
+        window.addEventListener('keydown', onKey, true);
     }
 
     // ---------------------------------------------------------------
@@ -12112,12 +12306,15 @@ App.template.newDeckHtml = function newDeckHtml() {
      * always do); on a line's end it snaps to 45 degrees.
      */
     function startDrag(downEvent, kind, handle) {
-        const element = App.selection.getElement();
+        // A move takes every selected element along; the other kinds work on the one selected.
+        const elements = kind === 'move' ? App.selection.getElements() : [App.selection.getElement()].filter(Boolean);
+        const element = elements[0];
         const slide = App.deck.getCurrentSlide();
         if (!element || !slide) {
             return;
         }
-        const startRect = App.transform.readRect(element);
+        const startRects = elements.map((item) => App.transform.readRect(item));
+        const startRect = startRects[0];
         const startFlip = element.getAttribute('data-flip') || '';
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
@@ -12141,11 +12338,11 @@ App.template.newDeckHtml = function newDeckHtml() {
             } else if (kind === 'adjust') {
                 App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
                     startRect.height, { x: point.x - startRect.left, y: point.y - startRect.top }));
+            } else if (kind === 'move') {
+                elements.forEach((item, i) => App.transform.writeRect(item, App.transform.moveRect(startRects[i], dx, dy)));
             } else {
-                App.transform.writeRect(element, kind === 'move'
-                    ? App.transform.moveRect(startRect, dx, dy)
-                    : App.transform.resizeRect(startRect, handle, dx, dy,
-                        App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey)));
+                App.transform.writeRect(element, App.transform.resizeRect(startRect, handle, dx, dy,
+                    App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey)));
             }
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
@@ -12444,9 +12641,10 @@ App.template.newDeckHtml = function newDeckHtml() {
 <script>
 // ---- js/elements.js ----
 /*
- * elements.js - actions on the selected element (SPEC 4, Phase 2):
- * nudge with the arrow keys, delete, cut / copy / paste / duplicate (also
- * across slides), and the stacking order (bring forward, send to back ...).
+ * elements.js - actions on the selected element(s) (SPEC 4, Phase 2; several
+ * at once since Phase 7's multi-select): nudge with the arrow keys, delete,
+ * cut / copy / paste / duplicate (also across slides), and the stacking order
+ * (bring forward, send to back ...).
  *
  * Every action is one undoable step on the current slide (history.js).
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
@@ -12481,19 +12679,39 @@ App.template.newDeckHtml = function newDeckHtml() {
      * 'front' / 'back' to the end / start, 'forward' / 'backward' one place.
      */
     App.elements.restack = function restack(order, id, action) {
-        const result = order.filter((item) => item !== id);
-        const index = order.indexOf(id);
-        let target = index;
+        return App.elements.restackMany(order, [id], action);
+    };
+
+    /*
+     * The same for several ids (multi-select): 'front' / 'back' move them all to
+     * the end / start in their own order; 'forward' / 'backward' move each one
+     * place, so a block of selected ids moves together past one other element.
+     */
+    App.elements.restackMany = function restackMany(order, ids, action) {
+        const chosen = new Set(ids);
+        const others = order.filter((id) => !chosen.has(id));
+        const picked = order.filter((id) => chosen.has(id));
         if (action === 'front') {
-            target = result.length;
-        } else if (action === 'back') {
-            target = 0;
-        } else if (action === 'forward') {
-            target = Math.min(result.length, index + 1);
-        } else if (action === 'backward') {
-            target = Math.max(0, index - 1);
+            return others.concat(picked);
         }
-        result.splice(target, 0, id);
+        if (action === 'back') {
+            return picked.concat(others);
+        }
+        const result = order.slice();
+        const swap = (i, j) => { [result[i], result[j]] = [result[j], result[i]]; };
+        if (action === 'forward') {
+            for (let i = result.length - 2; i >= 0; i--) {
+                if (chosen.has(result[i]) && !chosen.has(result[i + 1])) {
+                    swap(i, i + 1);
+                }
+            }
+        } else if (action === 'backward') {
+            for (let i = 1; i < result.length; i++) {
+                if (chosen.has(result[i]) && !chosen.has(result[i - 1])) {
+                    swap(i, i - 1);
+                }
+            }
+        }
         return result;
     };
 
@@ -12606,48 +12824,57 @@ App.template.newDeckHtml = function newDeckHtml() {
     // Actions on the live deck
     // ---------------------------------------------------------------
 
-    let clipboardHtml = null;
+    let clipboardHtml = null;   // the copied elements' HTML, back to front (an array: several can be copied)
 
     function currentSlideScope() {
         return { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
     }
 
     App.elements.hasSelection = function hasSelection() {
-        return !!App.selection.getElement();
+        return App.selection.count() > 0;
     };
+
+    /* The selected elements, back to front (their stacking order on the slide), so copies stack the same way. */
+    function selectedBackToFront() {
+        const chosen = App.selection.getElements();
+        const slide = App.deck.getCurrentSlide();
+        return slide ? App.transform.topLevelElements(slide).filter((element) => chosen.includes(element)) : [];
+    }
 
     App.elements.canPaste = function canPaste() {
         return clipboardHtml !== null && !!App.deck.getCurrentSlide();
     };
 
-    /* Move the selected element by (dx, dy) px; a held key is one undo step. */
+    /* Move the selected elements by (dx, dy) px; a held key is one undo step. */
     App.elements.nudge = function nudge(dx, dy) {
-        const element = App.selection.getElement();
-        if (!element) {
+        const elements = App.selection.getElements();
+        if (!elements.length) {
             return;
         }
         App.history.change('Move', currentSlideScope(), () => {
-            App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element), dx, dy));
-        }, { mergeKey: 'nudge:' + element.getAttribute('data-id') });
+            elements.forEach((element) => {
+                App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element), dx, dy));
+            });
+        }, { mergeKey: 'nudge:' + App.selection.selectedIds().join(',') });
     };
 
     App.elements.remove = function remove(label) {
-        const element = App.selection.getElement();
-        if (!element) {
+        const elements = App.selection.getElements();
+        if (!elements.length) {
             return;
         }
-        App.history.change(label || 'Delete', currentSlideScope(), () => element.remove());
+        App.history.change(label || 'Delete', currentSlideScope(), () => elements.forEach((element) => element.remove()));
         App.selection.clear();
     };
 
     App.elements.copy = function copy() {
-        const element = App.selection.getElement();
-        if (element) {
-            clipboardHtml = element.outerHTML;
+        const elements = selectedBackToFront();
+        if (elements.length) {
+            clipboardHtml = elements.map((element) => element.outerHTML);
             copyMark = 'deck-editor-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
             App.events.emit('clipboard-changed');   // Paste buttons become enabled
             if (!inClipboardEvent) {
-                writeMark(element);   // the ribbon's Copy: no copy event to write it in
+                writeMark(elements);   // the ribbon's Copy: no copy event to write it in
             }
         }
     };
@@ -12658,33 +12885,40 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     /*
-     * Put a copy of `html` (one element) on the current slide, on top of the
-     * others, with fresh ids; select it. Returns the new element.
+     * Put copies of `htmlList` (elements' HTML, back to front) on the current
+     * slide, on top of the others in that order, with fresh ids; select them.
+     * They all move by the same step (pastePosition of the first), so several
+     * keep their arrangement. Returns the new elements.
      */
-    function insertCopy(html, label) {
+    function insertCopy(htmlList, label) {
         const doc = App.deck.getDocument();
         const slide = App.deck.getCurrentSlide();
-        const template = doc.createElement('template');
-        template.innerHTML = html.trim();
-        const element = template.content.firstElementChild;
-        if (!element) {
-            return null;
+        const elements = htmlList.map((html) => {
+            const template = doc.createElement('template');
+            template.innerHTML = html.trim();
+            return template.content.firstElementChild;
+        }).filter(Boolean);
+        if (!elements.length) {
+            return [];
         }
         App.history.change(label, currentSlideScope(), () => {
             const usedIds = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
-            App.elements.giveFreshIds(element, usedIds);
-
             const others = App.transform.topLevelElements(slide);
             const taken = others.map((other) => App.transform.readRect(other));
-            App.transform.writeRect(element, App.elements.pastePosition(App.transform.readRect(element), taken));
+            const first = App.transform.readRect(elements[0]);
+            const spot = App.elements.pastePosition(first, taken);
             const topZ = others.reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
-            element.style.zIndex = String(topZ + 1);
-
-            // Speaker notes stay the last thing in the slide.
-            slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+            elements.forEach((element, index) => {
+                App.elements.giveFreshIds(element, usedIds);
+                App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element),
+                    spot.left - first.left, spot.top - first.top));
+                element.style.zIndex = String(topZ + 1 + index);
+                // Speaker notes stay the last thing in the slide.
+                slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+            });
         });
-        App.selection.select(element);
-        return element;
+        App.selection.selectMany(elements);
+        return elements;
     }
 
     // ---- The system clipboard (Ctrl+C / Ctrl+X / Ctrl+V) ----
@@ -12705,9 +12939,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         return (element.innerText || element.textContent || '').trim();
     }
 
+    function textOfAll(elements) {
+        return elements.map(textOf).filter(Boolean).join('\n');
+    }
+
     /* Best effort: if the browser refuses, a table copied earlier in Excel could win over this copy at Ctrl+V. */
-    function writeMark(element) {
-        const data = markData(textOf(element));
+    function writeMark(elements) {
+        const data = markData(textOfAll(elements));
         if (navigator.clipboard && window.ClipboardItem) {
             navigator.clipboard.write([new ClipboardItem({
                 'text/html': new Blob([data.html], { type: 'text/html' }),
@@ -12723,14 +12961,14 @@ App.template.newDeckHtml = function newDeckHtml() {
             !(target && target.closest && target.closest('dialog')) && !!App.deck.getCurrentSlide();
     }
 
-    /* Ctrl+C / Ctrl+X with an element selected: our copy, and its mark on the system clipboard. */
+    /* Ctrl+C / Ctrl+X with elements selected: our copy, and its mark on the system clipboard. */
     function onCopyEvent(event) {
-        const element = App.selection.getElement();
-        if (!forTheSlide(event) || !element) {
+        const elements = selectedBackToFront();
+        if (!forTheSlide(event) || !elements.length) {
             return;
         }
         event.preventDefault();
-        const text = textOf(element);
+        const text = textOfAll(elements);
         inClipboardEvent = true;
         try {
             App.commands.run(event.type);   // 'copy' or 'cut'
@@ -12789,9 +13027,9 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     App.elements.duplicate = function duplicate() {
-        const element = App.selection.getElement();
-        if (element) {
-            insertCopy(element.outerHTML, 'Duplicate');
+        const elements = selectedBackToFront();
+        if (elements.length) {
+            insertCopy(elements.map((element) => element.outerHTML), 'Duplicate');
         }
     };
 
@@ -12799,15 +13037,19 @@ App.template.newDeckHtml = function newDeckHtml() {
         front: 'Bring to front', forward: 'Bring forward', backward: 'Send backward', back: 'Send to back',
     };
 
-    /* Can the selected element move in this direction? (false at the top/bottom of the stack) */
+    /* The slide's elements back to front after `action` on the selected ones (several move as a block). */
+    function arranged(action) {
+        const order = App.transform.topLevelElements(App.deck.getCurrentSlide());
+        return { order: order, newOrder: App.elements.restackMany(order, App.selection.getElements(), action) };
+    }
+
+    /* Can the selected elements move in this direction? (false at the top/bottom of the stack) */
     App.elements.canArrange = function canArrange(action) {
-        const element = App.selection.getElement();
-        if (!element) {
+        if (!App.selection.count() || !App.deck.getCurrentSlide()) {
             return false;
         }
-        const order = App.transform.topLevelElements(App.deck.getCurrentSlide());
-        const index = order.indexOf(element);
-        return (action === 'front' || action === 'forward') ? index < order.length - 1 : index > 0;
+        const { order, newOrder } = arranged(action);
+        return newOrder.some((element, index) => element !== order[index]);
     };
 
     /*
@@ -12819,9 +13061,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (!App.elements.canArrange(action)) {
             return;
         }
-        const element = App.selection.getElement();
-        const order = App.transform.topLevelElements(App.deck.getCurrentSlide());
-        const newOrder = App.elements.restack(order, element, action);
+        const newOrder = arranged(action).newOrder;
         App.history.change(ARRANGE_LABELS[action], currentSlideScope(), () => {
             newOrder.forEach((item, index) => {
                 item.style.zIndex = String(index + 1);
@@ -12889,6 +13129,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     // ---------------------------------------------------------------
 
     let hint = null;
+    let HINT = '';   // the hint's own text from index.html (nothing selected)
     let section = null;
     let typeLabel = null;
     let inputs = [];
@@ -12898,6 +13139,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     App.formatPane.init = function init() {
         hint = document.getElementById('format-hint');
+        HINT = hint.textContent;
         section = document.getElementById('format-size');
         typeLabel = document.getElementById('format-type');
         inputs = Array.from(section.querySelectorAll('input[data-field]'));
@@ -12924,6 +13166,9 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.formatPane.refresh = function refresh() {
         const element = App.selection.getElement();
         hint.hidden = !!element;
+        // Several selected (Phase 7): no fields, just how many.
+        const count = App.selection.count();
+        hint.textContent = count > 1 ? count + ' objects selected' : HINT;
         section.hidden = !element;
         const isText = !!element && element.getAttribute('data-type') === 'text';
         textSection.hidden = !isText;
@@ -13072,8 +13317,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* Open the menu with its top-left corner at screen point (x, y). */
     App.contextMenu.open = function open(x, y) {
-        const element = App.selection.getElement();
-        App.contextMenu.openWith(!element ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS, x, y);
+        const items = App.selection.count() === 0 ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS;
+        App.contextMenu.openWith(items, x, y);
     };
 
     /* Open the menu listing `commands` ('-' = a line) at screen point (x, y); the slide rail's menu. */
@@ -13090,8 +13335,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.contextMenu.openForSelection = function openForSelection() {
         const overlayRect = document.getElementById('overlay').getBoundingClientRect();
         const zoom = App.canvas.getZoom();
-        const element = App.selection.getElement();
-        const rect = element ? App.transform.readRect(element) : { left: 0, top: 0, width: 1280, height: 720 };
+        const rect = App.transform.boundsOf(App.selection.getElements().map(App.transform.readRect)) ||
+            { left: 0, top: 0, width: 1280, height: 720 };
         App.contextMenu.open(overlayRect.left + (rect.left + rect.width / 2) * zoom,
             overlayRect.top + (rect.top + rect.height / 2) * zoom);
     };
@@ -15603,6 +15848,10 @@ App.template.newDeckHtml = function newDeckHtml() {
             });
         });
         App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
+        // Ctrl+A: every element on the slide (Phase 7 multi-select); while typing it stays the text's own Select All.
+        App.commands.define('selectAll', {
+            label: 'Select all', isEnabled: () => hasDeck() && !App.text.isEditing(), run: () => App.selection.selectAll(),
+        });
 
         // ---- Text (text.js) ----
         // Enter / F2: type in the selected text box or shape, or in the first cell of the selected table.
@@ -15813,7 +16062,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
         App.commands.define('deselect', {
             label: 'Deselect',
-            isEnabled: () => !!App.selection.selectedId(),
+            isEnabled: () => App.selection.count() > 0,
             run: () => App.selection.clear(),
         });
 

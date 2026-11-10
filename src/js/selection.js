@@ -12,6 +12,14 @@
  * the element: undo rebuilds the whole slide from a snapshot (history.js), so
  * the old element object no longer exists afterwards.
  *
+ * Multi-select (Phase 7): the selection is a list of ids. Shift+click (or
+ * Ctrl+click) adds an element or takes it out; a drag on empty slide draws a
+ * rubber band that selects what it covers wholly (with Shift: added); Ctrl+A
+ * all. Several selected: each gets an outline (no handles), and a drag on one
+ * of them moves them all. getElement() is the element only when exactly one
+ * is selected, so everything made for one element (typing, the Format pane,
+ * the contextual tabs) simply stays off; getElements() is all of them.
+ *
  * A drag is one undo step: history.begin() when the mouse has moved a few
  * pixels, history.commit() when it is released, history.cancel() on Escape.
  *
@@ -39,8 +47,10 @@
 
     let overlay = null;
     let box = null;
-    let selectedId = null;
+    let selectedIds = [];          // in the order they were picked
     let selectedSlideIndex = -1;
+    let outlines = [];             // one .selection-outline per element while several are selected
+    let band = null;               // the rubber band while it is dragged
     let dragging = false;
     let insertCallback = null;   // set by armInsert: the next click/drag places something
     let insertPreview = null;    // armInsert's options.preview: a drag in both directions (shapes)
@@ -103,52 +113,119 @@
     // Selection state
     // ---------------------------------------------------------------
 
+    /* Shift+click: `id` joins the selected ids, or leaves them if it was in (a new array). */
+    App.selection.toggleId = function toggleId(ids, id) {
+        return ids.includes(id) ? ids.filter((item) => item !== id) : ids.concat([id]);
+    };
+
+    /* The id of the one selected element, or null (none, or several). */
     App.selection.selectedId = function selectedIdFn() {
-        return selectedId;
+        return selectedIds.length === 1 ? selectedIds[0] : null;
+    };
+
+    /* The ids of every selected element (a copy). */
+    App.selection.selectedIds = function selectedIdsFn() {
+        return selectedIds.slice();
+    };
+
+    App.selection.count = function count() {
+        return selectedIds.length;
     };
 
     App.selection.isDragging = function isDragging() {
         return dragging;
     };
 
-    /* The selected element in the live deck, or null. */
+    function elementWithId(slide, id) {
+        return slide.querySelector('[data-id="' + CSS.escape(id) + '"]');
+    }
+
+    /* The selected element in the live deck when exactly one is selected, else null. */
     App.selection.getElement = function getElement() {
         const slide = App.deck.getCurrentSlide();
-        if (!selectedId || !slide) {
-            return null;
-        }
-        return slide.querySelector('[data-id="' + CSS.escape(selectedId) + '"]');
+        const id = App.selection.selectedId();
+        return id && slide ? elementWithId(slide, id) : null;
     };
 
-    App.selection.select = function select(element) {
-        const id = element ? element.getAttribute('data-id') : null;
-        if (id === selectedId) {
+    /* Every selected element in the live deck, in the order they were picked. */
+    App.selection.getElements = function getElements() {
+        const slide = App.deck.getCurrentSlide();
+        return slide ? selectedIds.map((id) => elementWithId(slide, id)).filter(Boolean) : [];
+    };
+
+    App.selection.isSelected = function isSelected(element) {
+        return !!element && selectedIds.includes(element.getAttribute('data-id'));
+    };
+
+    function setIds(ids) {
+        const same = ids.length === selectedIds.length && ids.every((id, i) => id === selectedIds[i]);
+        if (same) {
             App.selection.refresh();
             return;
         }
-        selectedId = id;
+        selectedIds = ids.slice();
         selectedSlideIndex = App.deck.getCurrentIndex();
         App.selection.refresh();
-        App.events.emit('selection-changed', { id: selectedId });
+        App.events.emit('selection-changed', { id: App.selection.selectedId(), ids: selectedIds.slice() });
+    }
+
+    App.selection.select = function select(element) {
+        setIds(element ? [element.getAttribute('data-id')] : []);
+    };
+
+    /* Select all of `elements` (several pasted, Ctrl+A ...). */
+    App.selection.selectMany = function selectMany(elements) {
+        setIds(elements.map((element) => element.getAttribute('data-id')));
+    };
+
+    /* Shift+click: `element` joins the selection, or leaves it. */
+    App.selection.toggle = function toggle(element) {
+        setIds(App.selection.toggleId(selectedIds, element.getAttribute('data-id')));
+    };
+
+    /* Ctrl+A: everything on the slide. */
+    App.selection.selectAll = function selectAll() {
+        const slide = App.deck.getCurrentSlide();
+        if (slide) {
+            App.selection.selectMany(App.transform.topLevelElements(slide));
+        }
     };
 
     App.selection.clear = function clear() {
-        App.selection.select(null);
+        setIds([]);
     };
 
-    /* Redraw the box; drop the selection if its element is gone (e.g. undo of a paste). */
-    App.selection.refresh = function refresh() {
-        const element = App.selection.getElement();
-        if (selectedId && !element) {
-            selectedId = null;
-            App.events.emit('selection-changed', { id: null });
+    /* Several selected: a plain outline round each (handles only for one, as resizing is one at a time). */
+    function drawOutlines(elements) {
+        while (outlines.length < elements.length) {
+            const outline = App.util.el('div', { class: 'selection-outline' });
+            overlay.appendChild(outline);
+            outlines.push(outline);
         }
+        outlines.forEach((outline, i) => {
+            outline.hidden = i >= elements.length;
+            if (i < elements.length) {
+                App.transform.writeRect(outline, App.transform.readRect(elements[i]));
+            }
+        });
+    }
+
+    /* Redraw the box or outlines; drop selected ids whose element is gone (e.g. undo of a paste). */
+    App.selection.refresh = function refresh() {
+        const slide = App.deck.getCurrentSlide();
+        const present = slide ? selectedIds.filter((id) => elementWithId(slide, id)) : [];
+        if (present.length !== selectedIds.length) {
+            selectedIds = present;
+            App.events.emit('selection-changed', { id: App.selection.selectedId(), ids: selectedIds.slice() });
+        }
+        const element = App.selection.getElement();
         box.hidden = !element;
         if (element) {
             const rect = App.transform.readRect(element);
             App.transform.writeRect(box, rect);
             placeShapeHandles(element, rect);
         }
+        drawOutlines(selectedIds.length > 1 ? App.selection.getElements() : []);
     };
 
     // ---------------------------------------------------------------
@@ -275,6 +352,22 @@
             }
             App.text.stopPainter();
         }
+        // Shift / Ctrl + click: add the element or take it out (on empty slide: a rubber band that adds).
+        if ((event.shiftKey || event.ctrlKey || event.metaKey) && event.button === 0) {
+            if (element) {
+                App.selection.toggle(element);
+            } else {
+                startBand(event, true);
+            }
+            return;
+        }
+        // One of several selected: a drag moves them all; a right-click keeps them for the menu.
+        if (element && selectedIds.length > 1 && App.selection.isSelected(element)) {
+            if (event.button === 0) {
+                startDrag(event, 'move', null);
+            }
+            return;
+        }
         // In a table: a column border drags; in its cells a click types in the cell, a drag selects cells (tablecontrols.js).
         const border = event.button === 0 && inTableCells(element, point) ? App.tableControls.borderAt(element, point) : -1;
         if (border >= 0) {
@@ -291,7 +384,67 @@
         App.selection.select(element);
         if (element && event.button === 0) {
             startDrag(event, 'move', null);
+        } else if (!element && event.button === 0) {
+            startBand(event, false);
         }
+    }
+
+    // ---------------------------------------------------------------
+    // Rubber band: a drag from empty slide selects what it covers wholly
+    // ---------------------------------------------------------------
+
+    function startBand(downEvent, adding) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        const start = toSlidePoint(downEvent);
+        const zoom = App.canvas.getZoom();
+        const kept = adding ? selectedIds.slice() : [];   // Shift: the band adds to these
+        overlay.setPointerCapture(downEvent.pointerId);
+
+        function onMove(event) {
+            const point = toSlidePoint(event);
+            if (!band) {
+                if (Math.hypot(point.x - start.x, point.y - start.y) * zoom < DRAG_THRESHOLD) {
+                    return;
+                }
+                band = App.util.el('div', { class: 'rubber-band' });
+                overlay.appendChild(band);
+            }
+            const rect = App.transform.bandRect(start, point);
+            App.transform.writeRect(band, rect);
+            const caught = App.transform.topLevelElements(slide)
+                .filter((element) => App.transform.containsRect(rect, App.transform.readRect(element)))
+                .map((element) => element.getAttribute('data-id'))
+                .filter((id) => !kept.includes(id));
+            setIds(kept.concat(caught));
+        }
+
+        function finish() {
+            overlay.removeEventListener('pointermove', onMove);
+            overlay.removeEventListener('pointerup', finish);
+            overlay.removeEventListener('pointercancel', finish);
+            window.removeEventListener('keydown', onKey, true);
+            if (band) {
+                band.remove();
+                band = null;
+            }
+        }
+
+        function onKey(event) {
+            if (event.key === 'Escape' && band) {
+                event.stopPropagation();
+                event.preventDefault();
+                setIds(kept);
+                finish();
+            }
+        }
+
+        overlay.addEventListener('pointermove', onMove);
+        overlay.addEventListener('pointerup', finish);
+        overlay.addEventListener('pointercancel', finish);
+        window.addEventListener('keydown', onKey, true);
     }
 
     // ---------------------------------------------------------------
@@ -385,12 +538,15 @@
      * always do); on a line's end it snaps to 45 degrees.
      */
     function startDrag(downEvent, kind, handle) {
-        const element = App.selection.getElement();
+        // A move takes every selected element along; the other kinds work on the one selected.
+        const elements = kind === 'move' ? App.selection.getElements() : [App.selection.getElement()].filter(Boolean);
+        const element = elements[0];
         const slide = App.deck.getCurrentSlide();
         if (!element || !slide) {
             return;
         }
-        const startRect = App.transform.readRect(element);
+        const startRects = elements.map((item) => App.transform.readRect(item));
+        const startRect = startRects[0];
         const startFlip = element.getAttribute('data-flip') || '';
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
@@ -414,11 +570,11 @@
             } else if (kind === 'adjust') {
                 App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
                     startRect.height, { x: point.x - startRect.left, y: point.y - startRect.top }));
+            } else if (kind === 'move') {
+                elements.forEach((item, i) => App.transform.writeRect(item, App.transform.moveRect(startRects[i], dx, dy)));
             } else {
-                App.transform.writeRect(element, kind === 'move'
-                    ? App.transform.moveRect(startRect, dx, dy)
-                    : App.transform.resizeRect(startRect, handle, dx, dy,
-                        App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey)));
+                App.transform.writeRect(element, App.transform.resizeRect(startRect, handle, dx, dy,
+                    App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey)));
             }
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live

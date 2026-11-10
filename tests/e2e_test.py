@@ -3386,6 +3386,100 @@ def test_speaker_notes(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_add_duplicate_delete_slides(browser):
+    """Phase 7: New Slide from the layout gallery (title placed like the deck's titles), Ctrl+M, Duplicate Slide
+    (right-click, Ctrl+D in the rail), Delete Slide (Delete in the rail); each one undo step that shows its slide;
+    thumbnails follow; never the last slide; saved and reopened."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    state = """() => { const s = App.deck.getCurrentSlide(); return { count: App.deck.getSlides().length,
+        index: App.deck.getCurrentIndex(), id: s.getAttribute('data-slide-id'), layout: s.getAttribute('data-layout'),
+        texts: Array.from(s.querySelectorAll(':scope > .el'), (e) => e.textContent),
+        notes: App.notes.textOf(s), thumbs: document.querySelectorAll('#thumbnail-rail .thumb').length,
+        label: App.history.undoLabel() }; }"""
+    now = lambda: page.evaluate(state)  # noqa: E731
+    unique_ids = """() => { const ids = Array.from(App.deck.getDocument().querySelectorAll('[data-id]'), (n) => n.getAttribute('data-id'));
+        return ids.length === new Set(ids).size; }"""
+    title_rect = """() => App.transform.readRect(App.slides.titleOf(App.deck.getCurrentSlide()))"""
+
+    # Home > New Slide ▾ > Two Content, from slide 2: a new slide 3, its title where the deck's titles are.
+    page.evaluate("App.deck.goTo(1)")
+    page.click(".ribbon-button.new-slide-button")
+    check(page.locator(".slide-layout-item").count() == 4, "four layouts")
+    page.screenshot(path=str(OUTPUT / "74-new-slide-layouts.png"))
+    page.click(".slide-layout-item[data-layout='two-columns']")
+    after = now()
+    check(after["count"] == 7 and after["index"] == 2 and after["layout"] == "two-columns" and after["thumbs"] == 7 and
+          after["label"] == "New slide", f"a new slide after slide 2: {after}")
+    check(after["texts"] == ["Título do slide", "Primeiro ponto", "Primeiro ponto"], after["texts"])
+    check(page.evaluate(title_rect) == {"left": 64, "top": 48, "width": 1152, "height": 60}, page.evaluate(title_rect))
+    check(page.evaluate(unique_ids), "element ids stay unique")
+    page.screenshot(path=str(OUTPUT / "75-new-slide.png"))
+    new_id = after["id"]
+
+    # One undo step: Ctrl+Z takes it away and shows slide 2 again; Ctrl+Y brings it back, shown.
+    page.keyboard.press("Control+z")
+    check(now()["count"] == 6 and now()["index"] == 1 and now()["thumbs"] == 6, f"undone: {now()}")
+    page.keyboard.press("Control+y")
+    check(now()["count"] == 7 and now()["id"] == new_id and now()["thumbs"] == 7, f"redone: {now()}")
+
+    # Ctrl+M on the title slide: Title and Content (not another title slide), after it.
+    page.evaluate("App.deck.goTo(0)")
+    page.keyboard.press("Control+m")
+    check(now()["index"] == 1 and now()["layout"] == "title-content" and now()["count"] == 8, f"Ctrl+M: {now()}")
+
+    # Right-click slide 3 (Sumário executivo) in the rail > Duplicate Slide: the copy right after it, notes and all.
+    page.click("#thumbnail-rail .thumb[data-index='2']", button="right")
+    check(now()["index"] == 2, "right-click shows the slide")
+    page.click(".context-menu .menu-label:text-is('Duplicate Slide')")
+    copy = now()
+    check(copy["index"] == 3 and copy["texts"][0] == "Sumário executivo" and copy["label"] == "Duplicate slide" and
+          copy["notes"].startswith("Reforçar"), f"the copy: {copy}")
+    check(page.evaluate(unique_ids), "the copy's elements have new ids")
+
+    # Ctrl+D in the rail duplicates too; Delete in the rail deletes the slide shown, the next one is shown.
+    page.focus("#thumbnail-rail .thumb[data-index='3']")
+    page.keyboard.press("Control+d")
+    check(now()["count"] == 10 and now()["index"] == 4, f"Ctrl+D in the rail: {now()}")
+    page.focus("#thumbnail-rail .thumb[data-index='4']")
+    page.keyboard.press("Delete")
+    check(now()["count"] == 9 and now()["index"] == 4 and now()["label"] == "Delete slide", f"deleted: {now()}")
+    shown_after_delete = now()["id"]
+    page.keyboard.press("Control+z")
+    check(now()["count"] == 10 and now()["index"] == 4 and now()["texts"][0] == "Sumário executivo", f"undo: back, shown: {now()}")
+    page.keyboard.press("Control+y")
+    check(now()["count"] == 9 and now()["id"] == shown_after_delete, f"redo: deleted again: {now()}")
+
+    # Delete twice in a row in the rail: the focus stays on the slide shown.
+    page.keyboard.press("Delete")
+    page.keyboard.press("Delete")
+    check(now()["count"] == 7, f"two deletes: {now()}")
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(now()["count"] == 9, f"both undone: {now()}")
+
+    # The ribbon's Delete Slide, on the Ctrl+M slide: the next one (Sumário executivo) is shown.
+    page.evaluate("App.deck.goTo(1)")
+    page.click(".ribbon-button[data-command='deleteSlide']")
+    check(now()["count"] == 8 and now()["index"] == 1 and now()["texts"][0] == "Sumário executivo",
+          f"ribbon delete, the next one shown: {now()}")
+    page.screenshot(path=str(OUTPUT / "76-slides-after-delete.png"))
+
+    # Saved and reopened: the new slides and their layouts are there.
+    saved = editor.save_as_download("slides-saved.html")
+    editor.open(saved)
+    layouts = page.evaluate("App.deck.getSlides().map((s) => s.getAttribute('data-layout'))")
+    check(layouts == ["title", "title-content", "title-content", "two-columns", "title-content", "title-content",
+                      "title-content", "two-columns"], f"saved: {layouts}")
+    check(page.evaluate(unique_ids), "unique ids after reopening")
+
+    # Never the last slide: Delete Slide greys out with one left.
+    page.evaluate("() => { while (App.slides.canRemove()) App.slides.remove(); }")
+    check(editor.slide_count() == 1 and page.is_disabled(".ribbon-button[data-command='deleteSlide']"), "one slide kept")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -3750,11 +3844,15 @@ def test_nudge_delete_clipboard_and_order(browser):
     check(order[0] == "e1", f"logo at the back: {order}")
     page.screenshot(path=str(OUTPUT / "13-arrange.png"))
 
-    # Working in the slide rail clears the element selection, so Delete there never removes an element.
+    # Working in the slide rail clears the element selection: Delete there deletes the slide (Phase 7), not the element.
     page.click(".thumb[data-index='0']")
     check(page.evaluate(selected) is None, "clicking a thumbnail deselects the element")
+    slides = editor.slide_count()
     page.keyboard.press("Delete")
-    check(page.evaluate("!!App.deck.getDocument().querySelector('[data-id=\"e1\"]')"), "Delete in the rail kept e1")
+    check(editor.slide_count() == slides - 1 and page.evaluate("App.history.undoLabel()") == "Delete slide",
+          "Delete in the rail deletes the slide")
+    page.keyboard.press("Control+z")
+    check(page.evaluate("!!App.deck.getDocument().querySelector('[data-id=\"e1\"]')"), "undo: the slide and e1 back")
 
     check(page.evaluate(undo_steps) >= 6, "every action was an undo step")
     check(editor.errors == [], f"no errors: {editor.errors}")
@@ -4464,6 +4562,7 @@ TESTS = [
     test_chart_label_numbers,
     test_phase6_done_when,
     test_speaker_notes,
+    test_add_duplicate_delete_slides,
 ]
 
 

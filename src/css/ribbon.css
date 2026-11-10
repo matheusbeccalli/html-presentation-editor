@@ -191,3 +191,12 @@
 #autosave-toggle[aria-checked="true"] .autosave-switch { background: rgba(255, 255, 255, 0.35); }
 #autosave-toggle[aria-checked="true"] .autosave-knob { left: 16px; }
 .autosave-state { min-width: 20px; text-align: left; }
+/* Home > New Slide: the layout gallery (slides.js), a drawing and a name per layout. */
+.slide-layout-gallery { min-width: 0; padding: 6px; }
+.slide-layout-gallery:focus { outline: none; }
+.slide-layout-grid { display: grid; grid-template-columns: repeat(2, 120px); gap: 4px; }
+.slide-layout-item {
+    display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; border: 1px solid transparent;
+    border-radius: 4px; background: none; color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+}
+.slide-layout-item:hover, .slide-layout-item:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }

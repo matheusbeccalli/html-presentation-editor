@@ -58,6 +58,7 @@ App.start = function start() {
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
+    App.slides.init();     // after deck: undo shows the slide the step was about
     App.text.init();
     App.elements.init();
     App.images.init();

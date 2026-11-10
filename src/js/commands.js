@@ -129,6 +129,12 @@
         App.commands.define('previousSlide', { label: 'Previous slide', run: () => App.deck.previous(), isEnabled: hasDeck });
         App.commands.define('firstSlide', { label: 'First slide', run: () => App.deck.first(), isEnabled: hasDeck });
         App.commands.define('lastSlide', { label: 'Last slide', run: () => App.deck.last(), isEnabled: hasDeck });
+        // Slides (slides.js): New Slide takes a layout from the gallery, or picks one like the slide shown.
+        App.commands.define('newSlide', { label: 'New Slide', run: (layout) => App.slides.add(layout), isEnabled: hasDeck });
+        App.commands.define('duplicateSlide', { label: 'Duplicate Slide', run: () => App.slides.duplicate(), isEnabled: hasDeck });
+        App.commands.define('deleteSlide', {
+            label: 'Delete Slide', run: () => App.slides.remove(), isEnabled: () => hasDeck() && App.slides.canRemove(),
+        });
 
         // ---- Selected element (elements.js) ----
         const hasSelection = () => App.elements.hasSelection();

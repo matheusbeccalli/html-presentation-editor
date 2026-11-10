@@ -12,7 +12,8 @@
  *     (debounced), so typing does not redraw on every key press.
  *
  * Talks to: deck.js (reads slides, goTo on click), events from history.js,
- *           selection.js (working in the rail clears the element selection).
+ *           selection.js (working in the rail clears the element selection),
+ *           commands.js and contextmenu.js (slide actions: keys and right-click, Phase 7).
  */
 
 (function () {
@@ -40,18 +41,53 @@
         // Working in the rail means working on slides, not on an element (as in PowerPoint):
         // without this, Delete or the arrow keys here would act on the element still selected.
         rail.addEventListener('pointerdown', () => App.selection.clear());
-        rail.addEventListener('focusin', () => App.selection.clear());
-
-        rail.addEventListener('keydown', (event) => {
-            if (event.key === 'ArrowDown') {
-                event.preventDefault();
-                App.deck.next();
-            } else if (event.key === 'ArrowUp') {
-                event.preventDefault();
-                App.deck.previous();
+        rail.addEventListener('focusin', (event) => {
+            App.selection.clear();
+            // A thumbnail reached with Tab is the slide shown, so the rail's keys act on it.
+            const item = event.target.closest('.thumb');
+            if (item && Number(item.getAttribute('data-index')) !== App.deck.getCurrentIndex()) {
+                App.deck.goTo(Number(item.getAttribute('data-index')));
             }
         });
+
+        rail.addEventListener('keydown', onRailKey);
+
+        // Right-click a slide: it is shown, and the menu has the slide actions (on the empty rail: New Slide).
+        rail.addEventListener('contextmenu', (event) => {
+            if (!App.state.hasDeck) {
+                return;
+            }
+            event.preventDefault();
+            const item = event.target.closest('.thumb');
+            if (item) {
+                App.deck.goTo(Number(item.getAttribute('data-index')));
+                item.focus();
+            }
+            App.contextMenu.openWith(item ? SLIDE_ITEMS : ['newSlide'], event.clientX, event.clientY);
+        });
     };
+
+    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide'];
+
+    // Keys in the rail work on slides, as in PowerPoint's slide pane (the editor's own shortcuts do not run).
+    const RAIL_KEYS = {
+        ArrowDown: () => App.deck.next(),
+        ArrowUp: () => App.deck.previous(),
+        Enter: () => App.commands.run('newSlide'),
+        Delete: () => App.commands.run('deleteSlide'),
+        Backspace: () => App.commands.run('deleteSlide'),
+        'Ctrl+D': () => App.commands.run('duplicateSlide'),
+    };
+
+    function onRailKey(event) {
+        const action = RAIL_KEYS[App.shortcuts.comboFromEvent(event)];
+        if (!action || !App.state.hasDeck) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        action();
+    }
 
     /*
      * A stand-alone miniature of `slide` (from document `sourceDoc`, whose
@@ -88,6 +124,8 @@
     };
 
     function rebuild() {
+        // Adding, deleting or undoing draws the rail again; the keyboard stays in it (Delete, Delete ...).
+        const hadFocus = rail.contains(document.activeElement);
         observer.disconnect();
         rail.innerHTML = '';
         App.deck.getSlides().forEach((slide, index) => {
@@ -96,6 +134,9 @@
             observer.observe(item);
         });
         highlightCurrent();
+        if (hadFocus && rail.querySelector('.thumb-current')) {
+            rail.querySelector('.thumb-current').focus();
+        }
     }
 
     function createItem(slide, index) {
@@ -184,8 +225,8 @@
         if (!info || !info.scope) {
             return;
         }
-        if (info.scope === 'deck') {
-            rebuild();   // slides may have been added, removed or restyled
+        if (info.scope === 'deck' || info.scope.slides) {
+            rebuild();   // slides may have been added, removed, moved or restyled
             return;
         }
         const index = App.deck.getSlides().findIndex((slide) => slide.getAttribute('data-slide-id') === info.scope.slideId);
@@ -203,6 +244,10 @@
             item.setAttribute('aria-current', isCurrent ? 'true' : 'false');
             if (isCurrent) {
                 item.scrollIntoView({ block: 'nearest' });
+                // While the keyboard is in the rail, it moves with the slide shown.
+                if (rail.contains(document.activeElement) && document.activeElement !== item) {
+                    item.focus();
+                }
             }
         });
     }

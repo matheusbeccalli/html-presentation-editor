@@ -1,5 +1,6 @@
 /*
- * contextmenu.js - the right-click menu on the slide (SPEC 4, Phase 2).
+ * contextmenu.js - the right-click menu on the slide (SPEC 4, Phase 2), and on the
+ * slide rail (openWith: New / Duplicate / Delete Slide, Phase 7, thumbnails.js).
  *
  * Right-click on an element: it is selected (selection.js does that on
  * pointerdown) and the menu lists the element actions. Right-click on empty
@@ -54,7 +55,11 @@
     /* Open the menu with its top-left corner at screen point (x, y). */
     App.contextMenu.open = function open(x, y) {
         const element = App.selection.getElement();
-        const commands = !element ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS;
+        App.contextMenu.openWith(!element ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS, x, y);
+    };
+
+    /* Open the menu listing `commands` ('-' = a line) at screen point (x, y); the slide rail's menu. */
+    App.contextMenu.openWith = function openWith(commands, x, y) {
         menu.innerHTML = '';
         commands.forEach((command) => menu.appendChild(command === '-' ? separator() : item(command)));
         menu.hidden = false;

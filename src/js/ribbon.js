@@ -7,7 +7,7 @@
  * fills them. Buttons only name a command; commands.js does the work.
  *
  * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips),
- *           textcontrols.js, tablecontrols.js, tabledesign.js and shapecontrols.js (controls that show a value or open a picker).
+ *           textcontrols.js, tablecontrols.js, tabledesign.js, shapecontrols.js and slides.js (controls that show a value or open a picker).
  */
 
 (function () {
@@ -42,7 +42,8 @@
                     [['alignLeft', 'alignLeft'], ['alignCenter', 'alignCenter'], ['alignRight', 'alignRight'],
                         ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }]],
                 },
-                { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
+                { label: 'Slides', commands: [{ control: 'newSlide' }, ['duplicateSlide', 'duplicateSlide'],
+                    ['deleteSlide', 'deleteSlide'], ['previousSlide', 'previous'], ['nextSlide', 'next']] },
                 // Small buttons with their names, stacked, as PowerPoint's Editing group.
                 { label: 'Editing', rows: [[{ command: 'find', icon: 'find' }], [{ command: 'replace', icon: 'replace' }]] },
             ],
@@ -188,7 +189,7 @@
 
     /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
     function createControl(name) {
-        return App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
+        return App.slides.create(name) || App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
             App.chartControls.create(name) || App.textControls.create(name);
     }
 
@@ -343,5 +344,6 @@
         App.tableDesign.refresh();
         App.shapeControls.refresh();
         App.chartControls.refresh();
+        App.slides.refresh();
     };
 })();

@@ -60,6 +60,103 @@ test('history: deck scope snapshots head and body', () => {
     assertEqual(doc.querySelectorAll('style').length, 1);
 });
 
+function slideIds(doc) {
+    return Array.from(doc.querySelectorAll('section.slide'), (slide) => slide.getAttribute('data-slide-id')).join(',');
+}
+
+function deckWithThreeSlidesAndMaster() {
+    return parseDoc(
+        '<html><head></head><body>' +
+        '<section class="slide" data-slide-id="s1"><div class="el" data-id="e1">One</div></section>' +
+        '<section class="slide" data-slide-id="s2"><div class="el" data-id="e2">Two</div></section>' +
+        '<section class="slide" data-slide-id="s3"><div class="el" data-id="e3">Three</div></section>' +
+        '<div class="master"><div class="el" data-id="m1">Logo</div></div>' +
+        '</body></html>'
+    );
+}
+
+test('history: slides scope - deleting a slide is undone in place and redone', () => {
+    const doc = deckWithThreeSlidesAndMaster();
+    const history = App.createHistory({ getDoc: () => doc });
+    history.change('Delete slide', { slides: ['s2'] }, () => doc.querySelector('[data-slide-id="s2"]').remove());
+    assertEqual(slideIds(doc), 's1,s3');
+    history.undo();
+    assertEqual(slideIds(doc), 's1,s2,s3', 'back in its place');
+    assertEqual(textOf(doc, 'e2'), 'Two', 'with its content');
+    history.redo();
+    assertEqual(slideIds(doc), 's1,s3', 'deleted again');
+    assertEqual(doc.body.lastElementChild.className, 'master', 'the master stays where it was');
+});
+
+test('history: slides scope - an added slide goes on undo and comes back on redo', () => {
+    const doc = deckWithThreeSlidesAndMaster();
+    const history = App.createHistory({ getDoc: () => doc });
+    history.change('New slide', { slides: ['s9'] }, () => {
+        const slide = doc.createElement('section');
+        slide.className = 'slide';
+        slide.setAttribute('data-slide-id', 's9');
+        slide.innerHTML = '<div class="el" data-id="e9">Nine</div>';
+        doc.querySelector('[data-slide-id="s1"]').after(slide);
+    });
+    assertEqual(slideIds(doc), 's1,s9,s2,s3');
+    history.undo();
+    assertEqual(slideIds(doc), 's1,s2,s3');
+    history.redo();
+    assertEqual(slideIds(doc), 's1,s9,s2,s3', 'in the same place');
+    assertEqual(textOf(doc, 'e9'), 'Nine');
+});
+
+test('history: slides scope - the slide order is undone (no slide listed)', () => {
+    const doc = deckWithThreeSlidesAndMaster();
+    const history = App.createHistory({ getDoc: () => doc });
+    history.change('Move slide', { slides: [] }, () => {
+        doc.querySelector('[data-slide-id="s3"]').after(doc.querySelector('[data-slide-id="s1"]'));
+    });
+    assertEqual(slideIds(doc), 's2,s3,s1');
+    history.undo();
+    assertEqual(slideIds(doc), 's1,s2,s3');
+    history.redo();
+    assertEqual(slideIds(doc), 's2,s3,s1');
+});
+
+test('history: slides scope - only the listed slides are copied, the others are the live ones', () => {
+    const doc = deckWithThreeSlidesAndMaster();
+    const history = App.createHistory({ getDoc: () => doc });
+    const s1 = doc.querySelector('[data-slide-id="s1"]');
+    history.change('Delete slide', { slides: ['s2'] }, () => doc.querySelector('[data-slide-id="s2"]').remove());
+    history.undo();
+    assert(doc.querySelector('[data-slide-id="s1"]') === s1, 'slide 1 was not rebuilt from a copy');
+});
+
+test('history: slides scope - slide edits before and after a delete undo in the right order', () => {
+    const doc = deckWithThreeSlidesAndMaster();
+    const history = App.createHistory({ getDoc: () => doc });
+    history.change('Edit', { slideId: 's2' }, () => {
+        doc.querySelector('[data-id="e2"]').textContent = 'Edited';
+    });
+    history.change('Delete slide', { slides: ['s2'] }, () => doc.querySelector('[data-slide-id="s2"]').remove());
+    history.undo();
+    assertEqual(textOf(doc, 'e2'), 'Edited');
+    history.undo();
+    assertEqual(textOf(doc, 'e2'), 'Two');
+    history.redo();
+    history.redo();
+    assertEqual(slideIds(doc), 's1,s3');
+    history.undo();
+    assertEqual(textOf(doc, 'e2'), 'Edited', 'the deleted slide as it was when deleted');
+});
+
+test('history: slides scope - a failed change puts the slides back', () => {
+    const doc = deckWithThreeSlidesAndMaster();
+    const history = App.createHistory({ getDoc: () => doc });
+    assertThrows(() => history.change('Delete slide', { slides: ['s2'] }, () => {
+        doc.querySelector('[data-slide-id="s2"]').remove();
+        throw new Error('boom');
+    }));
+    assertEqual(slideIds(doc), 's1,s2,s3');
+    assert(!history.canUndo(), 'nothing recorded');
+});
+
 test('history: a new change clears the redo stack', () => {
     const doc = deckWithTwoSlides();
     const history = App.createHistory({ getDoc: () => doc });

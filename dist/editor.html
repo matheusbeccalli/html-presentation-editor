@@ -329,6 +329,15 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 #autosave-toggle[aria-checked="true"] .autosave-switch { background: rgba(255, 255, 255, 0.35); }
 #autosave-toggle[aria-checked="true"] .autosave-knob { left: 16px; }
 .autosave-state { min-width: 20px; text-align: left; }
+/* Home > New Slide: the layout gallery (slides.js), a drawing and a name per layout. */
+.slide-layout-gallery { min-width: 0; padding: 6px; }
+.slide-layout-gallery:focus { outline: none; }
+.slide-layout-grid { display: grid; grid-template-columns: repeat(2, 120px); gap: 4px; }
+.slide-layout-item {
+    display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; border: 1px solid transparent;
+    border-radius: 4px; background: none; color: var(--text); font: inherit; font-size: 12px; cursor: pointer;
+}
+.slide-layout-item:hover, .slide-layout-item:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }
 
 </style>
 <style>
@@ -1029,6 +1038,7 @@ App.start = function start() {
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
+    App.slides.init();     // after deck: undo shows the slide the step was about
     App.text.init();
     App.elements.init();
     App.images.init();
@@ -1453,6 +1463,8 @@ App.createEventBus = function createEventBus() {
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
         ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],
         ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
+        // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).
+        ['Ctrl+M', 'newSlide', { blockBrowserDefault: true }],
         ['Shift+F10', 'contextMenu'],
         ['ContextMenu', 'contextMenu'],
     ];
@@ -1510,8 +1522,13 @@ App.createEventBus = function createEventBus() {
  *
  * Scope of a change:
  *   { slideId: 's3' }  -> snapshot of that slide only (fast, the common case)
+ *   { slides: ['s7'] } -> the slide order, plus a copy of the slides listed
+ *                         (Phase 7: adding, duplicating, deleting slides; the
+ *                         list is the slide that comes or goes, [] to reorder).
+ *                         The other slides are not copied: undo puts the live
+ *                         ones back in the old order, so a 20 MB deck stays cheap.
  *   'deck'             -> snapshot of the whole <head> and <body> (theme,
- *                         adding/removing slides, removing blocked fonts ...)
+ *                         Replace All, removing blocked fonts ...)
  *
  * Meta (Phase 3): a step may carry `meta`, any object the caller wants back
  * when the step is undone or redone (text editing keeps the cursor position
@@ -1553,10 +1570,56 @@ App.createHistory = function createHistory(options) {
         return slide;
     }
 
+    function slidesOf(doc) {
+        return Array.from(doc.querySelectorAll('section.slide'));
+    }
+
+    /* The slide order, and the HTML of the listed slides that exist now. */
+    function takeSlides(doc, listed) {
+        const slides = slidesOf(doc);
+        const html = {};
+        slides.filter((slide) => listed.includes(slide.getAttribute('data-slide-id')))
+            .forEach((slide) => { html[slide.getAttribute('data-slide-id')] = slide.outerHTML; });
+        return { order: slides.map((slide) => slide.getAttribute('data-slide-id')), html: html };
+    }
+
+    /*
+     * Put the slides back in the snapshot's order: a listed slide from its copy
+     * (or gone, if it had none), any other one is the live slide. They go where
+     * the first slide is now, so the master and other blocks keep their place.
+     */
+    function restoreSlides(doc, snapshot) {
+        const live = new Map(slidesOf(doc).map((slide) => [slide.getAttribute('data-slide-id'), slide]));
+        const wanted = snapshot.order.map((id) => {
+            if (Object.prototype.hasOwnProperty.call(snapshot.html, id)) {
+                const template = doc.createElement('template');
+                template.innerHTML = snapshot.html[id];
+                return doc.importNode(template.content.firstElementChild, true);
+            }
+            if (!live.has(id)) {
+                throw new Error('Undo: slide "' + id + '" not found');
+            }
+            return live.get(id);
+        });
+        const first = live.size ? live.values().next().value : null;
+        const marker = doc.createComment('slides');
+        if (first) {
+            first.before(marker);
+        } else {
+            doc.body.appendChild(marker);
+        }
+        live.forEach((slide) => slide.remove());
+        wanted.forEach((slide) => marker.before(slide));
+        marker.remove();
+    }
+
     function takeSnapshot(scope) {
         const doc = getDoc();
         if (scope === 'deck') {
             return { head: doc.head.innerHTML, body: doc.body.innerHTML };
+        }
+        if (scope.slides) {
+            return takeSlides(doc, scope.slides);
         }
         return findSlide(doc, scope.slideId).outerHTML;
     }
@@ -1568,13 +1631,17 @@ App.createHistory = function createHistory(options) {
             doc.body.innerHTML = snapshot.body;
             return;
         }
+        if (scope.slides) {
+            restoreSlides(doc, snapshot);
+            return;
+        }
         // Setting outerHTML replaces the slide element with one parsed from the string.
         findSlide(doc, scope.slideId).outerHTML = snapshot;
     }
 
     function validateScope(scope) {
-        if (scope !== 'deck' && !(scope && scope.slideId)) {
-            throw new Error("History scope must be 'deck' or { slideId: '...' }");
+        if (scope !== 'deck' && !(scope && (scope.slideId || Array.isArray(scope.slides)))) {
+            throw new Error("History scope must be 'deck', { slideId: '...' } or { slides: [...] }");
         }
     }
 
@@ -3913,7 +3980,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /*
      * Replace the text of a container by `lines` of plain text, all bold and / or
-     * italic when look.bold / look.italic (cells pasted from Excel).
+     * italic when look.bold / look.italic (cells pasted from Excel), as a list
+     * when look.list is 'bullet' or 'number' (the body of a new slide).
      */
     App.text.writeLines = function writeLines(container, lines, look) {
         const doc = container.ownerDocument;
@@ -3927,6 +3995,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             return p;
         }));
         App.text.normalizeCell(container);
+        if (look && look.list) {
+            Array.from(container.children).forEach((p) => p.setAttribute('data-list', look.list));
+        }
     };
 
     /* Remove all the text of a container (selected table cells + Delete), leaving one empty line. */
@@ -10788,6 +10859,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         redo: '<path d="M12.5 5L16 8.5 12.5 12"/><path d="M16 8.5H8a4 4 0 0 0 0 8h3"/>',
         previous: '<path d="M12.5 4.5L7 10l5.5 5.5"/>',
         next: '<path d="M7.5 4.5L13 10l-5.5 5.5"/>',
+        newSlide: '<rect x="2.5" y="4.5" width="13" height="9" rx="1"/><path d="M5 7.5h6M5 10h4M16 12v6M13 15h6"/>',
+        duplicateSlide: '<rect x="2.5" y="3" width="11" height="7.5" rx="1"/><rect x="6.5" y="9.5" width="11" height="7.5" rx="1"/>',
+        deleteSlide: '<rect x="2.5" y="3.5" width="13" height="9" rx="1"/><path d="M12 13l5 5M17 13l-5 5"/>',
         warning: '<path d="M10 2.5l8 14.5H2z"/><path d="M10 8v4.5"/><circle cx="10" cy="14.8" r="0.4"/>',
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
         check: '<path d="M4 10.5l4 4 8-9"/>',
@@ -12935,7 +13009,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 <script>
 // ---- js/contextmenu.js ----
 /*
- * contextmenu.js - the right-click menu on the slide (SPEC 4, Phase 2).
+ * contextmenu.js - the right-click menu on the slide (SPEC 4, Phase 2), and on the
+ * slide rail (openWith: New / Duplicate / Delete Slide, Phase 7, thumbnails.js).
  *
  * Right-click on an element: it is selected (selection.js does that on
  * pointerdown) and the menu lists the element actions. Right-click on empty
@@ -12990,7 +13065,11 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* Open the menu with its top-left corner at screen point (x, y). */
     App.contextMenu.open = function open(x, y) {
         const element = App.selection.getElement();
-        const commands = !element ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS;
+        App.contextMenu.openWith(!element ? EMPTY_SLIDE_ITEMS : App.images.isPictureSelected() ? PICTURE_ITEMS : ELEMENT_ITEMS, x, y);
+    };
+
+    /* Open the menu listing `commands` ('-' = a line) at screen point (x, y); the slide rail's menu. */
+    App.contextMenu.openWith = function openWith(commands, x, y) {
         menu.innerHTML = '';
         commands.forEach((command) => menu.appendChild(command === '-' ? separator() : item(command)));
         menu.hidden = false;
@@ -13085,7 +13164,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  *     (debounced), so typing does not redraw on every key press.
  *
  * Talks to: deck.js (reads slides, goTo on click), events from history.js,
- *           selection.js (working in the rail clears the element selection).
+ *           selection.js (working in the rail clears the element selection),
+ *           commands.js and contextmenu.js (slide actions: keys and right-click, Phase 7).
  */
 
 (function () {
@@ -13113,18 +13193,53 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Working in the rail means working on slides, not on an element (as in PowerPoint):
         // without this, Delete or the arrow keys here would act on the element still selected.
         rail.addEventListener('pointerdown', () => App.selection.clear());
-        rail.addEventListener('focusin', () => App.selection.clear());
-
-        rail.addEventListener('keydown', (event) => {
-            if (event.key === 'ArrowDown') {
-                event.preventDefault();
-                App.deck.next();
-            } else if (event.key === 'ArrowUp') {
-                event.preventDefault();
-                App.deck.previous();
+        rail.addEventListener('focusin', (event) => {
+            App.selection.clear();
+            // A thumbnail reached with Tab is the slide shown, so the rail's keys act on it.
+            const item = event.target.closest('.thumb');
+            if (item && Number(item.getAttribute('data-index')) !== App.deck.getCurrentIndex()) {
+                App.deck.goTo(Number(item.getAttribute('data-index')));
             }
         });
+
+        rail.addEventListener('keydown', onRailKey);
+
+        // Right-click a slide: it is shown, and the menu has the slide actions (on the empty rail: New Slide).
+        rail.addEventListener('contextmenu', (event) => {
+            if (!App.state.hasDeck) {
+                return;
+            }
+            event.preventDefault();
+            const item = event.target.closest('.thumb');
+            if (item) {
+                App.deck.goTo(Number(item.getAttribute('data-index')));
+                item.focus();
+            }
+            App.contextMenu.openWith(item ? SLIDE_ITEMS : ['newSlide'], event.clientX, event.clientY);
+        });
     };
+
+    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide'];
+
+    // Keys in the rail work on slides, as in PowerPoint's slide pane (the editor's own shortcuts do not run).
+    const RAIL_KEYS = {
+        ArrowDown: () => App.deck.next(),
+        ArrowUp: () => App.deck.previous(),
+        Enter: () => App.commands.run('newSlide'),
+        Delete: () => App.commands.run('deleteSlide'),
+        Backspace: () => App.commands.run('deleteSlide'),
+        'Ctrl+D': () => App.commands.run('duplicateSlide'),
+    };
+
+    function onRailKey(event) {
+        const action = RAIL_KEYS[App.shortcuts.comboFromEvent(event)];
+        if (!action || !App.state.hasDeck) {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        action();
+    }
 
     /*
      * A stand-alone miniature of `slide` (from document `sourceDoc`, whose
@@ -13161,6 +13276,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     function rebuild() {
+        // Adding, deleting or undoing draws the rail again; the keyboard stays in it (Delete, Delete ...).
+        const hadFocus = rail.contains(document.activeElement);
         observer.disconnect();
         rail.innerHTML = '';
         App.deck.getSlides().forEach((slide, index) => {
@@ -13169,6 +13286,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             observer.observe(item);
         });
         highlightCurrent();
+        if (hadFocus && rail.querySelector('.thumb-current')) {
+            rail.querySelector('.thumb-current').focus();
+        }
     }
 
     function createItem(slide, index) {
@@ -13257,8 +13377,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (!info || !info.scope) {
             return;
         }
-        if (info.scope === 'deck') {
-            rebuild();   // slides may have been added, removed or restyled
+        if (info.scope === 'deck' || info.scope.slides) {
+            rebuild();   // slides may have been added, removed, moved or restyled
             return;
         }
         const index = App.deck.getSlides().findIndex((slide) => slide.getAttribute('data-slide-id') === info.scope.slideId);
@@ -13276,6 +13396,10 @@ App.template.newDeckHtml = function newDeckHtml() {
             item.setAttribute('aria-current', isCurrent ? 'true' : 'false');
             if (isCurrent) {
                 item.scrollIntoView({ block: 'nearest' });
+                // While the keyboard is in the rail, it moves with the slide shown.
+                if (rail.contains(document.activeElement) && document.activeElement !== item) {
+                    item.focus();
+                }
             }
         });
     }
@@ -15331,6 +15455,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('previousSlide', { label: 'Previous slide', run: () => App.deck.previous(), isEnabled: hasDeck });
         App.commands.define('firstSlide', { label: 'First slide', run: () => App.deck.first(), isEnabled: hasDeck });
         App.commands.define('lastSlide', { label: 'Last slide', run: () => App.deck.last(), isEnabled: hasDeck });
+        // Slides (slides.js): New Slide takes a layout from the gallery, or picks one like the slide shown.
+        App.commands.define('newSlide', { label: 'New Slide', run: (layout) => App.slides.add(layout), isEnabled: hasDeck });
+        App.commands.define('duplicateSlide', { label: 'Duplicate Slide', run: () => App.slides.duplicate(), isEnabled: hasDeck });
+        App.commands.define('deleteSlide', {
+            label: 'Delete Slide', run: () => App.slides.remove(), isEnabled: () => hasDeck() && App.slides.canRemove(),
+        });
 
         // ---- Selected element (elements.js) ----
         const hasSelection = () => App.elements.hasSelection();
@@ -19091,6 +19221,387 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/slides.js ----
+/*
+ * slides.js - adding, duplicating and deleting slides (SPEC 4, Phase 7).
+ *
+ * New slide: one of four built-in layouts (decided in the Phase 7 Q&A), as in
+ * PowerPoint's New Slide gallery:
+ *
+ *   title          Title Slide         a title and a subtitle
+ *   title-content  Title and Content   a title and a bulleted text box
+ *   two-columns    Two Content         a title and two text boxes side by side
+ *   blank          Blank               nothing
+ *
+ * The title of a new slide sits where the deck's own titles sit and looks like
+ * them: it copies the position and look of the title of an existing slide of
+ * the same kind (the deck's title slide for "Title Slide", a content slide for
+ * the others). A deck without one gets the built-in title of File > New. Text
+ * uses the theme (var(--font-heading), var(--color-accent) ...), so a theme
+ * change restyles new slides too. The slide carries data-layout (SPEC 3.3).
+ *
+ * New and duplicated slides go after the slide shown; delete removes the slide
+ * shown (never the last one left). Each is one undo step of the history's
+ * { slides: [...] } scope: only the slide that comes or goes is copied, not the
+ * whole deck. Undo / redo show the slide the step was about.
+ *
+ * Talks to: deck.js, history.js, text.js (the text of new boxes), elements.js
+ * (nothing selected), commands.js (newSlide, duplicateSlide, deleteSlide),
+ * ribbon.js (the New Slide gallery), thumbnails.js (keys and right-click).
+ */
+
+(function () {
+    'use strict';
+
+    App.slides = {};
+
+    const el = (...args) => App.util.el(...args);
+
+    App.slides.LAYOUTS = [
+        { id: 'title', label: 'Title Slide' },
+        { id: 'title-content', label: 'Title and Content' },
+        { id: 'two-columns', label: 'Two Content' },
+        { id: 'blank', label: 'Blank' },
+    ];
+
+    const CONTENT_LAYOUTS = ['title-content', 'two-columns'];
+    const UPPER_PART = 360;    // a title starts in the upper half of the slide
+    const BODY_GAP = 40;       // between the title and the body
+    const BOTTOM_MARGIN = 70;  // the body stops this far from the slide's bottom
+    const COLUMN_GAP = 48;
+    const SUBTITLE_GAP = 28;
+
+    // The built-in titles (as in File > New, template.js) for decks without one to copy.
+    const DEFAULT_TITLES = {
+        title: 'left: 64px; top: 180px; width: 1152px; height: 110px; font-family: var(--font-heading); font-size: 36pt; ' +
+            'font-weight: bold; line-height: 1.15; color: var(--color-accent);',
+        content: 'left: 64px; top: 48px; width: 1152px; height: 60px; font-family: var(--font-heading); font-size: 25.5pt; ' +
+            'font-weight: bold; line-height: 1.2; color: var(--color-accent);',
+    };
+    const BODY_LOOK = 'font-family: var(--font-body); font-size: 16.5pt; line-height: 1.4; color: var(--color-text);';
+    const TEXTS = {
+        title: 'Título da apresentação', subtitle: 'Subtítulo', slideTitle: 'Título do slide',
+        body: ['Primeiro ponto', 'Segundo ponto'], column: ['Primeiro ponto'],
+    };
+
+    // ---------------------------------------------------------------
+    // Building slides (tested in tests/unit/slides.test.js)
+    // ---------------------------------------------------------------
+
+    /* A slide id no slide of `doc` has yet: s1, s2 ... */
+    App.slides.freshSlideId = function freshSlideId(doc) {
+        const used = new Set(Array.from(doc.querySelectorAll('section.slide'), (slide) => slide.getAttribute('data-slide-id')));
+        return App.util.uniqueId('s', used);
+    };
+
+    function usedElementIds(doc) {
+        return new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+    }
+
+    /* A font size written on the element itself, in px (0 when it has none). */
+    function fontSizeOf(element) {
+        const size = element.style.fontSize;
+        const number = parseFloat(size);
+        if (!number) {
+            return 0;
+        }
+        return /pt$/.test(size) ? number * 4 / 3 : number;
+    }
+
+    /* A slide's title: its largest text box starting in the upper half (the higher one on a tie), or null. */
+    App.slides.titleOf = function titleOf(slide) {
+        const texts = Array.from(slide.querySelectorAll(':scope > .el[data-type="text"]'))
+            .filter((element) => parseFloat(element.style.top) < UPPER_PART);
+        texts.sort((a, b) => fontSizeOf(b) - fontSizeOf(a) || parseFloat(a.style.top) - parseFloat(b.style.top));
+        return texts[0] || null;
+    };
+
+    /*
+     * The title a new slide of `layout` copies: from a slide of that layout,
+     * else (content layouts) any content slide, else a slide that says no
+     * layout (not the first: that is usually the deck's title slide). Or null.
+     */
+    function referenceTitle(doc, layout) {
+        const slides = Array.from(doc.querySelectorAll('section.slide'));
+        const kinds = layout === 'title' ? [['title']] : [[layout], CONTENT_LAYOUTS, [null]];
+        for (const kind of kinds) {
+            for (let i = 0; i < slides.length; i++) {
+                const said = slides[i].getAttribute('data-layout');
+                if (kind.includes(said) && !(said === null && i === 0)) {
+                    const title = App.slides.titleOf(slides[i]);
+                    if (title) {
+                        return title;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    function textBox(doc, id, style, zIndex) {
+        const element = doc.createElement('div');
+        element.setAttribute('class', 'el');
+        element.setAttribute('data-type', 'text');
+        element.setAttribute('data-id', id);
+        element.setAttribute('style', style);
+        element.style.removeProperty('--autofit-scale');
+        element.style.zIndex = String(zIndex);
+        return element;
+    }
+
+    function rectStyle(left, top, width, height) {
+        return 'left: ' + left + 'px; top: ' + top + 'px; width: ' + width + 'px; height: ' + height + 'px; ';
+    }
+
+    function boxRect(element) {
+        return { left: parseFloat(element.style.left) || 0, top: parseFloat(element.style.top) || 0,
+            width: parseFloat(element.style.width) || 0, height: parseFloat(element.style.height) || 0 };
+    }
+
+    /*
+     * A new slide of `layout` (not yet in the deck) with id `slideId`: its
+     * boxes styled like the deck's titles and theme, with element ids no
+     * element of `doc` has, and empty speaker notes.
+     */
+    App.slides.buildSlide = function buildSlide(doc, layout, slideId) {
+        const slide = doc.createElement('section');
+        slide.setAttribute('class', 'slide');
+        slide.setAttribute('data-slide-id', slideId);
+        slide.setAttribute('data-layout', layout);
+        const used = usedElementIds(doc);
+        const nextId = () => App.util.uniqueId('e', used);
+        const add = (element, lines, look) => {
+            slide.appendChild(element);
+            App.text.writeLines(element, lines, look);
+        };
+
+        if (layout !== 'blank') {
+            const reference = referenceTitle(doc, layout);
+            const fallback = DEFAULT_TITLES[layout === 'title' ? 'title' : 'content'];
+            const title = textBox(doc, nextId(), reference ? reference.getAttribute('style') : fallback, 1);
+            add(title, [layout === 'title' ? TEXTS.title : TEXTS.slideTitle]);
+            const rect = boxRect(title);
+            const bottom = rect.top + rect.height;
+
+            if (layout === 'title') {
+                add(textBox(doc, nextId(), rectStyle(rect.left, bottom + SUBTITLE_GAP, rect.width, 50) + BODY_LOOK, 2),
+                    [TEXTS.subtitle]);
+            } else {
+                const top = bottom + BODY_GAP;
+                const height = Math.max(120, 720 - BOTTOM_MARGIN - top);
+                if (layout === 'two-columns') {
+                    const width = Math.round((rect.width - COLUMN_GAP) / 2);
+                    add(textBox(doc, nextId(), rectStyle(rect.left, top, width, height) + BODY_LOOK, 2),
+                        TEXTS.column, { list: 'bullet' });
+                    add(textBox(doc, nextId(), rectStyle(rect.left + rect.width - width, top, width, height) + BODY_LOOK, 3),
+                        TEXTS.column, { list: 'bullet' });
+                } else {
+                    add(textBox(doc, nextId(), rectStyle(rect.left, top, rect.width, height) + BODY_LOOK, 2),
+                        TEXTS.body, { list: 'bullet' });
+                }
+            }
+        }
+        const notes = doc.createElement('aside');
+        notes.setAttribute('class', 'notes');
+        slide.appendChild(notes);
+        return slide;
+    };
+
+    /* A copy of `slide` (content, notes, hidden or not) with id `slideId` and new element ids. */
+    App.slides.copyOf = function copyOf(slide, slideId) {
+        const used = usedElementIds(slide.ownerDocument);
+        const copy = slide.cloneNode(true);
+        copy.setAttribute('data-slide-id', slideId);
+        copy.removeAttribute('data-editor-current');
+        copy.querySelectorAll('[data-id]').forEach((node) => node.setAttribute('data-id', App.util.uniqueId('e', used)));
+        return copy;
+    };
+
+    /* The layout New Slide (Ctrl+M) uses: the slide shown's, but content after a title slide (as PowerPoint). */
+    App.slides.nextLayout = function nextLayout(slide) {
+        const layout = slide && slide.getAttribute('data-layout');
+        return layout && layout !== 'title' && App.slides.LAYOUTS.some((entry) => entry.id === layout) ? layout : 'title-content';
+    };
+
+    // ---------------------------------------------------------------
+    // Actions on the live deck
+    // ---------------------------------------------------------------
+
+    function idOf(slide) {
+        return slide ? slide.getAttribute('data-slide-id') : null;
+    }
+
+    function show(slideId) {
+        const index = App.deck.getSlides().findIndex((slide) => idOf(slide) === slideId);
+        if (index !== -1) {
+            App.deck.goTo(index);
+        }
+    }
+
+    /* Typing ends and the element selection goes before the slides change, as in PowerPoint. */
+    function finishWork() {
+        if (App.text.isEditing()) {
+            App.text.exitEdit();
+        }
+        App.selection.clear();
+    }
+
+    /* Put `slide` after the slide shown as one undo step called `label`, and show it. */
+    function insert(label, slide) {
+        const current = App.deck.getCurrentSlide();
+        const id = idOf(slide);
+        App.history.change(label, { slides: [id] }, () => {
+            if (current) {
+                current.after(slide);
+            } else {
+                App.deck.getDocument().body.appendChild(slide);
+            }
+        }, { meta: { slides: { undo: idOf(current), redo: id } } });
+        show(id);
+    }
+
+    /* New Slide: `layout` (one of LAYOUTS), or the one nextLayout picks. */
+    App.slides.add = function add(layout) {
+        finishWork();
+        const doc = App.deck.getDocument();
+        const chosen = layout || App.slides.nextLayout(App.deck.getCurrentSlide());
+        insert('New slide', App.slides.buildSlide(doc, chosen, App.slides.freshSlideId(doc)));
+    };
+
+    App.slides.duplicate = function duplicate() {
+        finishWork();
+        const current = App.deck.getCurrentSlide();
+        if (current) {
+            insert('Duplicate slide', App.slides.copyOf(current, App.slides.freshSlideId(current.ownerDocument)));
+        }
+    };
+
+    /* A deck keeps at least one slide. */
+    App.slides.canRemove = function canRemove() {
+        return App.deck.getSlides().length > 1;
+    };
+
+    /* Delete the slide shown; the next one (the previous one, after the last) is shown. */
+    App.slides.remove = function remove() {
+        if (!App.slides.canRemove()) {
+            return;
+        }
+        finishWork();
+        const slides = App.deck.getSlides();
+        const index = App.deck.getCurrentIndex();
+        const current = slides[index];
+        const neighbour = slides[index + 1] || slides[index - 1];
+        App.history.change('Delete slide', { slides: [idOf(current)] }, () => current.remove(),
+            { meta: { slides: { undo: idOf(current), redo: idOf(neighbour) } } });
+        show(idOf(neighbour));
+    };
+
+    // ---------------------------------------------------------------
+    // Home > New Slide: the layout gallery
+    // ---------------------------------------------------------------
+
+    // A small drawing of each layout: the slide, its title (thick) and text lines.
+    const PREVIEWS = {
+        title: '<path d="M14 15h36" stroke-width="3"/><path d="M14 22h22"/>',
+        'title-content': '<path d="M8 8h30" stroke-width="3"/><path d="M8 16h44M8 21h44M8 26h30"/>',
+        'two-columns': '<path d="M8 8h30" stroke-width="3"/><path d="M8 16h21M8 21h21M8 26h14M35 16h21M35 21h21M35 26h14"/>',
+        blank: '',
+    };
+
+    function preview(layout) {
+        return '<svg width="64" height="36" viewBox="0 0 64 36" fill="none" stroke="currentColor" stroke-width="1.4" ' +
+            'aria-hidden="true"><rect x="0.5" y="0.5" width="63" height="35" rx="1.5" stroke-width="1"/>' + PREVIEWS[layout] + '</svg>';
+    }
+
+    let galleryButton = null;
+    let gallery = null;
+
+    function closeGallery() {
+        if (gallery) {
+            gallery.remove();
+            gallery = null;
+            window.removeEventListener('pointerdown', onOutsidePointerDown, true);
+            galleryButton.setAttribute('aria-expanded', 'false');
+        }
+    }
+
+    function onOutsidePointerDown(event) {
+        if (gallery && !gallery.contains(event.target) && !galleryButton.contains(event.target)) {
+            closeGallery();
+        }
+    }
+
+    function openGallery() {
+        closeGallery();
+        const items = App.slides.LAYOUTS.map((entry) => {
+            const item = el('button', {
+                type: 'button', class: 'slide-layout-item', 'data-layout': entry.id, title: entry.label,
+                onclick: () => {
+                    closeGallery();
+                    App.commands.run('newSlide', entry.id);
+                },
+            });
+            item.innerHTML = preview(entry.id);
+            item.appendChild(el('span', {}, [entry.label]));
+            return item;
+        });
+        gallery = el('div', {
+            class: 'menu slide-layout-gallery', role: 'dialog', 'aria-label': 'New slide layout', tabindex: '-1',
+            onkeydown: (event) => {
+                if (event.key === 'Escape') {
+                    event.stopPropagation();
+                    closeGallery();
+                    galleryButton.focus();
+                }
+            },
+        }, [el('div', { class: 'table-grid-label' }, ['Layouts']), el('div', { class: 'slide-layout-grid' }, items)]);
+        const rect = galleryButton.getBoundingClientRect();
+        gallery.style.left = rect.left + 'px';
+        gallery.style.top = rect.bottom + 'px';
+        document.body.appendChild(gallery);
+        galleryButton.setAttribute('aria-expanded', 'true');
+        window.addEventListener('pointerdown', onOutsidePointerDown, true);
+        items[0].focus();
+    }
+
+    function createGalleryButton() {
+        const keys = App.shortcuts.keysFor('newSlide');
+        galleryButton = el('button', {
+            type: 'button', class: 'ribbon-button new-slide-button', 'aria-label': 'New Slide',
+            title: 'New Slide: pick a layout (' + keys + ' adds one like the slide shown)',
+            'aria-haspopup': 'dialog', 'aria-expanded': 'false',
+            onclick: () => (gallery ? closeGallery() : openGallery()),
+        });
+        galleryButton.innerHTML = App.icons.get('newSlide');
+        galleryButton.appendChild(el('span', { class: 'ribbon-button-label' }, ['New Slide ▾']));
+        return galleryButton;
+    }
+
+    /* The ribbon control named `name`, or null when it is not one of these. */
+    App.slides.create = function create(name) {
+        return name === 'newSlide' ? createGalleryButton() : null;
+    };
+
+    App.slides.refresh = function refresh() {
+        if (galleryButton) {
+            galleryButton.disabled = !App.commands.isEnabled('newSlide');
+        }
+    };
+
+    /* Wiring, called once from App.start() (after deck.js, whose own history listener goes first). */
+    App.slides.init = function init() {
+        // Undo / redo of a slide step show the slide it was about (the deleted one back, the new one again).
+        App.events.on('history-changed', (info) => {
+            if (info && (info.action === 'undo' || info.action === 'redo') && info.meta && info.meta.slides) {
+                show(info.meta.slides[info.action]);
+            }
+        });
+        App.events.on('deck-loaded', closeGallery);
+    };
+})();
+
+</script>
+<script>
 // ---- js/findreplace.js ----
 /*
  * findreplace.js - Home > Editing: Find (Ctrl+F) and Replace (Ctrl+H) across all slides (SPEC Phase 3).
@@ -19461,7 +19972,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * fills them. Buttons only name a command; commands.js does the work.
  *
  * Talks to: commands.js, icons.js, shortcuts.js (to show key hints in tooltips),
- *           textcontrols.js, tablecontrols.js, tabledesign.js and shapecontrols.js (controls that show a value or open a picker).
+ *           textcontrols.js, tablecontrols.js, tabledesign.js, shapecontrols.js and slides.js (controls that show a value or open a picker).
  */
 
 (function () {
@@ -19496,7 +20007,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                     [['alignLeft', 'alignLeft'], ['alignCenter', 'alignCenter'], ['alignRight', 'alignRight'],
                         ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }]],
                 },
-                { label: 'Slides', commands: [['previousSlide', 'previous'], ['nextSlide', 'next']] },
+                { label: 'Slides', commands: [{ control: 'newSlide' }, ['duplicateSlide', 'duplicateSlide'],
+                    ['deleteSlide', 'deleteSlide'], ['previousSlide', 'previous'], ['nextSlide', 'next']] },
                 // Small buttons with their names, stacked, as PowerPoint's Editing group.
                 { label: 'Editing', rows: [[{ command: 'find', icon: 'find' }], [{ command: 'replace', icon: 'replace' }]] },
             ],
@@ -19642,7 +20154,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
     function createControl(name) {
-        return App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
+        return App.slides.create(name) || App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
             App.chartControls.create(name) || App.textControls.create(name);
     }
 
@@ -19797,6 +20309,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.tableDesign.refresh();
         App.shapeControls.refresh();
         App.chartControls.refresh();
+        App.slides.refresh();
     };
 })();
 

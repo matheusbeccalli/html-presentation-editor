@@ -828,7 +828,8 @@
 
     /*
      * Replace the text of a container by `lines` of plain text, all bold and / or
-     * italic when look.bold / look.italic (cells pasted from Excel).
+     * italic when look.bold / look.italic (cells pasted from Excel), as a list
+     * when look.list is 'bullet' or 'number' (the body of a new slide).
      */
     App.text.writeLines = function writeLines(container, lines, look) {
         const doc = container.ownerDocument;
@@ -842,6 +843,9 @@
             return p;
         }));
         App.text.normalizeCell(container);
+        if (look && look.list) {
+            Array.from(container.children).forEach((p) => p.setAttribute('data-list', look.list));
+        }
     };
 
     /* Remove all the text of a container (selected table cells + Delete), leaving one empty line. */

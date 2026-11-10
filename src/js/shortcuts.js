@@ -230,6 +230,8 @@
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
         ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],
         ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
+        // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).
+        ['Ctrl+M', 'newSlide', { blockBrowserDefault: true }],
         ['Shift+F10', 'contextMenu'],
         ['ContextMenu', 'contextMenu'],
     ];

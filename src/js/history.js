@@ -22,8 +22,13 @@
  *
  * Scope of a change:
  *   { slideId: 's3' }  -> snapshot of that slide only (fast, the common case)
+ *   { slides: ['s7'] } -> the slide order, plus a copy of the slides listed
+ *                         (Phase 7: adding, duplicating, deleting slides; the
+ *                         list is the slide that comes or goes, [] to reorder).
+ *                         The other slides are not copied: undo puts the live
+ *                         ones back in the old order, so a 20 MB deck stays cheap.
  *   'deck'             -> snapshot of the whole <head> and <body> (theme,
- *                         adding/removing slides, removing blocked fonts ...)
+ *                         Replace All, removing blocked fonts ...)
  *
  * Meta (Phase 3): a step may carry `meta`, any object the caller wants back
  * when the step is undone or redone (text editing keeps the cursor position
@@ -65,10 +70,56 @@ App.createHistory = function createHistory(options) {
         return slide;
     }
 
+    function slidesOf(doc) {
+        return Array.from(doc.querySelectorAll('section.slide'));
+    }
+
+    /* The slide order, and the HTML of the listed slides that exist now. */
+    function takeSlides(doc, listed) {
+        const slides = slidesOf(doc);
+        const html = {};
+        slides.filter((slide) => listed.includes(slide.getAttribute('data-slide-id')))
+            .forEach((slide) => { html[slide.getAttribute('data-slide-id')] = slide.outerHTML; });
+        return { order: slides.map((slide) => slide.getAttribute('data-slide-id')), html: html };
+    }
+
+    /*
+     * Put the slides back in the snapshot's order: a listed slide from its copy
+     * (or gone, if it had none), any other one is the live slide. They go where
+     * the first slide is now, so the master and other blocks keep their place.
+     */
+    function restoreSlides(doc, snapshot) {
+        const live = new Map(slidesOf(doc).map((slide) => [slide.getAttribute('data-slide-id'), slide]));
+        const wanted = snapshot.order.map((id) => {
+            if (Object.prototype.hasOwnProperty.call(snapshot.html, id)) {
+                const template = doc.createElement('template');
+                template.innerHTML = snapshot.html[id];
+                return doc.importNode(template.content.firstElementChild, true);
+            }
+            if (!live.has(id)) {
+                throw new Error('Undo: slide "' + id + '" not found');
+            }
+            return live.get(id);
+        });
+        const first = live.size ? live.values().next().value : null;
+        const marker = doc.createComment('slides');
+        if (first) {
+            first.before(marker);
+        } else {
+            doc.body.appendChild(marker);
+        }
+        live.forEach((slide) => slide.remove());
+        wanted.forEach((slide) => marker.before(slide));
+        marker.remove();
+    }
+
     function takeSnapshot(scope) {
         const doc = getDoc();
         if (scope === 'deck') {
             return { head: doc.head.innerHTML, body: doc.body.innerHTML };
+        }
+        if (scope.slides) {
+            return takeSlides(doc, scope.slides);
         }
         return findSlide(doc, scope.slideId).outerHTML;
     }
@@ -80,13 +131,17 @@ App.createHistory = function createHistory(options) {
             doc.body.innerHTML = snapshot.body;
             return;
         }
+        if (scope.slides) {
+            restoreSlides(doc, snapshot);
+            return;
+        }
         // Setting outerHTML replaces the slide element with one parsed from the string.
         findSlide(doc, scope.slideId).outerHTML = snapshot;
     }
 
     function validateScope(scope) {
-        if (scope !== 'deck' && !(scope && scope.slideId)) {
-            throw new Error("History scope must be 'deck' or { slideId: '...' }");
+        if (scope !== 'deck' && !(scope && (scope.slideId || Array.isArray(scope.slides)))) {
+            throw new Error("History scope must be 'deck', { slideId: '...' } or { slides: [...] }");
         }
     }
 

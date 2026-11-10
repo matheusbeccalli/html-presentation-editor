@@ -267,13 +267,14 @@ Nested bullets are the top priority of this phase.
 - [ ] Rotate (handle and degrees field)
 - [ ] Lock element
 - [x] Slides: add (with layout picker), duplicate, delete *(Home > New Slide ▾: Title Slide, Title and Content, Two Content, Blank; the new title sits and looks like the deck's own titles; Ctrl+M (and Enter in the slide rail) adds one like the slide shown; Duplicate / Delete Slide on the ribbon, by right-clicking a thumbnail, Ctrl+D / Delete in the rail; each one undo step that shows its slide; the last slide cannot be deleted)*
-- [ ] Slides: reorder by dragging thumbnails, hide slide
+- [x] Slides: reorder by dragging thumbnails, hide slide *(drag a thumbnail: a red line shows where it lands, Esc cancels; Ctrl+Up / Ctrl+Down in the slide rail too; Hide Slide on the Slide Show tab and a thumbnail's right-click menu (ticked while hidden): the thumbnail is dimmed with the crossed-out eye, the saved deck skips it when presenting; each one undo step)*
 - [ ] Slide master: logo, footer text, "Confidencial" label, automatic slide numbers; on every slide, edited in one place
 - [ ] Theme editor: edit `:root` CSS variables (colors, fonts) with live preview
 - [x] Speaker notes panel under the canvas *(plain text, as decided in the Phase 7 Q&A: type in the panel under the slide (line breaks kept), stored in the slide's <aside class="notes">; one undo step per typing run, Ctrl+Z / Ctrl+Y in the panel undo and redo; not searched by Find)*
 - [ ] **Done when:** a 15-slide deck can be restructured, aligned and rebranded in minutes.
   - [ ] Speaker notes: click the panel under the slide and type, Enter for a new line: the notes are this slide's (another slide shows its own; an empty one says "Click to add speaker notes"). Ctrl+Z in the panel takes the typing back. Save, reopen: the notes are kept, line breaks too
   - [ ] Slides: Home > New Slide ▾ > Title and Content (and the other three): the new slide comes after the one shown, its title where your titles are. Ctrl+M adds one too. Right-click a thumbnail > Duplicate Slide; click a thumbnail and press Delete: gone, the next one shown. Ctrl+Z after each: undone, and the slide it was about is shown. Save, reopen: the slides are there
+  - [ ] Reorder and hide: drag slide 1's thumbnail down between two others (a red line shows where): it moves there; Ctrl+Z puts it back. Click a thumbnail, Ctrl+Down: one place down. Right-click a thumbnail > Hide Slide: dimmed, crossed-out eye; Slide Show tab > Hide Slide is lit and turns it off. Save, open the saved file in Edge and present with the arrow keys: the hidden slide is skipped
 
 ## Phase 8: Present and export (section 7)
 

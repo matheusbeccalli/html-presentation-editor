@@ -3480,6 +3480,90 @@ def test_add_duplicate_delete_slides(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_reorder_and_hide_slides(browser):
+    """Phase 7: drag a thumbnail to move its slide (a line shows where; Esc cancels), Ctrl+Up / Ctrl+Down in the rail,
+    Hide Slide (right-click a thumbnail, Slide Show tab): dimmed thumbnail with the hidden mark; each one undo step;
+    saved and reopened."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    order = lambda: page.evaluate("App.deck.getSlides().map((s) => s.getAttribute('data-slide-id')).join(',')")  # noqa: E731
+    shown = lambda: page.evaluate("App.deck.getCurrentSlide().getAttribute('data-slide-id')")  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    box = lambda index: page.locator(f"#thumbnail-rail .thumb[data-index='{index}'] .thumb-box").bounding_box()  # noqa: E731
+    check(order() == "s1,s2,s3,s4,s5,s6", order())
+
+    # Drag slide 1's thumbnail down between slides 3 and 4: a line shows the place; it lands there, shown.
+    start = box(0)
+    page.mouse.move(start["x"] + 80, start["y"] + 40)
+    page.mouse.down()
+    gap_y = (box(2)["y"] + box(2)["height"] + box(3)["y"]) / 2
+    page.mouse.move(start["x"] + 80, gap_y, steps=10)
+    check(page.is_visible(".thumb-drop-line"), "the drop line shows")
+    check(page.evaluate("String(getSelection())") == "", "dragging selects no text in the rail")
+    page.screenshot(path=str(OUTPUT / "77-drag-thumbnail.png"))
+    page.mouse.up()
+    check(order() == "s2,s3,s1,s4,s5,s6" and shown() == "s1" and label() == "Move slide", f"moved: {order()} {shown()}")
+    check(page.locator(".thumb-drop-line").count() == 0, "the line goes")
+    check(page.get_attribute("#thumbnail-rail .thumb[data-index='2']", "class").count("thumb-current") == 1,
+          "its thumbnail is the current one")
+    page.keyboard.press("Control+z")
+    check(order() == "s1,s2,s3,s4,s5,s6" and shown() == "s1", f"undo: back on top, shown: {order()} {shown()}")
+    page.keyboard.press("Control+y")
+    check(order() == "s2,s3,s1,s4,s5,s6", f"redo: {order()}")
+    page.keyboard.press("Control+z")
+
+    # Esc during a drag: nothing moves.
+    page.mouse.move(start["x"] + 80, start["y"] + 40)
+    page.mouse.down()
+    page.mouse.move(start["x"] + 80, box(4)["y"] + 70, steps=10)
+    page.keyboard.press("Escape")
+    page.mouse.up()
+    check(order() == "s1,s2,s3,s4,s5,s6" and page.locator(".thumb-drop-line").count() == 0, f"Esc cancels: {order()}")
+
+    # A plain click on a thumbnail still just shows that slide.
+    page.click("#thumbnail-rail .thumb[data-index='3']")
+    check(shown() == "s4" and order() == "s1,s2,s3,s4,s5,s6", "click shows slide 4")
+
+    # Ctrl+Up / Ctrl+Down in the rail move the slide shown.
+    page.keyboard.press("Control+ArrowUp")
+    check(order() == "s1,s2,s4,s3,s5,s6" and shown() == "s4", f"Ctrl+Up: {order()}")
+    page.keyboard.press("Control+ArrowDown")
+    page.keyboard.press("Control+ArrowDown")
+    check(order() == "s1,s2,s3,s5,s4,s6" and shown() == "s4", f"Ctrl+Down twice: {order()}")
+
+    # Hide Slide from a thumbnail's right-click menu: dimmed, the crossed-out eye; the menu shows the tick next time.
+    hidden = lambda index: page.evaluate(  # noqa: E731
+        "i => [App.deck.getSlides()[i].getAttribute('data-hidden'), "
+        "document.querySelector('#thumbnail-rail .thumb[data-index=\"' + i + '\"]').classList.contains('thumb-hidden'), "
+        "!!document.querySelector('#thumbnail-rail .thumb[data-index=\"' + i + '\"] .thumb-hidden-badge')]", index)
+    page.click("#thumbnail-rail .thumb[data-index='0']", button="right")
+    page.click(".context-menu .menu-label:text-is('Hide Slide')")
+    check(hidden(0) == ["true", True, True] and label() == "Hide slide", f"hidden: {hidden(0)}")
+    page.click("#thumbnail-rail .thumb[data-index='0']", button="right")
+    check(page.get_attribute(".context-menu .menu-item[data-command='hideSlide']", "aria-checked") == "true", "ticked")
+    page.screenshot(path=str(OUTPUT / "78-hide-slide.png"))
+    page.keyboard.press("Escape")
+
+    # The Slide Show tab's Hide Slide button: lit for a hidden slide; clicking it shows the slide again.
+    page.click(".ribbon-tab[data-tab='slideshow']")
+    button = ".ribbon-button[data-command='hideSlide']"
+    check(page.get_attribute(button, "aria-pressed") == "true", "lit")
+    page.click(button)
+    check(hidden(0) == [None, False, False] and label() == "Unhide slide" and page.get_attribute(button, "aria-pressed") == "false",
+          f"unhidden: {hidden(0)}")
+    page.keyboard.press("Control+z")
+    check(hidden(0) == ["true", True, True], f"undo: hidden again: {hidden(0)}")
+
+    # Saved and reopened: the order and the hidden slides are kept.
+    saved = editor.save_as_download("reorder-saved.html")
+    editor.open(saved)
+    check(order() == "s1,s2,s3,s5,s4,s6", order())
+    check(page.evaluate("App.deck.getSlides().map((s) => s.getAttribute('data-hidden') === 'true')") ==
+          [True, False, False, True, False, False], "s1 and s5 hidden")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4563,6 +4647,7 @@ TESTS = [
     test_phase6_done_when,
     test_speaker_notes,
     test_add_duplicate_delete_slides,
+    test_reorder_and_hide_slides,
 ]
 
 

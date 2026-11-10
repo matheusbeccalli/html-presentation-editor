@@ -2,6 +2,8 @@
 
 /* ---- Thumbnail rail (left) ---- */
 #thumbnail-rail {
+    position: relative;                    /* the drop line of a dragged thumbnail is placed in it */
+    user-select: none;                     /* dragging a thumbnail must not select the slide numbers as text */
     flex: none;
     width: 212px;
     overflow-y: auto;
@@ -35,6 +37,11 @@
     pointer-events: none;                  /* clicks go to the .thumb, not into the slide */
 }
 .thumb-hidden .thumb-box { opacity: 0.45; }
+/* Dragging a thumbnail (thumbnails.js): a line where the slide will land. */
+#thumbnail-rail.dragging, #thumbnail-rail.dragging .thumb { cursor: grabbing; }
+.thumb-drop-line { position: absolute; left: 30px; width: 172px; height: 3px; border-radius: 2px; background: var(--accent);
+    pointer-events: none; }
+.thumb-drop-line[hidden] { display: none; }
 .thumb-hidden-badge {
     position: absolute; left: 4px; top: 22px;
     color: var(--text-muted);

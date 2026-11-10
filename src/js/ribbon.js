@@ -141,6 +141,7 @@
         },
         {
             id: 'slideshow', label: 'Slide Show',
+            groups: [{ label: 'Set Up', commands: [['hideSlide', 'hidden']] }],
             note: 'Presenting from the editor arrives in Phase 8. Saved decks already present on their own: open the saved file in the browser and use the arrow keys (F = full screen).',
         },
         { id: 'export', label: 'Export', note: 'PDF, PNG and PowerPoint export arrive in Phase 8.' },

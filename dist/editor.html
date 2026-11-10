@@ -309,6 +309,7 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .menu-item:disabled { opacity: 0.4; cursor: default; }
 .menu-label { flex: 1; }
 .menu-keys { color: var(--text-muted); font-size: 11px; }
+.context-menu .menu-item[aria-checked="true"] .menu-label::after { content: " \2713"; color: var(--accent); }
 .menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 
 /* AutoSave switch in the title bar (autosave.js), like PowerPoint's. */
@@ -346,6 +347,8 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 
 /* ---- Thumbnail rail (left) ---- */
 #thumbnail-rail {
+    position: relative;                    /* the drop line of a dragged thumbnail is placed in it */
+    user-select: none;                     /* dragging a thumbnail must not select the slide numbers as text */
     flex: none;
     width: 212px;
     overflow-y: auto;
@@ -379,6 +382,11 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     pointer-events: none;                  /* clicks go to the .thumb, not into the slide */
 }
 .thumb-hidden .thumb-box { opacity: 0.45; }
+/* Dragging a thumbnail (thumbnails.js): a line where the slide will land. */
+#thumbnail-rail.dragging, #thumbnail-rail.dragging .thumb { cursor: grabbing; }
+.thumb-drop-line { position: absolute; left: 30px; width: 172px; height: 3px; border-radius: 2px; background: var(--accent);
+    pointer-events: none; }
+.thumb-drop-line[hidden] { display: none; }
 .thumb-hidden-badge {
     position: absolute; left: 4px; top: 22px;
     color: var(--text-muted);
@@ -13104,6 +13112,12 @@ App.template.newDeckHtml = function newDeckHtml() {
                 App.commands.run(command);
             },
         });
+        // A toggle (Hide Slide) shows a tick while it is on.
+        const checked = App.commands.isChecked(command);
+        if (checked !== null) {
+            button.setAttribute('role', 'menuitemcheckbox');
+            button.setAttribute('aria-checked', checked ? 'true' : 'false');
+        }
         button.append(App.util.el('span', { class: 'menu-label' }, [App.commands.label(command)]),
             App.util.el('span', { class: 'menu-keys' }, [App.shortcuts.keysFor(command)]));
         return button;
@@ -13203,6 +13217,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
 
         rail.addEventListener('keydown', onRailKey);
+        rail.addEventListener('pointerdown', onRailPointerDown);
+        // The click that ends a drag must not also pick the slide under the pointer.
+        rail.addEventListener('click', (event) => {
+            if (justDragged) {
+                event.stopPropagation();
+                event.preventDefault();
+            }
+        }, true);
 
         // Right-click a slide: it is shown, and the menu has the slide actions (on the empty rail: New Slide).
         rail.addEventListener('contextmenu', (event) => {
@@ -13219,7 +13241,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     };
 
-    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide'];
+    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide', '-', 'hideSlide'];
 
     // Keys in the rail work on slides, as in PowerPoint's slide pane (the editor's own shortcuts do not run).
     const RAIL_KEYS = {
@@ -13229,7 +13251,88 @@ App.template.newDeckHtml = function newDeckHtml() {
         Delete: () => App.commands.run('deleteSlide'),
         Backspace: () => App.commands.run('deleteSlide'),
         'Ctrl+D': () => App.commands.run('duplicateSlide'),
+        'Ctrl+ArrowUp': () => App.commands.run('moveSlideUp'),
+        'Ctrl+ArrowDown': () => App.commands.run('moveSlideDown'),
     };
+
+    // ---- Dragging a thumbnail to move its slide ----
+
+    const DRAG_START = 5;     // px the pointer moves before a press becomes a drag
+    const SCROLL_EDGE = 30;   // px from the rail's top / bottom where a drag scrolls it
+    let drag = null;          // { from, startY, active, gap, line }
+    let justDragged = false;
+
+    function onRailPointerDown(event) {
+        const item = event.target.closest('.thumb');
+        if (event.button !== 0 || !item || !App.state.hasDeck) {
+            return;
+        }
+        drag = { from: Number(item.getAttribute('data-index')), startY: event.clientY, active: false, gap: null, line: null };
+        window.addEventListener('pointermove', onDragMove, true);
+        window.addEventListener('pointerup', onDragEnd, true);
+        window.addEventListener('keydown', onDragKey, true);
+    }
+
+    function boxesOf() {
+        return Array.from(rail.querySelectorAll('.thumb .thumb-box'), (box) => box.getBoundingClientRect());
+    }
+
+    function onDragMove(event) {
+        if (!drag.active) {
+            if (Math.abs(event.clientY - drag.startY) < DRAG_START) {
+                return;
+            }
+            drag.active = true;
+            drag.line = App.util.el('div', { class: 'thumb-drop-line' });
+            rail.appendChild(drag.line);
+            rail.classList.add('dragging');
+        }
+        const railRect = rail.getBoundingClientRect();
+        if (event.clientY < railRect.top + SCROLL_EDGE) {
+            rail.scrollTop -= 10;
+        } else if (event.clientY > railRect.bottom - SCROLL_EDGE) {
+            rail.scrollTop += 10;
+        }
+        const boxes = boxesOf();
+        drag.gap = App.slides.gapAt(boxes.map((box) => box.top + box.height / 2), event.clientY);
+        // The line sits in the gap: half the space above the thumbnail below it (or below the last one).
+        const y = drag.gap < boxes.length ? boxes[drag.gap].top - 6 : boxes[boxes.length - 1].bottom + 4;
+        drag.line.style.top = (y - railRect.top + rail.scrollTop) + 'px';
+        drag.line.hidden = drag.gap === drag.from || drag.gap === drag.from + 1;   // there, it would not move
+    }
+
+    function endDrag() {
+        window.removeEventListener('pointermove', onDragMove, true);
+        window.removeEventListener('pointerup', onDragEnd, true);
+        window.removeEventListener('keydown', onDragKey, true);
+        if (drag && drag.line) {
+            drag.line.remove();
+        }
+        rail.classList.remove('dragging');
+        const ended = drag;
+        drag = null;
+        return ended;
+    }
+
+    function onDragEnd() {
+        const ended = endDrag();
+        if (ended && ended.active) {
+            justDragged = true;
+            setTimeout(() => { justDragged = false; }, 0);
+            if (ended.gap !== null) {
+                App.slides.move(ended.from, ended.gap);
+            }
+        }
+    }
+
+    /* Esc while dragging: nothing moves. */
+    function onDragKey(event) {
+        if (event.key === 'Escape' && drag && drag.active) {
+            event.preventDefault();
+            event.stopPropagation();
+            endDrag();
+        }
+    }
 
     function onRailKey(event) {
         const action = RAIL_KEYS[App.shortcuts.comboFromEvent(event)];
@@ -13295,23 +13398,32 @@ App.template.newDeckHtml = function newDeckHtml() {
         const frame = App.util.el('iframe', {
             class: 'thumb-frame', sandbox: 'allow-same-origin', tabindex: '-1', 'aria-hidden': 'true',
         });
-        const hidden = slide.getAttribute('data-hidden') === 'true';
         const item = App.util.el('div', {
-            class: 'thumb' + (hidden ? ' thumb-hidden' : ''),
-            role: 'button', tabindex: '0',
+            class: 'thumb', role: 'button', tabindex: '0',
             'data-index': String(index),
-            title: 'Slide ' + (index + 1) + (hidden ? ' (hidden)' : ''),
             onclick: () => App.deck.goTo(index),
         }, [
             App.util.el('span', { class: 'thumb-number' }, [String(index + 1)]),
             App.util.el('div', { class: 'thumb-box' }, [frame]),
         ]);
-        if (hidden) {
-            const badge = App.util.el('span', { class: 'thumb-hidden-badge', title: 'Hidden slide' });
-            badge.innerHTML = App.icons.get('hidden');
-            item.appendChild(badge);
-        }
+        markHidden(item, slide);
         return item;
+    }
+
+    /* A hidden slide's thumbnail is dimmed and carries the crossed-out eye (also right after Hide Slide). */
+    function markHidden(item, slide) {
+        const hidden = App.slides.isHidden(slide);
+        const index = Number(item.getAttribute('data-index'));
+        item.classList.toggle('thumb-hidden', hidden);
+        item.title = 'Slide ' + (index + 1) + (hidden ? ' (hidden)' : '');
+        const badge = item.querySelector('.thumb-hidden-badge');
+        if (hidden && !badge) {
+            const mark = App.util.el('span', { class: 'thumb-hidden-badge', title: 'Hidden slide' });
+            mark.innerHTML = App.icons.get('hidden');
+            item.appendChild(mark);
+        } else if (!hidden && badge) {
+            badge.remove();
+        }
     }
 
     function onVisibilityChange(entries) {
@@ -13381,8 +13493,13 @@ App.template.newDeckHtml = function newDeckHtml() {
             rebuild();   // slides may have been added, removed, moved or restyled
             return;
         }
-        const index = App.deck.getSlides().findIndex((slide) => slide.getAttribute('data-slide-id') === info.scope.slideId);
+        const slides = App.deck.getSlides();
+        const index = slides.findIndex((slide) => slide.getAttribute('data-slide-id') === info.scope.slideId);
         if (index !== -1) {
+            const item = rail.querySelector('.thumb[data-index="' + index + '"]');
+            if (item) {
+                markHidden(item, slides[index]);
+            }
             pendingRefresh.add(index);
             flushRefresh();
         }
@@ -15460,6 +15577,18 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('duplicateSlide', { label: 'Duplicate Slide', run: () => App.slides.duplicate(), isEnabled: hasDeck });
         App.commands.define('deleteSlide', {
             label: 'Delete Slide', run: () => App.slides.remove(), isEnabled: () => hasDeck() && App.slides.canRemove(),
+        });
+        App.commands.define('hideSlide', {
+            label: 'Hide Slide', run: () => App.slides.toggleHidden(), isEnabled: hasDeck,
+            isChecked: () => hasDeck() && App.slides.isHidden(App.deck.getCurrentSlide()),
+        });
+        // Ctrl+Up / Ctrl+Down in the slide rail (thumbnails.js); dragging a thumbnail does the same.
+        App.commands.define('moveSlideUp', {
+            label: 'Move slide up', run: () => App.slides.moveBy(-1), isEnabled: () => hasDeck() && App.deck.getCurrentIndex() > 0,
+        });
+        App.commands.define('moveSlideDown', {
+            label: 'Move slide down', run: () => App.slides.moveBy(1),
+            isEnabled: () => hasDeck() && App.deck.getCurrentIndex() < App.deck.getSlides().length - 1,
         });
 
         // ---- Selected element (elements.js) ----
@@ -19241,13 +19370,19 @@ App.template.newDeckHtml = function newDeckHtml() {
  * change restyles new slides too. The slide carries data-layout (SPEC 3.3).
  *
  * New and duplicated slides go after the slide shown; delete removes the slide
- * shown (never the last one left). Each is one undo step of the history's
- * { slides: [...] } scope: only the slide that comes or goes is copied, not the
- * whole deck. Undo / redo show the slide the step was about.
+ * shown (never the last one left). A slide moves by dragging its thumbnail
+ * (thumbnails.js; gapAt says where it lands) or with Ctrl+Up / Ctrl+Down in
+ * the rail. Hide Slide marks it data-hidden="true": the player skips it.
+ *
+ * Adding, duplicating, deleting and moving are each one undo step of the
+ * history's { slides: [...] } scope: only the slide that comes or goes is
+ * copied (none for a move), not the whole deck. Undo / redo show the slide the
+ * step was about. Hiding is a step of that one slide.
  *
  * Talks to: deck.js, history.js, text.js (the text of new boxes), elements.js
- * (nothing selected), commands.js (newSlide, duplicateSlide, deleteSlide),
- * ribbon.js (the New Slide gallery), thumbnails.js (keys and right-click).
+ * (nothing selected), commands.js (newSlide, duplicateSlide, deleteSlide,
+ * hideSlide), ribbon.js (the New Slide gallery), thumbnails.js (drag, keys and
+ * right-click).
  */
 
 (function () {
@@ -19417,6 +19552,43 @@ App.template.newDeckHtml = function newDeckHtml() {
         return copy;
     };
 
+    /*
+     * Reordering by dragging a thumbnail: `middles` are the thumbnails' vertical
+     * middles (top to bottom); the pointer at `y` is in gap 0 (above the first)
+     * ... n (below the last).
+     */
+    App.slides.gapAt = function gapAt(middles, y) {
+        return middles.filter((middle) => middle < y).length;
+    };
+
+    /* Move slide number `from` into gap `gap` (see gapAt). False when that leaves it where it is. */
+    App.slides.moveSlide = function moveSlide(doc, from, gap) {
+        const slides = Array.from(doc.querySelectorAll('section.slide'));
+        const slide = slides[from];
+        if (!slide || gap === from || gap === from + 1 || gap < 0 || gap > slides.length) {
+            return false;
+        }
+        if (gap === slides.length) {
+            slides[slides.length - 1].after(slide);
+        } else {
+            slides[gap].before(slide);
+        }
+        return true;
+    };
+
+    /* A hidden slide is skipped when presenting (the player, Phase 8); the editor shows it dimmed. */
+    App.slides.isHidden = function isHidden(slide) {
+        return !!slide && slide.getAttribute('data-hidden') === 'true';
+    };
+
+    App.slides.setHidden = function setHidden(slide, hidden) {
+        if (hidden) {
+            slide.setAttribute('data-hidden', 'true');
+        } else {
+            slide.removeAttribute('data-hidden');
+        }
+    };
+
     /* The layout New Slide (Ctrl+M) uses: the slide shown's, but content after a title slide (as PowerPoint). */
     App.slides.nextLayout = function nextLayout(slide) {
         const layout = slide && slide.getAttribute('data-layout');
@@ -19494,6 +19666,39 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.history.change('Delete slide', { slides: [idOf(current)] }, () => current.remove(),
             { meta: { slides: { undo: idOf(current), redo: idOf(neighbour) } } });
         show(idOf(neighbour));
+    };
+
+    /* Move slide number `from` into gap `gap` as one undo step; the moved slide is shown (after undo too). */
+    App.slides.move = function move(from, gap) {
+        const slide = App.deck.getSlides()[from];
+        const doc = App.deck.getDocument();
+        if (!slide || gap === from || gap === from + 1) {
+            return;
+        }
+        finishWork();
+        App.history.change('Move slide', { slides: [] }, () => App.slides.moveSlide(doc, from, gap),
+            { meta: { slides: { undo: idOf(slide), redo: idOf(slide) } } });
+        show(idOf(slide));
+    };
+
+    /* Ctrl+Up / Ctrl+Down in the slide rail: the slide shown one place up (-1) or down (+1). */
+    App.slides.moveBy = function moveBy(delta) {
+        const index = App.deck.getCurrentIndex();
+        const target = index + delta;
+        if (target >= 0 && target < App.deck.getSlides().length) {
+            App.slides.move(index, delta < 0 ? target : target + 1);
+        }
+    };
+
+    /* Hide Slide: on / off for the slide shown, one undo step. */
+    App.slides.toggleHidden = function toggleHidden() {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        const hide = !App.slides.isHidden(slide);
+        App.history.change(hide ? 'Hide slide' : 'Unhide slide', { slideId: idOf(slide) },
+            () => App.slides.setHidden(slide, hide));
     };
 
     // ---------------------------------------------------------------
@@ -20106,6 +20311,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         },
         {
             id: 'slideshow', label: 'Slide Show',
+            groups: [{ label: 'Set Up', commands: [['hideSlide', 'hidden']] }],
             note: 'Presenting from the editor arrives in Phase 8. Saved decks already present on their own: open the saved file in the browser and use the arrow keys (F = full screen).',
         },
         { id: 'export', label: 'Export', note: 'PDF, PNG and PowerPoint export arrive in Phase 8.' },

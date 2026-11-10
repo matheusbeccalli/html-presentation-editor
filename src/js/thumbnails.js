@@ -51,6 +51,14 @@
         });
 
         rail.addEventListener('keydown', onRailKey);
+        rail.addEventListener('pointerdown', onRailPointerDown);
+        // The click that ends a drag must not also pick the slide under the pointer.
+        rail.addEventListener('click', (event) => {
+            if (justDragged) {
+                event.stopPropagation();
+                event.preventDefault();
+            }
+        }, true);
 
         // Right-click a slide: it is shown, and the menu has the slide actions (on the empty rail: New Slide).
         rail.addEventListener('contextmenu', (event) => {
@@ -67,7 +75,7 @@
         });
     };
 
-    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide'];
+    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide', '-', 'hideSlide'];
 
     // Keys in the rail work on slides, as in PowerPoint's slide pane (the editor's own shortcuts do not run).
     const RAIL_KEYS = {
@@ -77,7 +85,88 @@
         Delete: () => App.commands.run('deleteSlide'),
         Backspace: () => App.commands.run('deleteSlide'),
         'Ctrl+D': () => App.commands.run('duplicateSlide'),
+        'Ctrl+ArrowUp': () => App.commands.run('moveSlideUp'),
+        'Ctrl+ArrowDown': () => App.commands.run('moveSlideDown'),
     };
+
+    // ---- Dragging a thumbnail to move its slide ----
+
+    const DRAG_START = 5;     // px the pointer moves before a press becomes a drag
+    const SCROLL_EDGE = 30;   // px from the rail's top / bottom where a drag scrolls it
+    let drag = null;          // { from, startY, active, gap, line }
+    let justDragged = false;
+
+    function onRailPointerDown(event) {
+        const item = event.target.closest('.thumb');
+        if (event.button !== 0 || !item || !App.state.hasDeck) {
+            return;
+        }
+        drag = { from: Number(item.getAttribute('data-index')), startY: event.clientY, active: false, gap: null, line: null };
+        window.addEventListener('pointermove', onDragMove, true);
+        window.addEventListener('pointerup', onDragEnd, true);
+        window.addEventListener('keydown', onDragKey, true);
+    }
+
+    function boxesOf() {
+        return Array.from(rail.querySelectorAll('.thumb .thumb-box'), (box) => box.getBoundingClientRect());
+    }
+
+    function onDragMove(event) {
+        if (!drag.active) {
+            if (Math.abs(event.clientY - drag.startY) < DRAG_START) {
+                return;
+            }
+            drag.active = true;
+            drag.line = App.util.el('div', { class: 'thumb-drop-line' });
+            rail.appendChild(drag.line);
+            rail.classList.add('dragging');
+        }
+        const railRect = rail.getBoundingClientRect();
+        if (event.clientY < railRect.top + SCROLL_EDGE) {
+            rail.scrollTop -= 10;
+        } else if (event.clientY > railRect.bottom - SCROLL_EDGE) {
+            rail.scrollTop += 10;
+        }
+        const boxes = boxesOf();
+        drag.gap = App.slides.gapAt(boxes.map((box) => box.top + box.height / 2), event.clientY);
+        // The line sits in the gap: half the space above the thumbnail below it (or below the last one).
+        const y = drag.gap < boxes.length ? boxes[drag.gap].top - 6 : boxes[boxes.length - 1].bottom + 4;
+        drag.line.style.top = (y - railRect.top + rail.scrollTop) + 'px';
+        drag.line.hidden = drag.gap === drag.from || drag.gap === drag.from + 1;   // there, it would not move
+    }
+
+    function endDrag() {
+        window.removeEventListener('pointermove', onDragMove, true);
+        window.removeEventListener('pointerup', onDragEnd, true);
+        window.removeEventListener('keydown', onDragKey, true);
+        if (drag && drag.line) {
+            drag.line.remove();
+        }
+        rail.classList.remove('dragging');
+        const ended = drag;
+        drag = null;
+        return ended;
+    }
+
+    function onDragEnd() {
+        const ended = endDrag();
+        if (ended && ended.active) {
+            justDragged = true;
+            setTimeout(() => { justDragged = false; }, 0);
+            if (ended.gap !== null) {
+                App.slides.move(ended.from, ended.gap);
+            }
+        }
+    }
+
+    /* Esc while dragging: nothing moves. */
+    function onDragKey(event) {
+        if (event.key === 'Escape' && drag && drag.active) {
+            event.preventDefault();
+            event.stopPropagation();
+            endDrag();
+        }
+    }
 
     function onRailKey(event) {
         const action = RAIL_KEYS[App.shortcuts.comboFromEvent(event)];
@@ -143,23 +232,32 @@
         const frame = App.util.el('iframe', {
             class: 'thumb-frame', sandbox: 'allow-same-origin', tabindex: '-1', 'aria-hidden': 'true',
         });
-        const hidden = slide.getAttribute('data-hidden') === 'true';
         const item = App.util.el('div', {
-            class: 'thumb' + (hidden ? ' thumb-hidden' : ''),
-            role: 'button', tabindex: '0',
+            class: 'thumb', role: 'button', tabindex: '0',
             'data-index': String(index),
-            title: 'Slide ' + (index + 1) + (hidden ? ' (hidden)' : ''),
             onclick: () => App.deck.goTo(index),
         }, [
             App.util.el('span', { class: 'thumb-number' }, [String(index + 1)]),
             App.util.el('div', { class: 'thumb-box' }, [frame]),
         ]);
-        if (hidden) {
-            const badge = App.util.el('span', { class: 'thumb-hidden-badge', title: 'Hidden slide' });
-            badge.innerHTML = App.icons.get('hidden');
-            item.appendChild(badge);
-        }
+        markHidden(item, slide);
         return item;
+    }
+
+    /* A hidden slide's thumbnail is dimmed and carries the crossed-out eye (also right after Hide Slide). */
+    function markHidden(item, slide) {
+        const hidden = App.slides.isHidden(slide);
+        const index = Number(item.getAttribute('data-index'));
+        item.classList.toggle('thumb-hidden', hidden);
+        item.title = 'Slide ' + (index + 1) + (hidden ? ' (hidden)' : '');
+        const badge = item.querySelector('.thumb-hidden-badge');
+        if (hidden && !badge) {
+            const mark = App.util.el('span', { class: 'thumb-hidden-badge', title: 'Hidden slide' });
+            mark.innerHTML = App.icons.get('hidden');
+            item.appendChild(mark);
+        } else if (!hidden && badge) {
+            badge.remove();
+        }
     }
 
     function onVisibilityChange(entries) {
@@ -229,8 +327,13 @@
             rebuild();   // slides may have been added, removed, moved or restyled
             return;
         }
-        const index = App.deck.getSlides().findIndex((slide) => slide.getAttribute('data-slide-id') === info.scope.slideId);
+        const slides = App.deck.getSlides();
+        const index = slides.findIndex((slide) => slide.getAttribute('data-slide-id') === info.scope.slideId);
         if (index !== -1) {
+            const item = rail.querySelector('.thumb[data-index="' + index + '"]');
+            if (item) {
+                markHidden(item, slides[index]);
+            }
             pendingRefresh.add(index);
             flushRefresh();
         }

@@ -94,6 +94,12 @@
                 App.commands.run(command);
             },
         });
+        // A toggle (Hide Slide) shows a tick while it is on.
+        const checked = App.commands.isChecked(command);
+        if (checked !== null) {
+            button.setAttribute('role', 'menuitemcheckbox');
+            button.setAttribute('aria-checked', checked ? 'true' : 'false');
+        }
         button.append(App.util.el('span', { class: 'menu-label' }, [App.commands.label(command)]),
             App.util.el('span', { class: 'menu-keys' }, [App.shortcuts.keysFor(command)]));
         return button;

@@ -135,6 +135,18 @@
         App.commands.define('deleteSlide', {
             label: 'Delete Slide', run: () => App.slides.remove(), isEnabled: () => hasDeck() && App.slides.canRemove(),
         });
+        App.commands.define('hideSlide', {
+            label: 'Hide Slide', run: () => App.slides.toggleHidden(), isEnabled: hasDeck,
+            isChecked: () => hasDeck() && App.slides.isHidden(App.deck.getCurrentSlide()),
+        });
+        // Ctrl+Up / Ctrl+Down in the slide rail (thumbnails.js); dragging a thumbnail does the same.
+        App.commands.define('moveSlideUp', {
+            label: 'Move slide up', run: () => App.slides.moveBy(-1), isEnabled: () => hasDeck() && App.deck.getCurrentIndex() > 0,
+        });
+        App.commands.define('moveSlideDown', {
+            label: 'Move slide down', run: () => App.slides.moveBy(1),
+            isEnabled: () => hasDeck() && App.deck.getCurrentIndex() < App.deck.getSlides().length - 1,
+        });
 
         // ---- Selected element (elements.js) ----
         const hasSelection = () => App.elements.hasSelection();

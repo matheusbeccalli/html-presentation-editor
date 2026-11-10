@@ -17,13 +17,19 @@
  * change restyles new slides too. The slide carries data-layout (SPEC 3.3).
  *
  * New and duplicated slides go after the slide shown; delete removes the slide
- * shown (never the last one left). Each is one undo step of the history's
- * { slides: [...] } scope: only the slide that comes or goes is copied, not the
- * whole deck. Undo / redo show the slide the step was about.
+ * shown (never the last one left). A slide moves by dragging its thumbnail
+ * (thumbnails.js; gapAt says where it lands) or with Ctrl+Up / Ctrl+Down in
+ * the rail. Hide Slide marks it data-hidden="true": the player skips it.
+ *
+ * Adding, duplicating, deleting and moving are each one undo step of the
+ * history's { slides: [...] } scope: only the slide that comes or goes is
+ * copied (none for a move), not the whole deck. Undo / redo show the slide the
+ * step was about. Hiding is a step of that one slide.
  *
  * Talks to: deck.js, history.js, text.js (the text of new boxes), elements.js
- * (nothing selected), commands.js (newSlide, duplicateSlide, deleteSlide),
- * ribbon.js (the New Slide gallery), thumbnails.js (keys and right-click).
+ * (nothing selected), commands.js (newSlide, duplicateSlide, deleteSlide,
+ * hideSlide), ribbon.js (the New Slide gallery), thumbnails.js (drag, keys and
+ * right-click).
  */
 
 (function () {
@@ -193,6 +199,43 @@
         return copy;
     };
 
+    /*
+     * Reordering by dragging a thumbnail: `middles` are the thumbnails' vertical
+     * middles (top to bottom); the pointer at `y` is in gap 0 (above the first)
+     * ... n (below the last).
+     */
+    App.slides.gapAt = function gapAt(middles, y) {
+        return middles.filter((middle) => middle < y).length;
+    };
+
+    /* Move slide number `from` into gap `gap` (see gapAt). False when that leaves it where it is. */
+    App.slides.moveSlide = function moveSlide(doc, from, gap) {
+        const slides = Array.from(doc.querySelectorAll('section.slide'));
+        const slide = slides[from];
+        if (!slide || gap === from || gap === from + 1 || gap < 0 || gap > slides.length) {
+            return false;
+        }
+        if (gap === slides.length) {
+            slides[slides.length - 1].after(slide);
+        } else {
+            slides[gap].before(slide);
+        }
+        return true;
+    };
+
+    /* A hidden slide is skipped when presenting (the player, Phase 8); the editor shows it dimmed. */
+    App.slides.isHidden = function isHidden(slide) {
+        return !!slide && slide.getAttribute('data-hidden') === 'true';
+    };
+
+    App.slides.setHidden = function setHidden(slide, hidden) {
+        if (hidden) {
+            slide.setAttribute('data-hidden', 'true');
+        } else {
+            slide.removeAttribute('data-hidden');
+        }
+    };
+
     /* The layout New Slide (Ctrl+M) uses: the slide shown's, but content after a title slide (as PowerPoint). */
     App.slides.nextLayout = function nextLayout(slide) {
         const layout = slide && slide.getAttribute('data-layout');
@@ -270,6 +313,39 @@
         App.history.change('Delete slide', { slides: [idOf(current)] }, () => current.remove(),
             { meta: { slides: { undo: idOf(current), redo: idOf(neighbour) } } });
         show(idOf(neighbour));
+    };
+
+    /* Move slide number `from` into gap `gap` as one undo step; the moved slide is shown (after undo too). */
+    App.slides.move = function move(from, gap) {
+        const slide = App.deck.getSlides()[from];
+        const doc = App.deck.getDocument();
+        if (!slide || gap === from || gap === from + 1) {
+            return;
+        }
+        finishWork();
+        App.history.change('Move slide', { slides: [] }, () => App.slides.moveSlide(doc, from, gap),
+            { meta: { slides: { undo: idOf(slide), redo: idOf(slide) } } });
+        show(idOf(slide));
+    };
+
+    /* Ctrl+Up / Ctrl+Down in the slide rail: the slide shown one place up (-1) or down (+1). */
+    App.slides.moveBy = function moveBy(delta) {
+        const index = App.deck.getCurrentIndex();
+        const target = index + delta;
+        if (target >= 0 && target < App.deck.getSlides().length) {
+            App.slides.move(index, delta < 0 ? target : target + 1);
+        }
+    };
+
+    /* Hide Slide: on / off for the slide shown, one undo step. */
+    App.slides.toggleHidden = function toggleHidden() {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        const hide = !App.slides.isHidden(slide);
+        App.history.change(hide ? 'Hide slide' : 'Unhide slide', { slideId: idOf(slide) },
+            () => App.slides.setHidden(slide, hide));
     };
 
     // ---------------------------------------------------------------

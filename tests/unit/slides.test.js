@@ -129,3 +129,49 @@ test('slides: the layout a new slide gets by default follows the slide shown', (
     assertEqual(layout('s4'), 'title-content', 'no layout said');
     assertEqual(App.slides.nextLayout(null), 'title-content');
 });
+
+function orderOf(doc) {
+    return Array.from(doc.querySelectorAll('section.slide'), (slide) => slide.getAttribute('data-slide-id')).join(',');
+}
+
+function threeSlides() {
+    return slidesDeck('<section class="slide" data-slide-id="s1"></section><section class="slide" data-slide-id="s2"></section>' +
+        '<section class="slide" data-slide-id="s3"></section><div class="master"></div>');
+}
+
+test('slides: a dragged thumbnail lands in the gap the pointer is in (between the middles of two thumbnails)', () => {
+    const middles = [50, 150, 250];
+    assertEqual(App.slides.gapAt(middles, 10), 0, 'above the first');
+    assertEqual(App.slides.gapAt(middles, 100), 1);
+    assertEqual(App.slides.gapAt(middles, 151), 2);
+    assertEqual(App.slides.gapAt(middles, 400), 3, 'below the last');
+});
+
+test('slides: moving a slide into a gap', () => {
+    let doc = threeSlides();
+    assert(App.slides.moveSlide(doc, 0, 3), 'moved');
+    assertEqual(orderOf(doc), 's2,s3,s1', 'to the end');
+    assertEqual(doc.body.lastElementChild.className, 'master', 'still before the master');
+    doc = threeSlides();
+    App.slides.moveSlide(doc, 2, 0);
+    assertEqual(orderOf(doc), 's3,s1,s2', 'to the start');
+    doc = threeSlides();
+    App.slides.moveSlide(doc, 0, 2);
+    assertEqual(orderOf(doc), 's2,s1,s3', 'between two');
+});
+
+test('slides: dropping a slide next to itself does not move it', () => {
+    const doc = threeSlides();
+    assert(!App.slides.moveSlide(doc, 1, 1), 'the gap above it');
+    assert(!App.slides.moveSlide(doc, 1, 2), 'the gap below it');
+    assertEqual(orderOf(doc), 's1,s2,s3');
+});
+
+test('slides: hiding and showing a slide (data-hidden="true", SPEC 3.3)', () => {
+    const slide = threeSlides().querySelector('section');
+    App.slides.setHidden(slide, true);
+    assertEqual(slide.getAttribute('data-hidden'), 'true');
+    assert(App.slides.isHidden(slide), 'hidden');
+    App.slides.setHidden(slide, false);
+    assert(!slide.hasAttribute('data-hidden') && !App.slides.isHidden(slide), 'shown: the attribute goes');
+});

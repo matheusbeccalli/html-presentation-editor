@@ -171,6 +171,7 @@
 .menu-item:disabled { opacity: 0.4; cursor: default; }
 .menu-label { flex: 1; }
 .menu-keys { color: var(--text-muted); font-size: 11px; }
+.context-menu .menu-item[aria-checked="true"] .menu-label::after { content: " \2713"; color: var(--accent); }
 .menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 
 /* AutoSave switch in the title bar (autosave.js), like PowerPoint's. */

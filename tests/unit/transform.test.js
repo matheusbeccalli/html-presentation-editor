@@ -105,3 +105,78 @@ test('transform: the bounds of several rects', () => {
         { left: 10, top: 5, width: 50, height: 45 });
     assertEqual(App.transform.boundsOf([]), null);
 });
+
+// ---- Align and distribute (Phase 7) ----
+
+const ALIGN_RECTS = [
+    { left: 100, top: 50, width: 200, height: 40 },
+    { left: 400, top: 200, width: 100, height: 100 },
+    { left: 250, top: 120, width: 50, height: 20 },
+];
+const SLIDE_AREA = { left: 0, top: 0, width: 1280, height: 720 };
+
+function lefts(rects) { return rects.map((r) => r.left); }
+function tops(rects) { return rects.map((r) => r.top); }
+
+test('transform: align left / center / right lines the rects up on the area, keeping their size and height', () => {
+    const area = App.transform.boundsOf(ALIGN_RECTS);   // 100..500 x 50..300
+    let out = App.transform.alignRects(ALIGN_RECTS, 'left', area);
+    assertEqual(lefts(out), [100, 100, 100]);
+    assertEqual(tops(out), [50, 200, 120], 'tops untouched');
+    assertEqual(out.map((r) => r.width + 'x' + r.height), ['200x40', '100x100', '50x20'], 'sizes untouched');
+    out = App.transform.alignRects(ALIGN_RECTS, 'right', area);
+    assertEqual(out.map((r) => r.left + r.width), [500, 500, 500]);
+    out = App.transform.alignRects(ALIGN_RECTS, 'center', area);
+    assertEqual(out.map((r) => r.left + r.width / 2), [300, 300, 300]);
+    assert(ALIGN_RECTS[0].left === 100, 'the input is not changed');
+});
+
+test('transform: align top / middle / bottom', () => {
+    const area = App.transform.boundsOf(ALIGN_RECTS);
+    assertEqual(tops(App.transform.alignRects(ALIGN_RECTS, 'top', area)), [50, 50, 50]);
+    assertEqual(App.transform.alignRects(ALIGN_RECTS, 'bottom', area).map((r) => r.top + r.height), [300, 300, 300]);
+    assertEqual(App.transform.alignRects(ALIGN_RECTS, 'middle', area).map((r) => r.top + r.height / 2), [175, 175, 175]);
+    assertEqual(lefts(App.transform.alignRects(ALIGN_RECTS, 'middle', area)), [100, 400, 250], 'lefts untouched');
+});
+
+test('transform: aligning to the slide uses the slide as the area', () => {
+    const out = App.transform.alignRects([{ left: 10, top: 10, width: 280, height: 100 }], 'center', SLIDE_AREA);
+    assertEqual(out[0].left, 500);
+    assertEqual(App.transform.alignRects([{ left: 10, top: 10, width: 280, height: 100 }], 'bottom', SLIDE_AREA)[0].top, 620);
+});
+
+test('transform: distribute horizontally keeps the outer two and makes the gaps between equal', () => {
+    const rects = [
+        { left: 0, top: 0, width: 100, height: 10 },
+        { left: 600, top: 30, width: 100, height: 10 },   // the right-most
+        { left: 150, top: 60, width: 50, height: 10 },
+        { left: 300, top: 90, width: 150, height: 10 },
+    ];
+    // Widths 100+50+150+100 = 400 inside 0..700: three gaps of 100.
+    const out = App.transform.distributeRects(rects, 'horizontal', App.transform.boundsOf(rects));
+    assertEqual(lefts(out), [0, 600, 200, 350], 'in the input order');
+    assertEqual(tops(out), [0, 30, 60, 90], 'tops untouched');
+});
+
+test('transform: distribute vertically, and to the slide: the outer ones go to its edges', () => {
+    const rects = [
+        { left: 0, top: 100, width: 10, height: 40 },
+        { left: 0, top: 120, width: 10, height: 40 },
+        { left: 0, top: 300, width: 10, height: 40 },
+    ];
+    assertEqual(tops(App.transform.distributeRects(rects, 'vertical', App.transform.boundsOf(rects))), [100, 200, 300]);
+    // 720 - 120 = 600 left over: two gaps of 300.
+    assertEqual(tops(App.transform.distributeRects(rects, 'vertical', SLIDE_AREA)), [0, 340, 680]);
+});
+
+test('transform: distribute rounds to 1/100 px; ties keep their order; one rect is centred', () => {
+    const rects = [
+        { left: 0, top: 0, width: 10, height: 10 },
+        { left: 50, top: 0, width: 10, height: 10 },
+        { left: 50, top: 0, width: 10, height: 10 },
+        { left: 100, top: 0, width: 10, height: 10 },
+    ];
+    // 110 wide, 40 of boxes: three gaps of 23.333...
+    assertEqual(lefts(App.transform.distributeRects(rects, 'horizontal', App.transform.boundsOf(rects))), [0, 33.33, 66.67, 100]);
+    assertEqual(lefts(App.transform.distributeRects([{ left: 0, top: 0, width: 280, height: 10 }], 'horizontal', SLIDE_AREA)), [500]);
+});

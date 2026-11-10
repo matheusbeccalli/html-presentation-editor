@@ -367,6 +367,23 @@
                     label: label, isEnabled: () => App.elements.canArrange(action), run: () => App.elements.arrange(action),
                 });
             });
+        // Arrange > Align (Phase 7): one element on the slide, several on each other or on the slide.
+        ['left', 'center', 'right', 'top', 'middle', 'bottom'].forEach((how) => {
+            App.commands.define('alignObjects' + how[0].toUpperCase() + how.slice(1), {
+                label: 'Align ' + how, isEnabled: () => App.elements.canAlign(), run: () => App.elements.align(how),
+            });
+        });
+        [['distributeHorizontally', 'horizontal'], ['distributeVertically', 'vertical']].forEach(([name, axis]) => {
+            App.commands.define(name, {
+                label: 'Distribute ' + axis + 'ly', isEnabled: () => App.elements.canDistribute(), run: () => App.elements.distribute(axis),
+            });
+        });
+        App.commands.define('alignToSlide', {
+            label: 'Align to slide',
+            isEnabled: () => App.selection.count() > 1,
+            isChecked: () => App.elements.canAlign() && App.elements.alignsToSlide(),
+            run: () => App.elements.toggleAlignToSlide(),
+        });
 
         App.commands.define('contextMenu', {
             label: 'Show menu', isEnabled: () => App.state.hasDeck, run: () => App.contextMenu.openForSelection(),

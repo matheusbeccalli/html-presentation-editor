@@ -1203,7 +1203,7 @@ App.util.el = function el(tag, attributes, children) {
  *   'saved'            the deck was written to disk          (fileio.js)
  *
  * Added in Phase 2:
- *   'selection-changed' another element (or none) was selected (selection.js)
+ *   'selection-changed' another element (or none, or several: { id, ids }) was selected (selection.js)
  *   'clipboard-changed' something was copied, Paste can run    (elements.js)
  *   'selection-dragged' the selected element moves during a drag (selection.js)
  *   'zoom-changed'      the canvas zoom changed                (canvas.js)
@@ -10885,6 +10885,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         newSlide: '<rect x="2.5" y="4.5" width="13" height="9" rx="1"/><path d="M5 7.5h6M5 10h4M16 12v6M13 15h6"/>',
         duplicateSlide: '<rect x="2.5" y="3" width="11" height="7.5" rx="1"/><rect x="6.5" y="9.5" width="11" height="7.5" rx="1"/>',
         deleteSlide: '<rect x="2.5" y="3.5" width="13" height="9" rx="1"/><path d="M12 13l5 5M17 13l-5 5"/>',
+        alignObjectsLeft: '<path d="M3 2.5v15"/><rect x="5" y="5" width="11" height="3.5"/><rect x="5" y="11.5" width="7" height="3.5"/>',
+        alignObjectsCenter: '<path d="M10 2.5v15"/><rect x="4" y="5" width="12" height="3.5"/><rect x="6.5" y="11.5" width="7" height="3.5"/>',
+        alignObjectsRight: '<path d="M17 2.5v15"/><rect x="4" y="5" width="11" height="3.5"/><rect x="8" y="11.5" width="7" height="3.5"/>',
+        alignObjectsTop: '<path d="M2.5 3h15"/><rect x="5" y="5" width="3.5" height="11"/><rect x="11.5" y="5" width="3.5" height="7"/>',
+        alignObjectsMiddle: '<path d="M2.5 10h15"/><rect x="5" y="4" width="3.5" height="12"/><rect x="11.5" y="6.5" width="3.5" height="7"/>',
+        alignObjectsBottom: '<path d="M2.5 17h15"/><rect x="5" y="4" width="3.5" height="11"/><rect x="11.5" y="8" width="3.5" height="7"/>',
+        distributeHorizontally: '<path d="M2.5 3v14M17.5 3v14"/><rect x="5" y="7" width="2.5" height="6"/><rect x="8.75" y="7" width="2.5" height="6"/><rect x="12.5" y="7" width="2.5" height="6"/>',
+        distributeVertically: '<path d="M3 2.5h14M3 17.5h14"/><rect x="7" y="5" width="6" height="2.5"/><rect x="7" y="8.75" width="6" height="2.5"/><rect x="7" y="12.5" width="6" height="2.5"/>',
+        alignToSlide: '<rect x="2.5" y="4" width="15" height="12" rx="1"/><rect x="7" y="8" width="6" height="4" fill="currentColor" fill-opacity="0.25"/>',
         warning: '<path d="M10 2.5l8 14.5H2z"/><path d="M10 8v4.5"/><circle cx="10" cy="14.8" r="0.4"/>',
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
         check: '<path d="M4 10.5l4 4 8-9"/>',
@@ -11719,6 +11728,61 @@ App.template.newDeckHtml = function newDeckHtml() {
         const right = Math.max(...rects.map((r) => r.left + r.width));
         const bottom = Math.max(...rects.map((r) => r.top + r.height));
         return { left: left, top: top, width: right - left, height: bottom - top };
+    };
+
+    // ---- Align and distribute (Phase 7) ----
+
+    const hundredths = (value) => Math.round(value * 100) / 100;   // 1/100 px is plenty
+
+    /*
+     * New rects with each of `rects` lined up on `area` (the slide, or the
+     * bounds of the selection): 'left' / 'center' / 'right' move them
+     * sideways only, 'top' / 'middle' / 'bottom' up or down only. Sizes stay.
+     */
+    App.transform.alignRects = function alignRects(rects, how, area) {
+        return rects.map((rect) => {
+            const out = Object.assign({}, rect);
+            if (how === 'left') {
+                out.left = area.left;
+            } else if (how === 'center') {
+                out.left = hundredths(area.left + (area.width - rect.width) / 2);
+            } else if (how === 'right') {
+                out.left = area.left + area.width - rect.width;
+            } else if (how === 'top') {
+                out.top = area.top;
+            } else if (how === 'middle') {
+                out.top = hundredths(area.top + (area.height - rect.height) / 2);
+            } else if (how === 'bottom') {
+                out.top = area.top + area.height - rect.height;
+            }
+            return out;
+        });
+    };
+
+    /*
+     * New rects spread over `area` with equal gaps between them, as
+     * PowerPoint's Distribute: 'horizontal' orders them by their left edge
+     * (ties keep their order), the first starts at the area's left, the last
+     * ends at its right. Pass the selection's bounds to keep the outer two
+     * where they are, or the slide to spread them over it. One rect is centred.
+     */
+    App.transform.distributeRects = function distributeRects(rects, axis, area) {
+        const start = axis === 'horizontal' ? 'left' : 'top';
+        const size = axis === 'horizontal' ? 'width' : 'height';
+        const out = rects.map((rect) => Object.assign({}, rect));
+        if (out.length === 1) {
+            out[0][start] = hundredths(area[start] + (area[size] - out[0][size]) / 2);
+            return out;
+        }
+        const order = out.map((rect, index) => index).sort((a, b) => (out[a][start] - out[b][start]) || (a - b));
+        const used = out.reduce((total, rect) => total + rect[size], 0);
+        const gap = (area[size] - used) / (out.length - 1);
+        let position = area[start];
+        order.forEach((index) => {
+            out[index][start] = hundredths(position);
+            position += out[index][size] + gap;
+        });
+        return out;
     };
 
     // ---- Reading and writing elements (DOM, but no page state) ----
@@ -12644,7 +12708,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * elements.js - actions on the selected element(s) (SPEC 4, Phase 2; several
  * at once since Phase 7's multi-select): nudge with the arrow keys, delete,
  * cut / copy / paste / duplicate (also across slides), and the stacking order
- * (bring forward, send to back ...).
+ * (bring forward, send to back ...), align and distribute (Phase 7).
  *
  * Every action is one undoable step on the current slide (history.js).
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
@@ -13067,6 +13131,60 @@ App.template.newDeckHtml = function newDeckHtml() {
                 item.style.zIndex = String(index + 1);
             });
         });
+    };
+
+    // ---------------------------------------------------------------
+    // Align and distribute (Phase 7)
+    // ---------------------------------------------------------------
+
+    const SLIDE_AREA = { left: 0, top: 0, width: 1280, height: 720 };
+    let alignToSlide = false;   // Arrange > Align to Slide, for this session (PowerPoint keeps it too)
+
+    /* One element always lines up on the slide; several on each other unless Align to Slide is on. */
+    App.elements.alignsToSlide = function alignsToSlide() {
+        return alignToSlide || App.selection.count() === 1;
+    };
+
+    App.elements.toggleAlignToSlide = function toggleAlignToSlide() {
+        alignToSlide = !alignToSlide;
+        App.ribbon.refresh();
+    };
+
+    App.elements.canAlign = function canAlign() {
+        return App.selection.count() > 0 && Boolean(App.deck.getCurrentSlide());
+    };
+
+    /* Distributing needs three to spread between the outer two, or one and more over the slide. */
+    App.elements.canDistribute = function canDistribute() {
+        return App.elements.canAlign() && App.selection.count() >= (App.elements.alignsToSlide() ? 1 : 3);
+    };
+
+    /* Move the selected elements to the rects `place(rects, area)` gives; one undo step, none when nothing moves. */
+    function placeSelected(label, place) {
+        const elements = App.selection.getElements();
+        const rects = elements.map(App.transform.readRect);
+        const area = App.elements.alignsToSlide() ? SLIDE_AREA : App.transform.boundsOf(rects);
+        const placed = place(rects, area);
+        if (placed.every((rect, index) => rect.left === rects[index].left && rect.top === rects[index].top)) {
+            return;
+        }
+        App.history.change(label, currentSlideScope(), () => {
+            elements.forEach((element, index) => App.transform.writeRect(element, placed[index]));
+        });
+    }
+
+    /* how: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom' */
+    App.elements.align = function align(how) {
+        if (App.elements.canAlign()) {
+            placeSelected('Align ' + how, (rects, area) => App.transform.alignRects(rects, how, area));
+        }
+    };
+
+    /* axis: 'horizontal' | 'vertical' */
+    App.elements.distribute = function distribute(axis) {
+        if (App.elements.canDistribute()) {
+            placeSelected('Distribute ' + axis + 'ly', (rects, area) => App.transform.distributeRects(rects, axis, area));
+        }
     };
 })();
 
@@ -16055,6 +16173,23 @@ App.template.newDeckHtml = function newDeckHtml() {
                     label: label, isEnabled: () => App.elements.canArrange(action), run: () => App.elements.arrange(action),
                 });
             });
+        // Arrange > Align (Phase 7): one element on the slide, several on each other or on the slide.
+        ['left', 'center', 'right', 'top', 'middle', 'bottom'].forEach((how) => {
+            App.commands.define('alignObjects' + how[0].toUpperCase() + how.slice(1), {
+                label: 'Align ' + how, isEnabled: () => App.elements.canAlign(), run: () => App.elements.align(how),
+            });
+        });
+        [['distributeHorizontally', 'horizontal'], ['distributeVertically', 'vertical']].forEach(([name, axis]) => {
+            App.commands.define(name, {
+                label: 'Distribute ' + axis + 'ly', isEnabled: () => App.elements.canDistribute(), run: () => App.elements.distribute(axis),
+            });
+        });
+        App.commands.define('alignToSlide', {
+            label: 'Align to slide',
+            isEnabled: () => App.selection.count() > 1,
+            isChecked: () => App.elements.canAlign() && App.elements.alignsToSlide(),
+            run: () => App.elements.toggleAlignToSlide(),
+        });
 
         App.commands.define('contextMenu', {
             label: 'Show menu', isEnabled: () => App.state.hasDeck, run: () => App.contextMenu.openForSelection(),
@@ -20555,8 +20690,17 @@ App.template.newDeckHtml = function newDeckHtml() {
                     commands: [['bringToFront', 'front'], ['bringForward', 'forward'],
                         ['sendBackward', 'backward'], ['sendToBack', 'back']],
                 },
+                {
+                    label: 'Align',
+                    rows: [[['alignObjectsLeft', 'alignObjectsLeft'], ['alignObjectsCenter', 'alignObjectsCenter'],
+                        ['alignObjectsRight', 'alignObjectsRight'], ['distributeHorizontally', 'distributeHorizontally']],
+                    [['alignObjectsTop', 'alignObjectsTop'], ['alignObjectsMiddle', 'alignObjectsMiddle'],
+                        ['alignObjectsBottom', 'alignObjectsBottom'], ['distributeVertically', 'distributeVertically']],
+                    [{ command: 'alignToSlide', icon: 'alignToSlide' }]],
+                },
             ],
-            note: 'Align, distribute, group and rotate arrive in Phase 7.',
+            note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
+                'Distribute: equal gaps between three or more. Group and rotate arrive later in Phase 7.',
         },
         {
             id: 'slideshow', label: 'Slide Show',

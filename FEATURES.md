@@ -260,7 +260,7 @@ Nested bullets are the top priority of this phase.
 ## Phase 7: Arrange and slides
 
 - [x] Multi-select (Shift+click, or drag a rectangle on empty canvas) *(Shift+click or Ctrl+click adds an element or takes it out; a drag from an empty part of the slide draws a rectangle that selects what it covers completely (Shift: adds); Ctrl+A selects all; several selected move, nudge, delete, copy / paste, duplicate and restack together, each one undo step; the Format pane says how many are selected)*
-- [ ] Align left / center / right / top / middle / bottom; distribute horizontally / vertically
+- [x] Align left / center / right / top / middle / bottom; distribute horizontally / vertically *(Arrange > Align: one element lines up on the slide, several on each other (the box around them) or, with Align to slide on, on the slide; Distribute: equal gaps between three or more, the outer two stay (with Align to slide: spread over the slide); each one undo step)*
 - [ ] Smart guides and snapping to slide edges, center lines and other elements (5 px threshold); Alt while dragging disables snapping
 - [ ] Optional gridlines and rulers
 - [ ] Group / ungroup (Ctrl+G / Ctrl+Shift+G)
@@ -276,6 +276,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Slides: Home > New Slide ▾ > Title and Content (and the other three): the new slide comes after the one shown, its title where your titles are. Ctrl+M adds one too. Right-click a thumbnail > Duplicate Slide; click a thumbnail and press Delete: gone, the next one shown. Ctrl+Z after each: undone, and the slide it was about is shown. Save, reopen: the slides are there
   - [ ] Reorder and hide: drag slide 1's thumbnail down between two others (a red line shows where): it moves there; Ctrl+Z puts it back. Click a thumbnail, Ctrl+Down: one place down. Right-click a thumbnail > Hide Slide: dimmed, crossed-out eye; Slide Show tab > Hide Slide is lit and turns it off. Save, open the saved file in Edge and present with the arrow keys: the hidden slide is skipped
   - [ ] Multi-select: click the title, Shift+click the subtitle: both outlined; drag one of them: both move; Ctrl+Z. Drag a rectangle from an empty corner over several boxes: those wholly inside are selected. Ctrl+A, then Delete: all gone; Ctrl+Z. Select two, Ctrl+C, go to another slide, Ctrl+V: both pasted where they were
+  - [ ] Align and distribute: click the logo, Arrange > Align center: it moves to the middle of the slide. Select three boxes (Shift+click), Align left: their left edges line up; Distribute vertically: equal gaps, the top and bottom ones stay. Turn on Align to slide, Align middle: all three on the slide's middle line. Ctrl+Z after each
 
 ## Phase 8: Present and export (section 7)
 

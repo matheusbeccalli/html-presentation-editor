@@ -136,8 +136,17 @@
                     commands: [['bringToFront', 'front'], ['bringForward', 'forward'],
                         ['sendBackward', 'backward'], ['sendToBack', 'back']],
                 },
+                {
+                    label: 'Align',
+                    rows: [[['alignObjectsLeft', 'alignObjectsLeft'], ['alignObjectsCenter', 'alignObjectsCenter'],
+                        ['alignObjectsRight', 'alignObjectsRight'], ['distributeHorizontally', 'distributeHorizontally']],
+                    [['alignObjectsTop', 'alignObjectsTop'], ['alignObjectsMiddle', 'alignObjectsMiddle'],
+                        ['alignObjectsBottom', 'alignObjectsBottom'], ['distributeVertically', 'distributeVertically']],
+                    [{ command: 'alignToSlide', icon: 'alignToSlide' }]],
+                },
             ],
-            note: 'Align, distribute, group and rotate arrive in Phase 7.',
+            note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
+                'Distribute: equal gaps between three or more. Group and rotate arrive later in Phase 7.',
         },
         {
             id: 'slideshow', label: 'Slide Show',

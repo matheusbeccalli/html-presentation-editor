@@ -135,6 +135,61 @@
         return { left: left, top: top, width: right - left, height: bottom - top };
     };
 
+    // ---- Align and distribute (Phase 7) ----
+
+    const hundredths = (value) => Math.round(value * 100) / 100;   // 1/100 px is plenty
+
+    /*
+     * New rects with each of `rects` lined up on `area` (the slide, or the
+     * bounds of the selection): 'left' / 'center' / 'right' move them
+     * sideways only, 'top' / 'middle' / 'bottom' up or down only. Sizes stay.
+     */
+    App.transform.alignRects = function alignRects(rects, how, area) {
+        return rects.map((rect) => {
+            const out = Object.assign({}, rect);
+            if (how === 'left') {
+                out.left = area.left;
+            } else if (how === 'center') {
+                out.left = hundredths(area.left + (area.width - rect.width) / 2);
+            } else if (how === 'right') {
+                out.left = area.left + area.width - rect.width;
+            } else if (how === 'top') {
+                out.top = area.top;
+            } else if (how === 'middle') {
+                out.top = hundredths(area.top + (area.height - rect.height) / 2);
+            } else if (how === 'bottom') {
+                out.top = area.top + area.height - rect.height;
+            }
+            return out;
+        });
+    };
+
+    /*
+     * New rects spread over `area` with equal gaps between them, as
+     * PowerPoint's Distribute: 'horizontal' orders them by their left edge
+     * (ties keep their order), the first starts at the area's left, the last
+     * ends at its right. Pass the selection's bounds to keep the outer two
+     * where they are, or the slide to spread them over it. One rect is centred.
+     */
+    App.transform.distributeRects = function distributeRects(rects, axis, area) {
+        const start = axis === 'horizontal' ? 'left' : 'top';
+        const size = axis === 'horizontal' ? 'width' : 'height';
+        const out = rects.map((rect) => Object.assign({}, rect));
+        if (out.length === 1) {
+            out[0][start] = hundredths(area[start] + (area[size] - out[0][size]) / 2);
+            return out;
+        }
+        const order = out.map((rect, index) => index).sort((a, b) => (out[a][start] - out[b][start]) || (a - b));
+        const used = out.reduce((total, rect) => total + rect[size], 0);
+        const gap = (area[size] - used) / (out.length - 1);
+        let position = area[start];
+        order.forEach((index) => {
+            out[index][start] = hundredths(position);
+            position += out[index][size] + gap;
+        });
+        return out;
+    };
+
     // ---- Reading and writing elements (DOM, but no page state) ----
 
     App.transform.readRect = function readRect(element) {

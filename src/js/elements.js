@@ -2,7 +2,7 @@
  * elements.js - actions on the selected element(s) (SPEC 4, Phase 2; several
  * at once since Phase 7's multi-select): nudge with the arrow keys, delete,
  * cut / copy / paste / duplicate (also across slides), and the stacking order
- * (bring forward, send to back ...).
+ * (bring forward, send to back ...), align and distribute (Phase 7).
  *
  * Every action is one undoable step on the current slide (history.js).
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
@@ -425,5 +425,59 @@
                 item.style.zIndex = String(index + 1);
             });
         });
+    };
+
+    // ---------------------------------------------------------------
+    // Align and distribute (Phase 7)
+    // ---------------------------------------------------------------
+
+    const SLIDE_AREA = { left: 0, top: 0, width: 1280, height: 720 };
+    let alignToSlide = false;   // Arrange > Align to Slide, for this session (PowerPoint keeps it too)
+
+    /* One element always lines up on the slide; several on each other unless Align to Slide is on. */
+    App.elements.alignsToSlide = function alignsToSlide() {
+        return alignToSlide || App.selection.count() === 1;
+    };
+
+    App.elements.toggleAlignToSlide = function toggleAlignToSlide() {
+        alignToSlide = !alignToSlide;
+        App.ribbon.refresh();
+    };
+
+    App.elements.canAlign = function canAlign() {
+        return App.selection.count() > 0 && Boolean(App.deck.getCurrentSlide());
+    };
+
+    /* Distributing needs three to spread between the outer two, or one and more over the slide. */
+    App.elements.canDistribute = function canDistribute() {
+        return App.elements.canAlign() && App.selection.count() >= (App.elements.alignsToSlide() ? 1 : 3);
+    };
+
+    /* Move the selected elements to the rects `place(rects, area)` gives; one undo step, none when nothing moves. */
+    function placeSelected(label, place) {
+        const elements = App.selection.getElements();
+        const rects = elements.map(App.transform.readRect);
+        const area = App.elements.alignsToSlide() ? SLIDE_AREA : App.transform.boundsOf(rects);
+        const placed = place(rects, area);
+        if (placed.every((rect, index) => rect.left === rects[index].left && rect.top === rects[index].top)) {
+            return;
+        }
+        App.history.change(label, currentSlideScope(), () => {
+            elements.forEach((element, index) => App.transform.writeRect(element, placed[index]));
+        });
+    }
+
+    /* how: 'left' | 'center' | 'right' | 'top' | 'middle' | 'bottom' */
+    App.elements.align = function align(how) {
+        if (App.elements.canAlign()) {
+            placeSelected('Align ' + how, (rects, area) => App.transform.alignRects(rects, how, area));
+        }
+    };
+
+    /* axis: 'horizontal' | 'vertical' */
+    App.elements.distribute = function distribute(axis) {
+        if (App.elements.canDistribute()) {
+            placeSelected('Distribute ' + axis + 'ly', (rects, area) => App.transform.distributeRects(rects, axis, area));
+        }
     };
 })();

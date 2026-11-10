@@ -3678,6 +3678,75 @@ def test_multi_select(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_align_and_distribute(browser):
+    """Phase 7: Arrange > Align lines the selected elements up (one: on the slide; several: on each other, or on the
+    slide with Align to Slide) and Distribute spreads three or more with equal gaps; each one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    rect = lambda name: element_rect(page, name)  # noqa: E731
+    button = lambda name: "button[data-command='" + name + "']"  # noqa: E731
+
+    def click(x, y, shift=False):
+        if shift:
+            page.keyboard.down("Shift")
+        page.mouse.click(*slide_to_screen(page, x, y))
+        if shift:
+            page.keyboard.up("Shift")
+    # Slide 1: e1 logo (64,56 120x40), e2 title (64,230 1100x120), e3 bar (64,350 140x8), e4 subtitle (64,378 1100x70).
+    page.click(".ribbon-tab[data-tab='arrange']")
+    for name in ["alignObjectsLeft", "alignObjectsCenter", "distributeHorizontally"]:
+        check(page.is_disabled(button(name)), f"{name}: nothing selected, greyed out")
+
+    # One element: aligned on the slide.
+    click(120, 76)
+    check(page.evaluate("App.selection.selectedIds()") == ["e1"], "the logo selected")
+    check(page.get_attribute(button("alignToSlide"), "aria-pressed") == "true", "one element: Align to Slide is on")
+    page.click(button("alignObjectsCenter"))
+    check(rect("e1")["left"] == 580 and rect("e1")["top"] == 56 and label() == "Align center", f"centred: {rect('e1')}")
+    page.click(button("alignObjectsBottom"))
+    check(rect("e1")["top"] == 680, f"at the bottom of the slide: {rect('e1')}")
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(rect("e1")["left"] == 64 and rect("e1")["top"] == 56, "two undos: back")
+
+    # Two elements: aligned on each other (the box around both).
+    click(100, 354, shift=True)
+    check(page.evaluate("App.selection.selectedIds()") == ["e1", "e3"], "logo and bar")
+    check(page.get_attribute(button("alignToSlide"), "aria-pressed") == "false", "several: on each other")
+    page.click(button("alignObjectsRight"))
+    check(rect("e1")["left"] == 84 and rect("e3")["left"] == 64 and label() == "Align right", "right edges at 204")
+    page.click(button("alignObjectsMiddle"))
+    check(rect("e1")["top"] + 20 == 207 and rect("e3")["top"] + 4 == 207, f"middles at 207: {rect('e1')} {rect('e3')}")
+    page.screenshot(path=str(OUTPUT / "81-aligned.png"))
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(page.is_disabled(button("distributeVertically")), "two: nothing to distribute between")
+
+    # Align to Slide: the two go to the slide's edges.
+    page.click(button("alignToSlide"))
+    check(page.get_attribute(button("alignToSlide"), "aria-pressed") == "true", "on")
+    page.click(button("distributeVertically"))
+    check(rect("e1")["top"] == 0 and rect("e3")["top"] == 712 and label() == "Distribute vertically",
+          f"spread over the slide: {rect('e1')} {rect('e3')}")
+    page.keyboard.press("Control+z")
+    page.click(button("alignToSlide"))
+
+    # All four: equal gaps between them, the top and bottom ones stay.
+    page.keyboard.press("Control+a")
+    page.click(button("distributeVertically"))
+    tops = [rect(name)["top"] for name in ["e1", "e2", "e3", "e4"]]
+    check(tops == [56, 147.33, 318.67, 378], f"gaps of 51.33: {tops}")
+    page.screenshot(path=str(OUTPUT / "82-distributed.png"))
+    page.keyboard.press("Control+z")
+    check([rect(name)["top"] for name in ["e1", "e2", "e3", "e4"]] == [56, 230, 350, 378], "one undo: all back")
+
+    # Already lined up: nothing to undo.
+    page.click(button("alignObjectsLeft"))
+    check(label() != "Align left", f"no step for no change: {label()}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4763,6 +4832,7 @@ TESTS = [
     test_add_duplicate_delete_slides,
     test_reorder_and_hide_slides,
     test_multi_select,
+    test_align_and_distribute,
 ]
 
 

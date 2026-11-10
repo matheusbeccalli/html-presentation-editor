@@ -23,7 +23,8 @@
     App.settings = {};
 
     const KEY = 'deck-editor-settings';
-    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null });
+    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null,
+        showGridlines: false, showRulers: false });
     const NUMBER_LOCALES = ['pt-BR', 'en-US'];
 
     let store = null;   // localStorage, or a fake one in the tests
@@ -46,6 +47,8 @@
             retentionDays: Math.min(30, days),
             rememberRecent: keepDrafts && !!value.rememberRecent,   // no drafts means no recent files either
             numberLocale: NUMBER_LOCALES.indexOf(value.numberLocale) !== -1 ? value.numberLocale : null,
+            showGridlines: !!value.showGridlines,   // View tab (rulers.js)
+            showRulers: !!value.showRulers,
         };
     };
 

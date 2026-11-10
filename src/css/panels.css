@@ -308,3 +308,28 @@
 @media (max-width: 900px) {
     #format-pane { display: none; }
 }
+
+/* Smart guides while dragging (snap.js): red lines on what the element lines up with. */
+.smart-guides { position: absolute; inset: 0; pointer-events: none; }
+.smart-guide { position: absolute; background: #e8443a; }
+.smart-guide.vertical { width: calc(1px * var(--inverse-zoom)); }
+.smart-guide.horizontal { height: calc(1px * var(--inverse-zoom)); }
+/* View > Gridlines (rulers.js): every 40 slide px, above the slide, under the selection; only for the eye. */
+.gridlines {
+    position: absolute; inset: 0; pointer-events: none;
+    --grid-line: calc(1px * var(--inverse-zoom));
+    background-image:
+        linear-gradient(to right, rgba(0, 0, 0, 0.18) var(--grid-line), transparent var(--grid-line)),
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.18) var(--grid-line), transparent var(--grid-line));
+    background-size: 40px 40px;
+}
+.gridlines[hidden] { display: none; }
+/* View > Ruler (rulers.js): above and left of the slide, in slide px; the selection shaded. */
+.ruler { position: absolute; background: var(--surface); color: var(--text-muted); pointer-events: none; }
+.ruler[hidden] { display: none; }
+.ruler-top { left: 0; top: -20px; height: 18px; width: 100%; }
+.ruler-left { top: 0; left: -20px; width: 18px; height: 100%; }
+.ruler svg { display: block; overflow: visible; }
+.ruler line { stroke: currentColor; stroke-width: 1; }
+.ruler text { fill: currentColor; font-size: 9px; font-family: inherit; }
+.ruler .ruler-range { fill: rgba(0, 120, 212, 0.18); }

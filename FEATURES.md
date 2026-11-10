@@ -261,8 +261,8 @@ Nested bullets are the top priority of this phase.
 
 - [x] Multi-select (Shift+click, or drag a rectangle on empty canvas) *(Shift+click or Ctrl+click adds an element or takes it out; a drag from an empty part of the slide draws a rectangle that selects what it covers completely (Shift: adds); Ctrl+A selects all; several selected move, nudge, delete, copy / paste, duplicate and restack together, each one undo step; the Format pane says how many are selected)*
 - [x] Align left / center / right / top / middle / bottom; distribute horizontally / vertically *(Arrange > Align: one element lines up on the slide, several on each other (the box around them) or, with Align to slide on, on the slide; Distribute: equal gaps between three or more, the outer two stay (with Align to slide: spread over the slide); each one undo step)*
-- [ ] Smart guides and snapping to slide edges, center lines and other elements (5 px threshold); Alt while dragging disables snapping
-- [ ] Optional gridlines and rulers
+- [x] Smart guides and snapping to slide edges, center lines and other elements (5 px threshold); Alt while dragging disables snapping *(5 screen px, so the pull feels the same at every zoom; a dragged element's edges and centre snap, a resized one's dragged edges (not while Shift keeps the shape); a red line shows each line it sits on; Alt held, or pressed mid-drag, places it freely)*
+- [x] Optional gridlines and rulers *(new View tab: Ruler and Gridlines, Shift+F9 for gridlines; remembered for next time. Gridlines every 40 px, only for the eye (nothing snaps to them); rulers in slide px, the same numbers as the Format pane's X and Y, with the selection shaded)*
 - [ ] Group / ungroup (Ctrl+G / Ctrl+Shift+G)
 - [ ] Rotate (handle and degrees field)
 - [ ] Lock element
@@ -277,6 +277,7 @@ Nested bullets are the top priority of this phase.
   - [ ] Reorder and hide: drag slide 1's thumbnail down between two others (a red line shows where): it moves there; Ctrl+Z puts it back. Click a thumbnail, Ctrl+Down: one place down. Right-click a thumbnail > Hide Slide: dimmed, crossed-out eye; Slide Show tab > Hide Slide is lit and turns it off. Save, open the saved file in Edge and present with the arrow keys: the hidden slide is skipped
   - [ ] Multi-select: click the title, Shift+click the subtitle: both outlined; drag one of them: both move; Ctrl+Z. Drag a rectangle from an empty corner over several boxes: those wholly inside are selected. Ctrl+A, then Delete: all gone; Ctrl+Z. Select two, Ctrl+C, go to another slide, Ctrl+V: both pasted where they were
   - [ ] Align and distribute: click the logo, Arrange > Align center: it moves to the middle of the slide. Select three boxes (Shift+click), Align left: their left edges line up; Distribute vertically: equal gaps, the top and bottom ones stay. Turn on Align to slide, Align middle: all three on the slide's middle line. Ctrl+Z after each
+  - [ ] Smart guides: drag the logo slowly towards the middle of the slide: a red line appears and the logo jumps onto the centre; keep dragging with Alt held: it moves freely, no line. Drag a box so its left edge comes near another box's left edge: it snaps, a red line joins them. Drag a box's right handle near another's right edge: it snaps. View > Ruler and Gridlines: rulers and a grid appear, the selected box shaded on the rulers; Shift+F9 hides the grid; close and reopen the editor: the ruler is still on
 
 ## Phase 8: Present and export (section 7)
 

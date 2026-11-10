@@ -550,10 +550,16 @@
         const startFlip = element.getAttribute('data-flip') || '';
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
+        // Smart guides (snap.js): moves and resizes snap to the slide and the other elements; Alt turns it off.
+        const targets = kind === 'move' || kind === 'resize' ? App.snap.targetsFor(slide, elements) : null;
         let started = false;
+        let last = null;   // the last pointer event, to snap again when Alt is pressed or let go
         overlay.setPointerCapture(downEvent.pointerId);   // keep getting moves outside the slide
 
-        function onMove(event) {
+        function onMove(event, altKey) {
+            last = event;
+            const free = altKey === undefined ? event.altKey : altKey;
+            let guides = [];
             const point = toSlidePoint(event);
             const dx = point.x - start.x;
             const dy = point.y - start.y;
@@ -571,10 +577,26 @@
                 App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
                     startRect.height, { x: point.x - startRect.left, y: point.y - startRect.top }));
             } else if (kind === 'move') {
-                elements.forEach((item, i) => App.transform.writeRect(item, App.transform.moveRect(startRects[i], dx, dy)));
+                let moved = startRects.map((rect) => App.transform.moveRect(rect, dx, dy));
+                if (!free) {
+                    const snapped = App.snap.snapMove(App.transform.boundsOf(moved), targets, App.snap.threshold(zoom));
+                    // Not moveRect: it rounds, and a centre line can be half a pixel.
+                    moved = moved.map((rect) => Object.assign({}, rect, { left: rect.left + snapped.dx, top: rect.top + snapped.dy }));
+                    guides = snapped.guides;
+                }
+                elements.forEach((item, i) => App.transform.writeRect(item, moved[i]));
             } else {
-                App.transform.writeRect(element, App.transform.resizeRect(startRect, handle, dx, dy,
-                    App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey)));
+                const keepAspect = App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey);
+                let rect = App.transform.resizeRect(startRect, handle, dx, dy, keepAspect);
+                if (!free && !keepAspect) {
+                    const snapped = App.snap.snapResize(rect, handle, targets, App.snap.threshold(zoom));
+                    rect = snapped.rect;
+                    guides = snapped.guides;
+                }
+                App.transform.writeRect(element, rect);
+            }
+            if (targets) {
+                App.snap.showGuides(guides);
             }
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
@@ -591,6 +613,8 @@
             overlay.removeEventListener('pointerup', onUp);
             overlay.removeEventListener('pointercancel', onCancel);
             window.removeEventListener('keydown', onKey, true);
+            window.removeEventListener('keyup', onKey, true);
+            App.snap.hideGuides();
             if (!started) {
                 return;
             }
@@ -606,7 +630,16 @@
         const onUp = () => finish(false);
         const onCancel = () => finish(true);
         function onKey(event) {
-            if (event.key === 'Escape') {
+            if (event.key === 'Alt') {
+                // Snap again at once (on or off), without waiting for the mouse to move; and keep the
+                // browser from taking Alt for its menu.
+                event.preventDefault();
+                if (started && last) {
+                    onMove(last, event.type === 'keydown');
+                }
+                return;
+            }
+            if (event.type === 'keydown' && event.key === 'Escape') {
                 // Capture phase + stopPropagation: Escape ends the drag only, it does not also deselect.
                 event.stopPropagation();
                 event.preventDefault();
@@ -618,5 +651,6 @@
         overlay.addEventListener('pointerup', onUp);
         overlay.addEventListener('pointercancel', onCancel);
         window.addEventListener('keydown', onKey, true);
+        window.addEventListener('keyup', onKey, true);
     }
 })();

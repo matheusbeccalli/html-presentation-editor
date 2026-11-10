@@ -35,6 +35,8 @@
         alignObjectsBottom: '<path d="M2.5 17h15"/><rect x="5" y="4" width="3.5" height="11"/><rect x="11.5" y="8" width="3.5" height="7"/>',
         distributeHorizontally: '<path d="M2.5 3v14M17.5 3v14"/><rect x="5" y="7" width="2.5" height="6"/><rect x="8.75" y="7" width="2.5" height="6"/><rect x="12.5" y="7" width="2.5" height="6"/>',
         distributeVertically: '<path d="M3 2.5h14M3 17.5h14"/><rect x="7" y="5" width="6" height="2.5"/><rect x="7" y="8.75" width="6" height="2.5"/><rect x="7" y="12.5" width="6" height="2.5"/>',
+        grid: '<rect x="3" y="3" width="14" height="14"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14"/>',
+        ruler: '<rect x="2.5" y="6.5" width="15" height="7" rx="0.5"/><path d="M5.5 6.5v3M8.5 6.5v2M11.5 6.5v3M14.5 6.5v2"/>',
         alignToSlide: '<rect x="2.5" y="4" width="15" height="12" rx="1"/><rect x="7" y="8" width="6" height="4" fill="currentColor" fill-opacity="0.25"/>',
         warning: '<path d="M10 2.5l8 14.5H2z"/><path d="M10 8v4.5"/><circle cx="10" cy="14.8" r="0.4"/>',
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',

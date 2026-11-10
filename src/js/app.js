@@ -49,6 +49,7 @@ App.start = function start() {
     App.findReplace.init();
     App.canvas.init();
     App.selection.init();
+    App.rulers.init();
     App.crop.init();       // after selection: its press listener goes first
     App.formatPane.init();
     App.shapeControls.init();   // its Format pane section

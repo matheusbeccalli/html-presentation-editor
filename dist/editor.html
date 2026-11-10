@@ -654,6 +654,31 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     #format-pane { display: none; }
 }
 
+/* Smart guides while dragging (snap.js): red lines on what the element lines up with. */
+.smart-guides { position: absolute; inset: 0; pointer-events: none; }
+.smart-guide { position: absolute; background: #e8443a; }
+.smart-guide.vertical { width: calc(1px * var(--inverse-zoom)); }
+.smart-guide.horizontal { height: calc(1px * var(--inverse-zoom)); }
+/* View > Gridlines (rulers.js): every 40 slide px, above the slide, under the selection; only for the eye. */
+.gridlines {
+    position: absolute; inset: 0; pointer-events: none;
+    --grid-line: calc(1px * var(--inverse-zoom));
+    background-image:
+        linear-gradient(to right, rgba(0, 0, 0, 0.18) var(--grid-line), transparent var(--grid-line)),
+        linear-gradient(to bottom, rgba(0, 0, 0, 0.18) var(--grid-line), transparent var(--grid-line));
+    background-size: 40px 40px;
+}
+.gridlines[hidden] { display: none; }
+/* View > Ruler (rulers.js): above and left of the slide, in slide px; the selection shaded. */
+.ruler { position: absolute; background: var(--surface); color: var(--text-muted); pointer-events: none; }
+.ruler[hidden] { display: none; }
+.ruler-top { left: 0; top: -20px; height: 18px; width: 100%; }
+.ruler-left { top: 0; left: -20px; width: 18px; height: 100%; }
+.ruler svg { display: block; overflow: visible; }
+.ruler line { stroke: currentColor; stroke-width: 1; }
+.ruler text { fill: currentColor; font-size: 9px; font-family: inherit; }
+.ruler .ruler-range { fill: rgba(0, 120, 212, 0.18); }
+
 </style>
 <style>
 /* ---- css/dialogs.css ---- */
@@ -1051,6 +1076,7 @@ App.start = function start() {
     App.findReplace.init();
     App.canvas.init();
     App.selection.init();
+    App.rulers.init();
     App.crop.init();       // after selection: its press listener goes first
     App.formatPane.init();
     App.shapeControls.init();   // its Format pane section
@@ -1489,6 +1515,7 @@ App.createEventBus = function createEventBus() {
         // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).
         ['Ctrl+M', 'newSlide', { blockBrowserDefault: true }],
         ['Shift+F10', 'contextMenu'],
+        ['Shift+F9', 'toggleGridlines'],
         ['ContextMenu', 'contextMenu'],
     ];
 
@@ -10893,6 +10920,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         alignObjectsBottom: '<path d="M2.5 17h15"/><rect x="5" y="4" width="3.5" height="11"/><rect x="11.5" y="8" width="3.5" height="7"/>',
         distributeHorizontally: '<path d="M2.5 3v14M17.5 3v14"/><rect x="5" y="7" width="2.5" height="6"/><rect x="8.75" y="7" width="2.5" height="6"/><rect x="12.5" y="7" width="2.5" height="6"/>',
         distributeVertically: '<path d="M3 2.5h14M3 17.5h14"/><rect x="7" y="5" width="6" height="2.5"/><rect x="7" y="8.75" width="6" height="2.5"/><rect x="7" y="12.5" width="6" height="2.5"/>',
+        grid: '<rect x="3" y="3" width="14" height="14"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14"/>',
+        ruler: '<rect x="2.5" y="6.5" width="15" height="7" rx="0.5"/><path d="M5.5 6.5v3M8.5 6.5v2M11.5 6.5v3M14.5 6.5v2"/>',
         alignToSlide: '<rect x="2.5" y="4" width="15" height="12" rx="1"/><rect x="7" y="8" width="6" height="4" fill="currentColor" fill-opacity="0.25"/>',
         warning: '<path d="M10 2.5l8 14.5H2z"/><path d="M10 8v4.5"/><circle cx="10" cy="14.8" r="0.4"/>',
         info: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5"/><circle cx="10" cy="6.3" r="0.4"/>',
@@ -11829,6 +11858,295 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/snap.js ----
+/*
+ * snap.js - smart guides and snapping while dragging (SPEC Phase 7).
+ *
+ * While an element is moved or resized, its edges and centre are pulled onto
+ * the slide's edges and centre lines and onto the edges and centres of the
+ * other elements on the slide when they come within 5 screen pixels. A red
+ * line (a "smart guide") shows every line the element then sits on. Holding
+ * Alt while dragging turns snapping (and the guides) off. Resizing with the
+ * aspect ratio kept (Shift, a picture's corner) does not snap.
+ *
+ * The maths at the top is pure (tests/unit/snap.test.js); the guides are
+ * drawn in the overlay (#overlay), so they are never part of the deck.
+ *
+ * A target line: { at, from, to }: x = at (or y = at) from `from` to `to`
+ * on the other axis (where the guide is drawn).
+ *
+ * Talks to: transform.js (the slide's elements), selection.js (calls it during a drag).
+ */
+
+(function () {
+    'use strict';
+
+    App.snap = {};
+
+    const SCREEN_THRESHOLD = 5;   // screen pixels, as the spec says; more slide pixels when zoomed out
+    const SAME = 0.5;             // a box "sits on" a line closer than this
+
+    // ---------------------------------------------------------------
+    // Pure helpers
+    // ---------------------------------------------------------------
+
+    App.snap.threshold = function threshold(zoom) {
+        return SCREEN_THRESHOLD / zoom;
+    };
+
+    /* The lines a box can snap to: the slide's edges and centre lines, then each of `rects`' edges and centre. */
+    App.snap.targetsOf = function targetsOf(rects, slide) {
+        const x = [0, slide.width / 2, slide.width].map((at) => ({ at: at, from: 0, to: slide.height }));
+        const y = [0, slide.height / 2, slide.height].map((at) => ({ at: at, from: 0, to: slide.width }));
+        rects.forEach((r) => {
+            [r.left, r.left + r.width / 2, r.left + r.width].forEach((at) => x.push({ at: at, from: r.top, to: r.top + r.height }));
+            [r.top, r.top + r.height / 2, r.top + r.height].forEach((at) => y.push({ at: at, from: r.left, to: r.left + r.width }));
+        });
+        return { x: x, y: y };
+    };
+
+    /* The smallest shift (within `limit`) that puts one of `values` on one of `lines`; 0 if none is near. */
+    function nearestShift(values, lines, limit) {
+        let best = null;
+        values.forEach((value) => {
+            lines.forEach((line) => {
+                const shift = line.at - value;
+                if (Math.abs(shift) <= limit && (best === null || Math.abs(shift) < Math.abs(best))) {
+                    best = shift;
+                }
+            });
+        });
+        return best === null ? 0 : best;
+    }
+
+    /* A guide for each line one of `values` sits on, long enough to reach the box (from..to on the other axis). */
+    function guidesOn(axis, values, lines, from, to) {
+        const byPlace = new Map();
+        lines.forEach((line) => {
+            if (!values.some((value) => Math.abs(value - line.at) < SAME)) {
+                return;
+            }
+            const guide = byPlace.get(line.at) || { axis: axis, at: line.at, from: from, to: to };
+            guide.from = Math.min(guide.from, line.from);
+            guide.to = Math.max(guide.to, line.to);
+            byPlace.set(line.at, guide);
+        });
+        return Array.from(byPlace.values());
+    }
+
+    const xsOf = (r) => [r.left, r.left + r.width / 2, r.left + r.width];
+    const ysOf = (r) => [r.top, r.top + r.height / 2, r.top + r.height];
+
+    /*
+     * A box being moved (the bounds of everything moved): how far to shift it
+     * so its nearest edge or centre lands on a line, and the guides to draw.
+     */
+    App.snap.snapMove = function snapMove(rect, targets, limit) {
+        const dx = nearestShift(xsOf(rect), targets.x, limit);
+        const dy = nearestShift(ysOf(rect), targets.y, limit);
+        const moved = { left: rect.left + dx, top: rect.top + dy, width: rect.width, height: rect.height };
+        const guides = guidesOn('x', xsOf(moved), targets.x, moved.top, moved.top + moved.height)
+            .concat(guidesOn('y', ysOf(moved), targets.y, moved.left, moved.left + moved.width));
+        return { dx: dx, dy: dy, guides: guides };
+    };
+
+    /* A box being resized by `handle` ('n', 'se' ...): only the dragged edges snap; the others stay. */
+    App.snap.snapResize = function snapResize(rect, handle, targets, limit) {
+        let left = rect.left;
+        let top = rect.top;
+        let right = rect.left + rect.width;
+        let bottom = rect.top + rect.height;
+        const moving = { x: [], y: [] };
+        if (handle.indexOf('w') !== -1) {
+            left += nearestShift([left], targets.x, limit);
+            moving.x.push(left);
+        }
+        if (handle.indexOf('e') !== -1) {
+            right += nearestShift([right], targets.x, limit);
+            moving.x.push(right);
+        }
+        if (handle.indexOf('n') !== -1) {
+            top += nearestShift([top], targets.y, limit);
+            moving.y.push(top);
+        }
+        if (handle.indexOf('s') !== -1) {
+            bottom += nearestShift([bottom], targets.y, limit);
+            moving.y.push(bottom);
+        }
+        if (right - left < App.transform.MIN_SIZE || bottom - top < App.transform.MIN_SIZE) {
+            return { rect: rect, guides: [] };   // snapping would make it too small: leave it
+        }
+        const out = { left: left, top: top, width: right - left, height: bottom - top };
+        const guides = guidesOn('x', moving.x, targets.x, top, bottom).concat(guidesOn('y', moving.y, targets.y, left, right));
+        return { rect: out, guides: guides };
+    };
+
+    // ---------------------------------------------------------------
+    // On the page
+    // ---------------------------------------------------------------
+
+    /* The targets on `slide` for a drag of `moving` (the elements being dragged do not attract themselves). */
+    App.snap.targetsFor = function targetsFor(slide, moving) {
+        const others = App.transform.topLevelElements(slide).filter((element) => moving.indexOf(element) === -1);
+        return App.snap.targetsOf(others.map(App.transform.readRect), { width: 1280, height: 720 });
+    };
+
+    let layer = null;
+
+    /* Draw `guides` in the overlay (none: hide them). */
+    App.snap.showGuides = function showGuides(guides) {
+        const overlay = document.getElementById('overlay');
+        if (!layer || !layer.isConnected) {
+            layer = App.util.el('div', { class: 'smart-guides' });
+            overlay.appendChild(layer);
+        }
+        layer.innerHTML = '';
+        guides.forEach((guide) => {
+            const line = App.util.el('div', { class: 'smart-guide ' + (guide.axis === 'x' ? 'vertical' : 'horizontal') });
+            if (guide.axis === 'x') {
+                Object.assign(line.style, { left: guide.at + 'px', top: guide.from + 'px', height: (guide.to - guide.from) + 'px' });
+            } else {
+                Object.assign(line.style, { top: guide.at + 'px', left: guide.from + 'px', width: (guide.to - guide.from) + 'px' });
+            }
+            layer.appendChild(line);
+        });
+    };
+
+    App.snap.hideGuides = function hideGuides() {
+        if (layer) {
+            layer.innerHTML = '';
+        }
+    };
+})();
+
+</script>
+<script>
+// ---- js/rulers.js ----
+/*
+ * rulers.js - optional gridlines and rulers (SPEC Phase 7), switched on and
+ * off on the View tab (Shift+F9: gridlines, as in PowerPoint). The choice is
+ * remembered in the settings (settings.js), like PowerPoint does.
+ *
+ * Gridlines: thin lines every 40 slide px (32 across, 18 down) drawn in the
+ * overlay, above the slide but under the selection; they are only a guide
+ * for the eye: nothing snaps to them.
+ * Rulers: one above and one left of the slide, in slide pixels from the top
+ * left corner (the same numbers as the Format pane's X and Y), with the
+ * selected element(s) shaded on them.
+ *
+ * Neither is ever part of the deck: they live in the editor page.
+ *
+ * Talks to: settings.js, canvas.js (zoom), selection.js (what is selected).
+ */
+
+(function () {
+    'use strict';
+
+    App.rulers = {};
+
+    App.rulers.GRID = 40;          // slide px between gridlines
+    const STEP = 10;               // slide px between ruler marks
+    const MIN_GAP = 5;             // screen px: closer marks are left out
+    const RULER = 18;              // screen px: the ruler's thickness
+    const SIZES = { big: 8, half: 5, small: 3 };
+
+    // ---------------------------------------------------------------
+    // Pure helper (tests/unit/rulers.test.js)
+    // ---------------------------------------------------------------
+
+    /* The marks along a ruler `length` slide px long at `zoom`: { at, size: 'big' | 'half' | 'small', label }. */
+    App.rulers.marks = function marks(length, zoom) {
+        const out = [];
+        const small = STEP * zoom >= MIN_GAP;
+        for (let at = 0; at <= length; at += STEP) {
+            const size = at % 100 === 0 ? 'big' : at % 50 === 0 ? 'half' : 'small';
+            if (size === 'small' && !small) {
+                continue;
+            }
+            out.push({ at: at, size: size, label: size === 'big' ? String(at) : null });
+        }
+        return out;
+    };
+
+    // ---------------------------------------------------------------
+    // On the page
+    // ---------------------------------------------------------------
+
+    let grid = null;
+    let top = null;
+    let left = null;
+
+    App.rulers.init = function init() {
+        const el = App.util.el;
+        grid = el('div', { class: 'gridlines', hidden: '' });
+        const overlay = document.getElementById('overlay');
+        overlay.insertBefore(grid, overlay.firstChild);   // under the selection
+        top = el('div', { class: 'ruler ruler-top', hidden: '', 'aria-hidden': 'true' });
+        left = el('div', { class: 'ruler ruler-left', hidden: '', 'aria-hidden': 'true' });
+        const box = document.getElementById('canvas-stage-box');
+        box.appendChild(top);
+        box.appendChild(left);
+        ['deck-loaded', 'settings-changed', 'zoom-changed', 'selection-changed', 'selection-dragged', 'history-changed']
+            .forEach((name) => App.events.on(name, App.rulers.refresh));
+        App.rulers.refresh();
+    };
+
+    App.rulers.toggle = function toggle(name) {
+        const patch = {};
+        patch[name] = !App.settings.get()[name];
+        App.settings.update(patch);   // settings-changed redraws
+        App.ribbon.refresh();
+    };
+
+    /* One ruler as SVG: marks and numbers along `length` slide px; `range` (slide px) shaded. */
+    function drawRuler(target, length, zoom, horizontal, range) {
+        const size = Math.floor(length * zoom);
+        const parts = [];
+        if (range) {
+            const from = range[0] * zoom;
+            const span = (range[1] - range[0]) * zoom;
+            parts.push(horizontal
+                ? '<rect class="ruler-range" x="' + from + '" y="0" width="' + span + '" height="' + RULER + '"/>'
+                : '<rect class="ruler-range" x="0" y="' + from + '" width="' + RULER + '" height="' + span + '"/>');
+        }
+        App.rulers.marks(length, zoom).forEach((mark) => {
+            const at = Math.round(mark.at * zoom) + 0.5;
+            const tick = SIZES[mark.size];
+            parts.push(horizontal
+                ? '<line x1="' + at + '" y1="' + (RULER - tick) + '" x2="' + at + '" y2="' + RULER + '"/>'
+                : '<line x1="' + (RULER - tick) + '" y1="' + at + '" x2="' + RULER + '" y2="' + at + '"/>');
+            if (mark.label !== null && mark.at < length) {
+                parts.push(horizontal
+                    ? '<text x="' + (at + 2) + '" y="9">' + mark.label + '</text>'
+                    : '<text x="9" y="' + (at + 2) + '" transform="rotate(-90 9 ' + (at + 2) + ')" text-anchor="end">' + mark.label + '</text>');
+            }
+        });
+        const width = horizontal ? size : RULER;
+        const height = horizontal ? RULER : size;
+        target.innerHTML = '<svg width="' + width + '" height="' + height + '">' + parts.join('') + '</svg>';
+    }
+
+    App.rulers.refresh = function refresh() {
+        if (!grid) {
+            return;
+        }
+        const settings = App.settings.get();
+        const shown = App.state.hasDeck;
+        grid.hidden = !(shown && settings.showGridlines);
+        top.hidden = left.hidden = !(shown && settings.showRulers);
+        if (top.hidden) {
+            return;
+        }
+        const zoom = App.canvas.getZoom();
+        const elements = App.selection.getElements();
+        const bounds = elements.length ? App.transform.boundsOf(elements.map(App.transform.readRect)) : null;
+        drawRuler(top, 1280, zoom, true, bounds && [bounds.left, bounds.left + bounds.width]);
+        drawRuler(left, 720, zoom, false, bounds && [bounds.top, bounds.top + bounds.height]);
+    };
+})();
+
+</script>
+<script>
 // ---- js/selection.js ----
 /*
  * selection.js - click to select, drag to move, handles to resize (SPEC 4, Phase 2).
@@ -12382,10 +12700,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         const startFlip = element.getAttribute('data-flip') || '';
         const start = toSlidePoint(downEvent);
         const zoom = App.canvas.getZoom();
+        // Smart guides (snap.js): moves and resizes snap to the slide and the other elements; Alt turns it off.
+        const targets = kind === 'move' || kind === 'resize' ? App.snap.targetsFor(slide, elements) : null;
         let started = false;
+        let last = null;   // the last pointer event, to snap again when Alt is pressed or let go
         overlay.setPointerCapture(downEvent.pointerId);   // keep getting moves outside the slide
 
-        function onMove(event) {
+        function onMove(event, altKey) {
+            last = event;
+            const free = altKey === undefined ? event.altKey : altKey;
+            let guides = [];
             const point = toSlidePoint(event);
             const dx = point.x - start.x;
             const dy = point.y - start.y;
@@ -12403,10 +12727,26 @@ App.template.newDeckHtml = function newDeckHtml() {
                 App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
                     startRect.height, { x: point.x - startRect.left, y: point.y - startRect.top }));
             } else if (kind === 'move') {
-                elements.forEach((item, i) => App.transform.writeRect(item, App.transform.moveRect(startRects[i], dx, dy)));
+                let moved = startRects.map((rect) => App.transform.moveRect(rect, dx, dy));
+                if (!free) {
+                    const snapped = App.snap.snapMove(App.transform.boundsOf(moved), targets, App.snap.threshold(zoom));
+                    // Not moveRect: it rounds, and a centre line can be half a pixel.
+                    moved = moved.map((rect) => Object.assign({}, rect, { left: rect.left + snapped.dx, top: rect.top + snapped.dy }));
+                    guides = snapped.guides;
+                }
+                elements.forEach((item, i) => App.transform.writeRect(item, moved[i]));
             } else {
-                App.transform.writeRect(element, App.transform.resizeRect(startRect, handle, dx, dy,
-                    App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey)));
+                const keepAspect = App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey);
+                let rect = App.transform.resizeRect(startRect, handle, dx, dy, keepAspect);
+                if (!free && !keepAspect) {
+                    const snapped = App.snap.snapResize(rect, handle, targets, App.snap.threshold(zoom));
+                    rect = snapped.rect;
+                    guides = snapped.guides;
+                }
+                App.transform.writeRect(element, rect);
+            }
+            if (targets) {
+                App.snap.showGuides(guides);
             }
             if (kind === 'resize') {
                 App.text.fitText(element);   // autofit: the text shrinks or the box keeps its text's height, live
@@ -12423,6 +12763,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             overlay.removeEventListener('pointerup', onUp);
             overlay.removeEventListener('pointercancel', onCancel);
             window.removeEventListener('keydown', onKey, true);
+            window.removeEventListener('keyup', onKey, true);
+            App.snap.hideGuides();
             if (!started) {
                 return;
             }
@@ -12438,7 +12780,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         const onUp = () => finish(false);
         const onCancel = () => finish(true);
         function onKey(event) {
-            if (event.key === 'Escape') {
+            if (event.key === 'Alt') {
+                // Snap again at once (on or off), without waiting for the mouse to move; and keep the
+                // browser from taking Alt for its menu.
+                event.preventDefault();
+                if (started && last) {
+                    onMove(last, event.type === 'keydown');
+                }
+                return;
+            }
+            if (event.type === 'keydown' && event.key === 'Escape') {
                 // Capture phase + stopPropagation: Escape ends the drag only, it does not also deselect.
                 event.stopPropagation();
                 event.preventDefault();
@@ -12450,6 +12801,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         overlay.addEventListener('pointerup', onUp);
         overlay.addEventListener('pointercancel', onCancel);
         window.addEventListener('keydown', onKey, true);
+        window.addEventListener('keyup', onKey, true);
     }
 })();
 
@@ -15008,7 +15360,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.settings = {};
 
     const KEY = 'deck-editor-settings';
-    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null });
+    App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null,
+        showGridlines: false, showRulers: false });
     const NUMBER_LOCALES = ['pt-BR', 'en-US'];
 
     let store = null;   // localStorage, or a fake one in the tests
@@ -15031,6 +15384,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             retentionDays: Math.min(30, days),
             rememberRecent: keepDrafts && !!value.rememberRecent,   // no drafts means no recent files either
             numberLocale: NUMBER_LOCALES.indexOf(value.numberLocale) !== -1 ? value.numberLocale : null,
+            showGridlines: !!value.showGridlines,   // View tab (rulers.js)
+            showRulers: !!value.showRulers,
         };
     };
 
@@ -16183,6 +16538,15 @@ App.template.newDeckHtml = function newDeckHtml() {
             App.commands.define(name, {
                 label: 'Distribute ' + axis + 'ly', isEnabled: () => App.elements.canDistribute(), run: () => App.elements.distribute(axis),
             });
+        });
+        // View tab (rulers.js): remembered in the settings.
+        App.commands.define('toggleGridlines', {
+            label: 'Gridlines', isEnabled: hasDeck, isChecked: () => App.settings.get().showGridlines,
+            run: () => App.rulers.toggle('showGridlines'),
+        });
+        App.commands.define('toggleRulers', {
+            label: 'Ruler', isEnabled: hasDeck, isChecked: () => App.settings.get().showRulers,
+            run: () => App.rulers.toggle('showRulers'),
         });
         App.commands.define('alignToSlide', {
             label: 'Align to slide',
@@ -20555,7 +20919,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 /*
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
  *
- * Tabs: Home, Insert, Arrange, Slide Show, Export, and contextual tabs shown
+ * Tabs: Home, Insert, Arrange, Slide Show, View, Export, and contextual tabs shown
  * only while they apply (Table Design and Layout, Picture Format, Shape Format, Chart Design). In Phase 1 only Home has
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
@@ -20706,6 +21070,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             id: 'slideshow', label: 'Slide Show',
             groups: [{ label: 'Set Up', commands: [['hideSlide', 'hidden']] }],
             note: 'Presenting from the editor arrives in Phase 8. Saved decks already present on their own: open the saved file in the browser and use the arrow keys (F = full screen).',
+        },
+        {
+            id: 'view', label: 'View',
+            groups: [{ label: 'Show', rows: [[{ command: 'toggleRulers', icon: 'ruler' }], [{ command: 'toggleGridlines', icon: 'grid' }]] }],
+            note: 'Smart guides show by themselves while you drag: an element snaps to the slide\'s edges and centre and to the ' +
+                'other elements within 5 px. Hold Alt while dragging to place it freely. Gridlines are every 40 px; nothing snaps to them.',
         },
         { id: 'export', label: 'Export', note: 'PDF, PNG and PowerPoint export arrive in Phase 8.' },
     ];

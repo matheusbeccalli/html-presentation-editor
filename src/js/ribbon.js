@@ -1,7 +1,7 @@
 /*
  * ribbon.js - the PowerPoint-style ribbon: a File menu and tabs (SPEC 4).
  *
- * Tabs: Home, Insert, Arrange, Slide Show, Export, and contextual tabs shown
+ * Tabs: Home, Insert, Arrange, Slide Show, View, Export, and contextual tabs shown
  * only while they apply (Table Design and Layout, Picture Format, Shape Format, Chart Design). In Phase 1 only Home has
  * buttons (undo/redo, slide navigation); the other tabs say which phase
  * fills them. Buttons only name a command; commands.js does the work.
@@ -152,6 +152,12 @@
             id: 'slideshow', label: 'Slide Show',
             groups: [{ label: 'Set Up', commands: [['hideSlide', 'hidden']] }],
             note: 'Presenting from the editor arrives in Phase 8. Saved decks already present on their own: open the saved file in the browser and use the arrow keys (F = full screen).',
+        },
+        {
+            id: 'view', label: 'View',
+            groups: [{ label: 'Show', rows: [[{ command: 'toggleRulers', icon: 'ruler' }], [{ command: 'toggleGridlines', icon: 'grid' }]] }],
+            note: 'Smart guides show by themselves while you drag: an element snaps to the slide\'s edges and centre and to the ' +
+                'other elements within 5 px. Hold Alt while dragging to place it freely. Gridlines are every 40 px; nothing snaps to them.',
         },
         { id: 'export', label: 'Export', note: 'PDF, PNG and PowerPoint export arrive in Phase 8.' },
     ];

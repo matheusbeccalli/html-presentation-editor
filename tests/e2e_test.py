@@ -3608,7 +3608,9 @@ def test_multi_select(browser):
 
     # Dragging one of them moves all three: one undo step.
     before = rects(["e2", "e3", "e4"])
+    page.keyboard.down("Alt")   # placed freely: no snapping (Phase 7)
     drag(page, slide_to_screen(page, 600, 410), slide_to_screen(page, 640, 430))
+    page.keyboard.up("Alt")
     moved = rects(["e2", "e3", "e4"])
     check(all(m["left"] == b["left"] + 40 and m["top"] == b["top"] + 20 for m, b in zip(moved, before)), f"all moved: {moved}")
     check(label() == "Move" and sorted(ids()) == ["e2", "e3", "e4"], "still all selected")
@@ -3745,6 +3747,79 @@ def test_align_and_distribute(browser):
     # Already lined up: nothing to undo.
     page.click(button("alignObjectsLeft"))
     check(label() != "Align left", f"no step for no change: {label()}")
+
+
+def test_smart_guides_gridlines_and_rulers(browser):
+    """Phase 7: a dragged element snaps to the slide's centre and edges and to other elements within 5 screen px, with a
+    red guide while it does; Alt (also pressed during the drag) places it freely; a resized edge snaps too. View tab:
+    gridlines (Shift+F9) and rulers that shade the selection, remembered in the settings."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    rect = lambda name: element_rect(page, name)  # noqa: E731
+    guides = lambda: page.locator(".smart-guide:visible").count()  # noqa: E731
+    # Slide 1: e1 logo (64,56 120x40), e2 title (64,230 1100x120), e3 bar (64,350 140x8), e4 subtitle (64,378 1100x70).
+
+    # Drag the logo so its centre ends 2 px right of the slide's centre line (642): it snaps onto it (left 580).
+    page.mouse.move(*slide_to_screen(page, 120, 76))
+    page.mouse.down()
+    page.mouse.move(*slide_to_screen(page, 120 + 518, 76), steps=10)
+    check(rect("e1")["left"] == 580, f"snapped onto the centre line: {rect('e1')}")
+    check(guides() == 1, f"one guide, on the centre line: {guides()}")
+    guide = page.evaluate("(() => { const g = document.querySelector('.smart-guide'); return [g.style.left, g.style.top, g.style.height]; })()")
+    check(guide == ["640px", "0px", "720px"], f"the slide's centre line, top to bottom: {guide}")
+    page.screenshot(path=str(OUTPUT / "83-smart-guide.png"))
+    # Alt pressed during the drag: free at once; let go: snapped again.
+    page.keyboard.down("Alt")
+    check(rect("e1")["left"] != 580 and guides() == 0, f"Alt: free, no guide: {rect('e1')}")
+    page.keyboard.up("Alt")
+    check(rect("e1")["left"] == 580 and guides() == 1, "Alt let go: snapped again")
+    page.mouse.up()
+    check(guides() == 0 and page.evaluate("App.history.undoLabel()") == "Move", "dropped: the guide goes, one Move step")
+    page.keyboard.press("Control+z")
+
+    # The same drag with Alt held from the start: no snapping.
+    page.keyboard.down("Alt")
+    drag(page, slide_to_screen(page, 120, 76), slide_to_screen(page, 120 + 518, 76), steps=10)
+    page.keyboard.up("Alt")
+    check(abs(rect("e1")["left"] - 582) <= 1, f"Alt: where the mouse put it: {rect('e1')}")
+    page.keyboard.press("Control+z")
+
+    # Snapping to another element: the bar dragged so its left edge is 3 px right of the title's (64): back on it.
+    page.mouse.click(*slide_to_screen(page, 100, 354))
+    drag(page, slide_to_screen(page, 100, 354), slide_to_screen(page, 103, 164), steps=6)
+    check(rect("e3")["left"] == 64 and rect("e3")["top"] == 160, f"left edge on the title's (top near no line): {rect('e3')}")
+    page.keyboard.press("Control+z")
+
+    # Resizing: the bar's right edge dragged 3 px short of the title's right edge (1164) snaps onto it.
+    side = page.locator("#overlay .selection-handle[data-handle='e']").bounding_box()
+    start = [side["x"] + side["width"] / 2, side["y"] + side["height"] / 2]
+    zoom = page.evaluate("App.canvas.getZoom()")
+    drag(page, start, [start[0] + (1161 - 204) * zoom, start[1]], steps=10)
+    check(rect("e3")["left"] == 64 and rect("e3")["width"] == 1100, f"right edge on the title's: {rect('e3')}")
+    page.keyboard.press("Control+z")
+
+    # View tab: gridlines and rulers, off at first.
+    page.click(".ribbon-tab[data-tab='view']")
+    check(page.is_hidden(".gridlines") and page.is_hidden(".ruler-top"), "both off at first")
+    page.click("button[data-command='toggleGridlines']")
+    check(page.is_visible(".gridlines") and page.get_attribute("button[data-command='toggleGridlines']", "aria-pressed") == "true",
+          "gridlines on")
+    page.click("button[data-command='toggleRulers']")
+    check(page.is_visible(".ruler-top") and page.is_visible(".ruler-left"), "rulers on")
+    page.mouse.click(*slide_to_screen(page, 120, 76))
+    shade = page.evaluate("(() => { const r = document.querySelector('.ruler-top .ruler-range'); "
+                          "return [Number(r.getAttribute('x')), Number(r.getAttribute('width'))]; })()")
+    check(abs(shade[0] - 64 * zoom) < 1 and abs(shade[1] - 120 * zoom) < 1, f"the logo shaded on the top ruler: {shade}")
+    page.screenshot(path=str(OUTPUT / "84-gridlines-rulers.png"))
+    check(page.evaluate("App.settings.get().showGridlines && App.settings.get().showRulers"), "remembered in the settings")
+    page.keyboard.press("Escape")
+    page.keyboard.press("Shift+F9")
+    check(page.is_hidden(".gridlines"), "Shift+F9: gridlines off")
+    page.click("button[data-command='toggleRulers']")
+    check(page.is_hidden(".ruler-top"), "rulers off")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('.gridlines, .ruler, .smart-guide').length") == 0,
+          "nothing of it in the deck")
 
 
 def App_round(value):
@@ -3996,7 +4071,9 @@ def test_select_move_resize(browser):
 
     # Drag moves; the whole drag is one undo step.
     start = slide_to_screen(page, 300, 290)
+    page.keyboard.down("Alt")   # placed freely: no snapping (Phase 7) to the bar's right edge 1 px away
     drag(page, start, (start[0] + 100, start[1] + 50))
+    page.keyboard.up("Alt")
     rect = element_rect(page, "e2")
     check(abs(rect["left"] - (64 + 100 / zoom)) <= 1 and abs(rect["top"] - (230 + 50 / zoom)) <= 1, f"moved: {rect}")
     check(page.evaluate("App.history.undoLabel()") == "Move", "undo label")
@@ -4616,7 +4693,8 @@ def test_settings_recent_files_and_status(browser):
     page.fill("#settings-retention", "45")
     editor.click_dialog_button("OK")
     saved = page.evaluate("JSON.parse(localStorage.getItem('deck-editor-settings'))")
-    check(saved == {"keepDrafts": True, "retentionDays": 30, "rememberRecent": True, "numberLocale": None}, f"saved settings: {saved}")
+    check(saved == {"keepDrafts": True, "retentionDays": 30, "rememberRecent": True, "numberLocale": None,
+                     "showGridlines": False, "showRulers": False}, f"saved settings: {saved}")
 
     # Recent files: an opened file is remembered; choosing it opens the Open window in its folder.
     page.evaluate("""() => App.events.emit('file-opened',
@@ -4833,6 +4911,7 @@ TESTS = [
     test_reorder_and_hide_slides,
     test_multi_select,
     test_align_and_distribute,
+    test_smart_guides_gridlines_and_rulers,
 ]
 
 

@@ -378,6 +378,15 @@
                 label: 'Distribute ' + axis + 'ly', isEnabled: () => App.elements.canDistribute(), run: () => App.elements.distribute(axis),
             });
         });
+        // View tab (rulers.js): remembered in the settings.
+        App.commands.define('toggleGridlines', {
+            label: 'Gridlines', isEnabled: hasDeck, isChecked: () => App.settings.get().showGridlines,
+            run: () => App.rulers.toggle('showGridlines'),
+        });
+        App.commands.define('toggleRulers', {
+            label: 'Ruler', isEnabled: hasDeck, isChecked: () => App.settings.get().showRulers,
+            run: () => App.rulers.toggle('showRulers'),
+        });
         App.commands.define('alignToSlide', {
             label: 'Align to slide',
             isEnabled: () => App.selection.count() > 1,

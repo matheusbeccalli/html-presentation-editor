@@ -26,7 +26,7 @@ HAND_CHECKS = [
      "left": "pasting into a new Outlook e-mail: " + OFFICE},
     {"key": "Format painter", "tests": ['test_format_painter', 'test_gap_p3_format_painter'], "auto": True},
     {"key": "Find & replace", "tests": ['test_find_and_replace', 'test_gap_p3_find_replace'], "auto": False,
-     "left": "Ctrl+H never opening Edge's History is only shown indirectly (the editor takes the key); the current match's orange shows muted on screen (200,158,118) under the inactive selection: judge gap-p3-find-orange.png"},
+     "left": "Ctrl+H never opening Edge's History is only shown indirectly (the editor takes the key)"},
     {"key": "Autofit", "tests": ['test_autofit', 'test_gap_p3_autofit'], "auto": True},
     # ---- Phase 4 -----------------------------------------------------
     {"key": "The whole journey in Edge, timed", "tests": ["test_phase4_done_when"], "auto": False,
@@ -59,9 +59,9 @@ HAND_CHECKS = [
     {"key": "Shape handles", "tests": ['test_line_and_adjust_handles', 'test_gap_p5_shape_handles'], "auto": True},
     # ---- Phase 6 -----------------------------------------------------
     {"key": "Charts drawn", "tests": ['test_chart_rendering', 'test_gap_p6_charts_drawn'], "auto": False,
-     "left": "the import report still says 'a placeholder was drawn (full charts arrive in Phase 6)' (editor text out of date); the test closes the grid before Ctrl+Z, the hand check presses Ctrl+Z in the cell"},
+     "left": "the test closes the grid before Ctrl+Z, the hand check presses Ctrl+Z in the cell"},
     {"key": "Lines, combo, donut", "tests": ['test_chart_lines_combo_donut', 'test_gap_p6_lines_combo_donut'], "auto": False,
-     "left": "'the waterfall is still grey until the next step' is out of date (it is drawn now); contract deck slide 4 'looks as before' is compared with the file's own drawing"},
+     "left": "contract deck slide 4 'looks as before' is compared with the file's own drawing"},
     {"key": "Waterfall: open", "tests": ['test_chart_waterfall', 'test_gap_p6_waterfall'], "auto": True},
     {"key": "More types", "tests": ['test_chart_types_priority_2', 'test_gap_p6_more_types'], "auto": True},
     {"key": "Readability", "tests": ['test_chart_readability', 'test_gap_p6_readability'], "auto": True},

@@ -2808,7 +2808,9 @@ def test_chart_rendering(browser):
     deck = chart_deck("charts-deck.html", [("e12", 64, 130, 700, 440, revenue), ("e20", 800, 290, 420, 280, ranking)])
     editor = Editor(browser)
     editor.open(deck)
-    check("2 charts had data but no drawing" in (editor.report_dialog_text() or ""), "drawn on open, reported")
+    report = editor.report_dialog_text() or ""
+    check("2 charts had data but no drawing; the editor drew them from their data" in report, "drawn on open, reported")
+    check("placeholder" not in report and "Phase 6" not in report, "no out-of-date placeholder wording")
     editor.close_dialog_if_open()
     page = editor.page
     page.evaluate("App.deck.goTo(3)")
@@ -4698,7 +4700,7 @@ def test_appendix_a_deck_gets_charts_and_fixes(browser):
     editor.open(APPENDIX_A)
     report = editor.report_dialog_text() or ""
     check("already uses the editor's format" in report, "recognised as contract deck")
-    check("2 charts had data but no drawing" in report, "2 chart placeholders rendered")
+    check("2 charts had data but no drawing; the editor drew them from their data" in report, "2 charts drawn")
     check("z-index" in report, "z-index fix reported")
     editor.close_dialog_if_open()
     editor.page.evaluate("App.deck.goTo(1)")

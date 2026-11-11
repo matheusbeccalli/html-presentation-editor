@@ -120,8 +120,9 @@
             lines.push('Slides were scaled from ' + report.scaledFrom + ' to 1280×720.');
         }
         if (report.chartsRendered) {
-            lines.push(report.chartsRendered + ' chart' + (report.chartsRendered === 1 ? '' : 's') +
-                ' had data but no drawing; a placeholder was drawn (full charts arrive in Phase 6).');
+            lines.push(report.chartsRendered === 1
+                ? '1 chart had data but no drawing; the editor drew it from its data.'
+                : report.chartsRendered + ' charts had data but no drawing; the editor drew them from their data.');
         }
         report.fixes.forEach((fix) => lines.push(fix + '.'));
         return lines;

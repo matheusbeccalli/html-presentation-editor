@@ -3078,6 +3078,47 @@ def test_insert_chart_and_design(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
 
 
+def test_chart_grid_undo_in_cell(browser):
+    """Ctrl+Z / Ctrl+Y in a grid cell are the editor's undo and redo: the whole typing in the cell goes back at once
+    (not the text box's own undo, one digit at a time), and keys after the grid is closed raise no error."""
+    revenue = {"version": 1, "type": "column", "categories": ["2022", "2023"],
+               "series": [{"name": "Receita", "values": [410, 498]}],
+               "options": {"title": "Receita", "dataLabels": True, "locale": "pt-BR"}}
+    deck = chart_deck("chart-grid-undo-deck.html", [("e12", 64, 130, 700, 440, revenue)])
+    editor = Editor(browser)
+    editor.open(deck)
+    editor.close_dialog_if_open()
+    page = editor.page
+    page.evaluate("App.deck.goTo(3)")
+    cell = "#chart-data-grid input.cell[data-row='0'][data-col='0']"
+    labels = lambda: page.evaluate(  # noqa: E731
+        "[...App.deck.getDocument().querySelectorAll('[data-id=\"e12\"] .chart-data-label')].map((n) => n.textContent)")
+    page.mouse.dblclick(*slide_to_screen(page, 300, 300))
+    page.click(cell)
+    page.keyboard.type("1234")
+    check(labels() == ["1.234", "498"] and page.input_value(cell) == "1234", f"typed 1234: {labels()}")
+    page.keyboard.press("Control+z")
+    check(labels() == ["410", "498"] and page.input_value(cell) == "410", f"Ctrl+Z in the cell: all of 1234 back to 410: {labels()} / {page.input_value(cell)}")
+    check(not page.evaluate("App.history.canUndo()"), "nothing left to undo")
+    page.keyboard.press("Control+y")
+    check(labels() == ["1.234", "498"] and page.input_value(cell) == "1234", f"Ctrl+Y in the cell: 1234 again: {labels()}")
+    name = "#chart-data-grid input.series-name[data-col='0']"
+    page.click(name)
+    page.keyboard.type("Lucro")
+    legend = lambda: page.evaluate(  # noqa: E731
+        "App.charts.readData(App.deck.getDocument().querySelector('[data-id=\"e12\"]')).series[0].name")
+    check(legend() == "Lucro", f"series renamed: {legend()}")
+    page.keyboard.press("Control+z")
+    check(legend() == "Receita" and page.input_value(name) == "Receita", f"Ctrl+Z in the series name: the whole name back: {legend()}")
+    page.keyboard.press("Control+z")
+    page.click("#chart-data-close")
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+y")
+    check(labels() == ["1.234", "498"], f"after closing, Ctrl+Y redoes the chart: {labels()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_chart_data_grid(browser):
     """The data grid under the slide: opens with a new chart and on a double-click; typing in a cell redraws the chart
     at once (one undo step per cell); rows and series added, removed, renamed, dragged; estimates, waterfall roles,
@@ -5601,6 +5642,7 @@ TESTS = [
     test_chart_readability,
     test_insert_chart_and_design,
     test_chart_data_grid,
+    test_chart_grid_undo_in_cell,
     test_chart_paste_from_excel,
     test_chart_label_numbers,
     test_phase6_done_when,

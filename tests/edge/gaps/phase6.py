@@ -112,10 +112,11 @@ def _boxes(rects):
 # ----------------------------------------------------------------------
 
 def test_gap_p6_charts_drawn(browser):
-    """Charts drawn: after `python3 tests/run_tests.py`, open `tests/output/charts-deck.html` (made by the tests, fake
-    numbers): the report says 2 charts were drawn. Slide 4: columns for 2022-2025E with the 2025E pair lighter and
-    dashed, numbers on top as 1.234, a legend at the bottom; a horizontal bar chart beside it. Drag the column chart's
-    right edge: it is drawn again narrower, the text stays the same size; Ctrl+Z"""
+    """Charts drawn: after `python3 tests/run_tests.py`, open `tests/output/charts-deck.html` (made by the tests,
+    fake numbers): the report says 2 charts were drawn. Slide 4: columns for 2022-2025E with the 2025E pair lighter
+    and dashed, numbers on top, a legend at the bottom; a horizontal bar chart beside it. Drag the column chart's
+    right edge: it is drawn again narrower, the text stays the same size; Ctrl+Z. Double-click the column chart,
+    type 1234 over a number in the grid: it shows on top as 1.234; Ctrl+Z"""
     # The same deck the twin (test_chart_rendering) writes, under our own name.
     revenue = {"version": 1, "type": "column", "categories": ["2022", "2023", "2024", "2025E"],
                "estimates": [False, False, False, True],
@@ -131,7 +132,8 @@ def test_gap_p6_charts_drawn(browser):
 
     # The report says 2 charts were drawn.
     report = editor.report_dialog_text() or ""
-    check("2 charts had data but no drawing" in report, f"the report says 2 charts were drawn: {report!r}")
+    check("2 charts had data but no drawing; the editor drew them from their data" in report,
+          f"the report says 2 charts were drawn: {report!r}")
     editor.close_dialog_if_open()
 
     # Slide 4: columns for 2022-2025E.
@@ -208,8 +210,7 @@ def test_gap_p6_charts_drawn(browser):
     check(element_rect(page, "e12")["width"] == 700 and page.evaluate(SVG_INFO, "e12")["width"] == "700", "Ctrl+Z: 700 wide again")
     check(_boxes(nodes(page, "e12", "rect.chart-bar")) == _boxes(series[0] + series[1]), "Ctrl+Z: the columns as they were")
 
-    # PROXY for "numbers on top as 1.234": no number of this deck reaches 1.000, so one is typed in the grid
-    # (double-click the chart, 1234 over 410): drawn on top of its column as 1.234; then Ctrl+Z.
+    # Double-click the column chart, type 1234 over a number in the grid: on top as 1.234; Ctrl+Z (in the cell).
     page.mouse.dblclick(*slide_to_screen(page, 300, 300))
     check(page.is_visible("#chart-data-panel"), "double-click: the chart's grid")
     page.click("#chart-data-grid input.cell[data-row='0'][data-col='0']")
@@ -217,9 +218,12 @@ def test_gap_p6_charts_drawn(browser):
     first = nodes(page, "e12", "g.chart-series[data-series='0'] rect.chart-bar")[0]
     found = label_on(nodes(page, "e12", ".chart-data-label"), centre_x(first), "1.234")
     check(len(found) == 1 and num(found[0], "y") < num(first, "y"), f"1234 written on top as 1.234: {texts(page, 'e12', '.chart-data-label')}")
-    page.click("#chart-data-close")
     page.keyboard.press("Control+z")
-    check(_boxes(nodes(page, "e12", "rect.chart-bar")) == _boxes(series[0] + series[1]), "Ctrl+Z: 410 again")
+    cell = "#chart-data-grid input.cell[data-row='0'][data-col='0']"
+    check(_boxes(nodes(page, "e12", "rect.chart-bar")) == _boxes(series[0] + series[1]), "Ctrl+Z: the columns as before")
+    back = nodes(page, "e12", "g.chart-series[data-series='0'] rect.chart-bar")[0]
+    check(page.input_value(cell) == "410" and label_on(nodes(page, "e12", ".chart-data-label"), centre_x(back), "410"),
+          f"Ctrl+Z in the cell: 410 again, in the grid and on top: {page.input_value(cell)} {texts(page, 'e12', '.chart-data-label')}")
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
 

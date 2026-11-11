@@ -21406,10 +21406,27 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     }
 
+    /*
+     * Ctrl+Z / Ctrl+Y (Ctrl+Shift+Z) in a grid field: the editor's undo and redo, so all of a field's typing goes
+     * back at once (the text box's own undo takes back one character at a time and leaves the chart out of step).
+     */
+    function onUndoKey(event) {
+        const letter = event.key.toLowerCase();
+        if ((event.ctrlKey || event.metaKey) && (letter === 'z' || letter === 'y')) {
+            event.preventDefault();
+            App.commands.run(letter === 'y' || event.shiftKey ? 'redo' : 'undo');
+        }
+    }
+
     function textInput(className, value, attrs, onInput) {
         const input = el('input', Object.assign({ type: 'text', class: className, value: value, autocomplete: 'off' }, attrs));
         input.addEventListener('focus', () => input.select());
-        input.addEventListener('input', () => onInput(input));
+        input.addEventListener('keydown', onUndoKey);
+        input.addEventListener('input', () => {
+            if (shown) {   // a closed grid's field changes no chart
+                onInput(input);
+            }
+        });
         return input;
     }
 

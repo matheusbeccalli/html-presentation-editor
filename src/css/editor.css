@@ -117,3 +117,25 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
     padding: 16px 28px; border-radius: 8px;
     background: var(--surface); font-size: 16px; font-weight: 600; color: var(--accent);
 }
+
+/* Slide show (present.js, Phase 8): black layer over everything, full screen; the
+   frame inside scales the slide to fit with black bars (the saved deck's player styles). */
+#slideshow {
+    position: fixed; inset: 0; z-index: 2000; background: #000; outline: none;
+}
+#slideshow .slideshow-frame {
+    position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: #000;
+}
+/* Black screen (B) and the end screen: covers the slide; clicks still reach the layer. */
+#slideshow .slideshow-curtain {
+    position: absolute; inset: 0; background: #000; display: flex; align-items: flex-start; justify-content: center;
+}
+#slideshow .slideshow-curtain[hidden] { display: none; }
+#slideshow .slideshow-end {
+    margin: 24px 0 0; color: #fff; font: 16px "Segoe UI", Arial, sans-serif; opacity: 0.8;
+}
+
+/* The frame that prints the chosen slides (pdf.js): off screen, at slide size. */
+iframe.pdf-print-frame {
+    position: fixed; left: -20000px; top: 0; width: 1280px; height: 720px; border: 0;
+}

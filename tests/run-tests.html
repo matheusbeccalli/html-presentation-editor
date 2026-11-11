@@ -28,6 +28,8 @@
     <div id="summary">Running…</div>
     <ol id="results"></ol>
 
+    <!-- Vendored libraries (vendor/README.md), as build.py puts them first. -->
+    <script src="../vendor/pptxgenjs/pptxgen.bundle.js"></script>
     <!-- APP-SOURCES-START (same order as src/index.html) -->
     <script src="../src/js/app.js"></script>
     <script src="../src/js/util.js"></script>
@@ -78,6 +80,10 @@
     <script src="../src/js/notes.js"></script>
     <script src="../src/js/slides.js"></script>
     <script src="../src/js/findreplace.js"></script>
+    <script src="../src/js/present.js"></script>
+    <script src="../src/js/presenter.js"></script>
+    <script src="../src/js/pdf.js"></script>
+    <script src="../src/js/snapshot.js"></script>
     <script src="../src/js/ribbon.js"></script>
     <script src="../src/js/ui.js"></script>
     <!-- APP-SOURCES-END -->
@@ -120,6 +126,9 @@
     <script src="unit/formatpane.test.js"></script>
     <script src="unit/canvas.test.js"></script>
     <script src="unit/autosave.test.js"></script>
+    <script src="unit/present.test.js"></script>
+    <script src="unit/pdf.test.js"></script>
+    <script src="unit/snapshot.test.js"></script>
     <script src="unit/storage.test.js"></script>
     <script src="unit/drafts.test.js"></script>
     <script src="unit/settings.test.js"></script>

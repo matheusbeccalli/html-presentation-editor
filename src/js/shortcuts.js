@@ -236,6 +236,12 @@
         // Group / ungroup, as in PowerPoint (in the browser: find next / previous).
         ['Ctrl+G', 'group', { blockBrowserDefault: true }],
         ['Ctrl+Shift+G', 'ungroup', { blockBrowserDefault: true }],
+        // Slide show, as in PowerPoint; F5 / Shift+F5 would otherwise reload the page (and lose unsaved work).
+        ['F5', 'slideShowFromStart', { whileTyping: true, blockBrowserDefault: true }],
+        ['Shift+F5', 'slideShowFromCurrent', { whileTyping: true, blockBrowserDefault: true }],
+        ['Alt+F5', 'presenterView', { whileTyping: true, blockBrowserDefault: true }],
+        // Ctrl+P would otherwise print the editor's own screen: it asks which slides to print instead.
+        ['Ctrl+P', 'exportPdf', { whileTyping: true, blockBrowserDefault: true }],
         ['Shift+F10', 'contextMenu'],
         ['Shift+F9', 'toggleGridlines'],
         ['ContextMenu', 'contextMenu'],

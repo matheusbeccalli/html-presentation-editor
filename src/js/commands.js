@@ -139,6 +139,27 @@
             label: 'Hide Slide', run: () => App.slides.toggleHidden(), isEnabled: hasDeck,
             isChecked: () => hasDeck() && App.slides.isHidden(App.deck.getCurrentSlide()),
         });
+        // Slide show (present.js): F5 from the first slide, Shift+F5 from the current one.
+        App.commands.define('slideShowFromStart', {
+            label: 'From Beginning', run: () => App.present.start(false), isEnabled: hasDeck,
+        });
+        App.commands.define('slideShowFromCurrent', {
+            label: 'From Current Slide', run: () => App.present.start(true), isEnabled: hasDeck,
+        });
+        // Export (Phase 8): PDF through the print window (pdf.js); Ctrl+P opens it too.
+        App.commands.define('exportPdf', { label: 'PDF', run: () => App.pdf.open(), isEnabled: hasDeck });
+        // Pictures of slides (snapshot.js): the browser draws the slide itself, at 2×.
+        App.commands.define('exportPng', { label: 'PNG of This Slide', run: () => App.snapshot.exportCurrent(), isEnabled: hasDeck });
+        App.commands.define('exportPngAll', {
+            label: 'PNG of All Slides (ZIP)', run: () => App.snapshot.exportAll(), isEnabled: hasDeck,
+        });
+        App.commands.define('copySlideImage', {
+            label: 'Copy Slide as Picture', run: () => App.snapshot.copyCurrent(), isEnabled: hasDeck,
+        });
+        // Alt+F5, as in PowerPoint: the show from the current slide plus the presenter window (presenter.js).
+        App.commands.define('presenterView', {
+            label: 'Presenter View', run: () => App.present.start(true, { presenter: true }), isEnabled: hasDeck,
+        });
         // Ctrl+Up / Ctrl+Down in the slide rail (thumbnails.js); dragging a thumbnail does the same.
         App.commands.define('moveSlideUp', {
             label: 'Move slide up', run: () => App.slides.moveBy(-1), isEnabled: () => hasDeck() && App.deck.getCurrentIndex() > 0,

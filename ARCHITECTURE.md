@@ -70,6 +70,10 @@ src/index.html + src/css/*.css + src/js/*.js + src/player/*  ──build.py─�
 | `shapecontrols.js` | Insert > Shapes: the button and its gallery of icons; a pick runs `insertShape`. Shape Format (contextual tab while a shape with data-shape is selected, and the Format pane's "Fill & line" section, `init`): `commands()` (shapeFill / setShapeFill, shapeOutline / setShapeOutline, setShapeOutlineWidth, setShapeDash, setShapeTransparency, shapeShadow: each one undo step via `setLook`; a width or dash on a shape without outline adds one), colour split buttons (textcontrols.colorSplit), list buttons, `refresh` | shapes, commands, icons, textcontrols, history, selection |
 | `tablecontrols.js` | Table controls: Insert > Table's 10 × 10 grid picker (mouse or arrow keys + Enter) → `insertTable`; selected cells (a press in a table's cells: `pressCells` keeps the mouse on the overlay, a drag into another cell selects a block, a release types in the cell; Shift+click while typing; drawn as `.cell-block` on the overlay, nothing in the deck; Esc / Delete empties them; kept across undo); column borders (`borderAt`, `dragBorder`: from the overlay, or from the deck while typing, where an editor-only `<style data-editor-only="col-resize">` in the deck head shows the border cursor); the cells the Layout / Table Design buttons work on (`cellTarget`), `keepCells`, `selectCells`, `widthFromColumns`; the Layout tab's actions (`canLayout`, `layout`: one undo step, typing goes on in the same cell or the one now in its place) | tables, text, selection, commands, ribbon, history |
 | `findreplace.js` | Home > Editing: Find / Replace panel (Ctrl+F / Ctrl+H) over the slide; walks every slide and text box in order (hidden slides too), selects the match in its box, Replace (one step) and Replace All (one deck-wide step, autofit measured with `deck.withSlideShown`); paints every match with the CSS Highlight API (`::highlight(editor-find)`, nothing written into the deck); while open, `data-editor-finding` on the deck's html gives its text selection (the match just found) the same orange, so the browser's grey for an unfocused selection does not cover it (stripped on save) | text, deck, history, selection |
+| `present.js` | Slide show (Phase 8): pure `startIndex` (F5: the first shown slide; Shift+F5: the current one, or the next shown) and `reduce(state, key or click)` (next / previous skipping hidden slides, Home / End, a number + Enter, B / . black screen, the end screen, Esc → `exit`); `start` puts a black full-screen layer over the editor with a sandboxed frame (no scripts) holding `serialize.cleanCopy` + the player's CSS, so a slide looks as in the saved file; keys in the capture phase (the editor's shortcuts never see them); leaving full screen ends the show; `stop` gives the focus back and shows the slide the show ended on | deck, serialize, slides, commands, dialogs |
+| `presenter.js` | Presenter view (Phase 8, Alt+F5): `open(html, count)` opens (or reuses) the `deck-presenter` window (false = blocked: `BLOCKED_HELP`) and writes its page itself (same file, so no `postMessage`): Slide X of Y, current and next slide (frames with the show's clean copy, scaled), notes (`notes.textOf`), timer (Pause / Reset) and clock; `draw(state)` follows the show (`present.nextShown`); its keys and buttons go to `present.input`; `close` | present, deck, notes |
+| `pdf.js` | Export > PDF / Ctrl+P (Phase 8): pure `parseRange` ('1-3, 5' → indexes or an error text), `pickSlides` (all / current / range; hidden only when ticked, the current one always), `printDocument` (clean copy, only those slides, none hidden, titled after the deck, + player.css: @page 13.333 × 7.5 in, one slide per page, exact colours); `open` asks (dialog, the Save as PDF hint until the first print: settings `pdfHintShown`) and prints from a hidden frame (`sandbox=allow-same-origin allow-modals`, no scripts) via `printWindow` (the tests catch the document there) | serialize, deck, slides, dialogs, settings |
+| `snapshot.js` | Slide pictures (Phase 8, no library): `slideSvg(cleanRoot, index)` wraps one slide (the deck's styles, notes removed, placed alone at 0,0) as XHTML in an SVG `<foreignObject>`; `toCanvas(svg, scale)` lets the browser draw it (a data: URL: a blob: one taints the canvas); `slidePngs(indexes, 2)` → PNG blobs; `exportCurrent` (download `deck-slide-03.png`), `exportAll` (every slide not hidden → `deck-slides.zip` with the JSZip inside the vendored PptxGenJS bundle, progress on the busy cover), `copyCurrent` (clipboard, asked at once with a promise of the picture; refused → download) | serialize, deck, fileio |
 | `ribbon.js` | File menu and tabs (contextual tabs show only while they apply: Table Design and Layout, Picture Format); buttons only name commands; toggle buttons show `aria-pressed`; `keepsEdit` buttons do not take the focus out of the text | commands |
 | `ui.js` | Title bar, status bar (save state per SPEC 6.4 + last message + the deck size, `sizeText`: KB / MB, amber above 20 MB, measured a second after a change), notes, welcome screen, busy/drop overlays, "use Edge or Chrome" banner | events, fileio, autosave, drafts |
 
@@ -84,6 +88,10 @@ for ProseMirror/Tiptap (ask first) without touching other modules.
 
 `src/player/player.js` + `player.css` are **not run by the editor**. They are copied into every saved deck
 so it presents (arrow keys, F = full screen, hidden slides skipped) and prints one slide per page on its own.
+
+`vendor/pptxgenjs/pptxgen.bundle.js` (PptxGenJS 4.0.1, with JSZip inside; Phase 8) is the only vendored library:
+`build.py` checks its SHA-256 and license against `vendor/README.md` and pastes it in before our own code, so the
+globals `PptxGenJS` (PowerPoint export) and `JSZip` (the ZIP of slide pictures) exist when our modules load.
 
 ## How a user action flows
 
@@ -297,6 +305,30 @@ saved / undo back to saved / tab closed clean / Discard → drafts of that deck 
 editor start → storage.open (blocked → "Recovery unavailable") → purge older than 1 day → drafts left? → Recover / Compare… / Discard
 file opened → 'file-opened' {lastModified} → drafts of this deck (by deck id, or by file name if the file has no id yet)
   newer than the file? → Recover (history.change + deck.replaceContent, undoable) / Compare (changed slides, miniatures) / Discard
+```
+
+**Presenting** (Phase 8: F5 / Shift+F5, Slide Show tab)
+
+```text
+keydown F5 → shortcuts.js (blocks the browser's reload) → commands.run('slideShowFromStart') → present.start
+  → startIndex(hidden flags) → #slideshow layer + frame (srcdoc = serialize.cleanCopy + player.css, html.deck-player-on)
+  → requestFullscreen (inside the key press: the browser allows it) → frame load → fit (scale) → draw (.deck-player-current)
+keys (capture, editor window and the frame) / clicks → present.reduce → draw   ·   exit → present.stop
+  → layer removed, focus back to the editor → deck.goTo(the slide the show ended on)
+Esc in full screen → the browser leaves full screen itself → 'fullscreenchange' → present.stop
+Alt+F5 → present.start(true, {presenter}) → requestFullscreen FIRST (a new window uses up the key press), then
+  presenter.open (window.open; null → stop + 'allow pop-ups' message) → every draw also presenter.draw(state)
+keys / buttons in the presenter window → present.input → reduce → draw (both windows) · show ends → presenter.close
+```
+
+**Exporting** (Phase 8: Export tab)
+
+```text
+Ctrl+P / Export > PDF → pdf.open → dialog (parseRange, pickSlides) → printDocument(clean copy, chosen slides, player.css)
+  → hidden frame srcdoc → load → frame.print() → the browser's print window (Save as PDF)
+Export > PNG of This Slide / Copy Slide as Picture → snapshot.slidePngs: cleanCopy → slideSvg → data: URL → <img>
+  → canvas (2×) → toBlob → fileio.downloadBlob / navigator.clipboard.write (refused → download)
+Export > PNG of All Slides → snapshot.exportAll → slidePngs (busy cover: 'Drawing slide 3 of 12…') → JSZip (STORE) → download
 ```
 
 **Saving** (Ctrl+S)

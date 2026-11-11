@@ -17,5 +17,13 @@ To compute a hash: `python -c "import hashlib,sys;print(hashlib.sha256(open(sys.
 
 | Name | Version | License | Source URL | File | SHA-256 |
 | --- | --- | --- | --- | --- | --- |
+| PptxGenJS | 4.0.1 | MIT | https://registry.npmjs.org/pptxgenjs/-/pptxgenjs-4.0.1.tgz (file `package/dist/pptxgen.bundle.js`; npm shasum cd0f202f62f74d950bcd217e90b766da8f73742e checked) | `pptxgenjs/pptxgen.bundle.js` | `4fb9eac5cfefb213e2d8743c2b7151025f31bfb3f834c73c12062916daa0f3f8` |
 
-*(No libraries yet. Phase 8 will add PptxGenJS and html2canvas.)*
+Notes:
+
+- **PptxGenJS** (PowerPoint export, SPEC 7.4, added 2026-11-11 with the user's approval). Its browser bundle also holds
+  **JSZip 3.10.1** ("MIT or GPLv3", used under MIT) with pako, lie, setImmediate and readable-stream (all MIT /
+  zlib); their notices are in `pptxgenjs/LICENSE`. The editor uses that JSZip (global `JSZip`) for the PNG ZIP too
+  (SPEC 7.3), so JSZip is not vendored separately. Checked under the editor's CSP: no blocked call (its one
+  `XMLHttpRequest` only runs for a picture given by path, which the editor never does).
+- **html2canvas** is not needed: the editor draws slide pictures with the browser itself (SPEC 7.3, Phase 8 Q&A).

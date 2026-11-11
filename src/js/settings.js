@@ -24,7 +24,7 @@
 
     const KEY = 'deck-editor-settings';
     App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null,
-        showGridlines: false, showRulers: false });
+        showGridlines: false, showRulers: false, pdfHintShown: false });
     const NUMBER_LOCALES = ['pt-BR', 'en-US'];
 
     let store = null;   // localStorage, or a fake one in the tests
@@ -49,6 +49,7 @@
             numberLocale: NUMBER_LOCALES.indexOf(value.numberLocale) !== -1 ? value.numberLocale : null,
             showGridlines: !!value.showGridlines,   // View tab (rulers.js)
             showRulers: !!value.showRulers,
+            pdfHintShown: !!value.pdfHintShown,   // Export > PDF's "Save as PDF" hint, shown the first time only (pdf.js)
         };
     };
 

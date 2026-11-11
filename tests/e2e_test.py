@@ -5471,7 +5471,7 @@ def test_settings_recent_files_and_status(browser):
     editor.click_dialog_button("OK")
     saved = page.evaluate("JSON.parse(localStorage.getItem('deck-editor-settings'))")
     check(saved == {"keepDrafts": True, "retentionDays": 30, "rememberRecent": True, "numberLocale": None,
-                     "showGridlines": False, "showRulers": False}, f"saved settings: {saved}")
+                     "showGridlines": False, "showRulers": False, "pdfHintShown": False}, f"saved settings: {saved}")
 
     # Recent files: an opened file is remembered; choosing it opens the Open window in its folder.
     page.evaluate("""() => App.events.emit('file-opened',
@@ -5618,6 +5618,441 @@ def test_text_lists_render_bullets_and_numbers(browser):
     editor.close()
 
 
+# ---------------------------------------------------------------------------
+# Phase 8: present and export
+# ---------------------------------------------------------------------------
+
+SHOWN_IN_SHOW = """() => {
+    const frame = document.querySelector('#slideshow iframe');
+    const slide = frame && frame.contentDocument.querySelector('section.slide.deck-player-current');
+    return slide ? slide.getAttribute('data-slide-id') : null;
+}"""
+
+
+def test_slideshow(browser):
+    """Phase 8 (SPEC 7.1): F5 presents from the first slide, full screen, the slide scaled to fit with black bars;
+    arrows / Space / Page Down / a click move on, the hidden slide is skipped, a number + Enter jumps, B blacks the
+    screen, after the last slide the end screen; Esc ends on the slide shown; Shift+F5 starts on the current slide;
+    the speaker notes never show; F5 never reloads the editor."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    shown = lambda: page.evaluate(SHOWN_IN_SHOW)  # noqa: E731
+    page.evaluate("App.deck.goTo(2)")
+    page.evaluate("window.__sameEditor = true")   # gone if F5 reloaded the page
+
+    page.keyboard.press("F5")
+    wait_until(page, SHOWN_IN_SHOW)
+    check(shown() == "s1", f"F5 starts on the first slide: {shown()}")
+    wait_until(page, "document.fullscreenElement && document.fullscreenElement.id === 'slideshow'")
+    check(page.evaluate("window.__sameEditor === true"), "F5 did not reload the editor")
+    time.sleep(0.3)
+    # 1440 x 900 window: the slide is scaled to 1440 x 810, black bars of 45 px above and below.
+    view = page.viewport_size
+    scale = min(view["width"] / 1280, view["height"] / 720)
+    bar = (view["height"] - 720 * scale) / 2
+    check(bar > 20, f"this window gives bars above and below: {bar}")
+    top_bar = common_colour(page, {"left": 100, "top": 2, "right": view["width"] - 100, "bottom": int(bar) - 2})
+    check(top_bar == [0, 0, 0], f"black bar above the slide: {top_bar}")
+    slide_box = page.evaluate("""() => {
+        const frame = document.querySelector('#slideshow iframe');
+        const r = frame.contentDocument.querySelector('section.slide.deck-player-current').getBoundingClientRect();
+        return { left: r.left, top: r.top, width: r.width, height: r.height };
+    }""")
+    check(abs(slide_box["width"] - 1280 * scale) < 1.5 and abs(slide_box["top"] - bar) < 1.5,
+          f"scaled to fit, centred: {slide_box}")
+    middle = common_colour(page, {"left": view["width"] // 2 - 200, "top": int(bar) + 500,
+                                  "right": view["width"] // 2 + 200, "bottom": int(bar) + 600})
+    check(middle == [255, 255, 255], f"the white slide fills the middle: {middle}")
+    notes_text = page.evaluate("""() => {
+        const doc = document.querySelector('#slideshow iframe').contentDocument;
+        const notes = doc.querySelector('section.slide.deck-player-current aside.notes');
+        return notes ? getComputedStyle(notes).display : 'none';
+    }""")
+    check(notes_text == "none", "speaker notes are not shown")
+    page.screenshot(path=str(OUTPUT / "93-slideshow.png"))
+
+    page.keyboard.press("ArrowRight")
+    check(shown() == "s2", f"→: {shown()}")
+    page.keyboard.press("Space")
+    check(shown() == "s3", f"Space: {shown()}")
+    page.keyboard.press("PageDown")
+    check(shown() == "s4", f"Page Down: {shown()}")
+    page.mouse.click(view["width"] / 2, view["height"] / 2)
+    check(shown() == "s6", f"a click; hidden slide 5 skipped: {shown()}")
+    page.keyboard.press("ArrowLeft")
+    check(shown() == "s4", f"←: back over the hidden slide: {shown()}")
+    page.keyboard.press("2")
+    page.keyboard.press("Enter")
+    check(shown() == "s2", f"2 + Enter: {shown()}")
+
+    page.keyboard.press("b")
+    check(page.is_visible("#slideshow .slideshow-curtain"), "B: black screen")
+    black = common_colour(page, {"left": view["width"] // 2 - 200, "top": int(bar) + 500,
+                                 "right": view["width"] // 2 + 200, "bottom": int(bar) + 600})
+    check(black == [0, 0, 0], f"the slide is covered by black: {black}")
+    page.keyboard.press("b")
+    check(not page.is_visible("#slideshow .slideshow-curtain") and shown() == "s2", "B again: the same slide back")
+
+    page.keyboard.press("End")
+    page.keyboard.press("ArrowRight")
+    check(page.is_visible("#slideshow .slideshow-end"), "after the last slide: the end screen")
+    page.keyboard.press("ArrowLeft")
+    check(not page.is_visible("#slideshow .slideshow-end") and shown() == "s6", "back: the last slide again")
+    page.keyboard.press("ArrowLeft")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.getElementById('slideshow') && !document.fullscreenElement")
+    check(page.evaluate("App.deck.getCurrentSlide().getAttribute('data-slide-id')") == "s4",
+          "Esc ends; the editor shows the slide the show ended on")
+    check(page.evaluate("App.history.canUndo()") is False, "presenting changed nothing in the deck")
+
+    # Shift+F5: from the current slide (s4); also from the Slide Show tab.
+    page.keyboard.press("Shift+F5")
+    wait_until(page, SHOWN_IN_SHOW)
+    check(shown() == "s4", f"Shift+F5 starts on the current slide: {shown()}")
+    # Right after the last show left full screen: this one is full screen too, and stays on.
+    wait_until(page, "document.fullscreenElement && document.fullscreenElement.id === 'slideshow'")
+    time.sleep(0.5)
+    check(page.evaluate("App.present.isActive() && !!document.fullscreenElement"), "the second show is still on, full screen")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.getElementById('slideshow')")
+    page.click("[role='tab']:has-text('Slide Show')")
+    page.click("button[data-command='slideShowFromStart']")
+    wait_until(page, SHOWN_IN_SHOW)
+    check(shown() == "s1", "the ribbon's From Beginning")
+    page.keyboard.press("Space")
+    check(shown() == "s2", "Space moves on (it does not press the ribbon button again)")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.getElementById('slideshow')")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+def presenter_frame_slide(popup, frame_id):
+    return popup.evaluate("""(id) => {
+        const doc = document.getElementById(id).contentDocument;
+        const slide = doc && doc.querySelector('section.slide.deck-player-current');
+        return slide ? slide.getAttribute('data-slide-id') : null;
+    }""", frame_id)
+
+
+def test_presenter_view(browser):
+    """Phase 8 (SPEC 7.1): Alt+F5 presents from the current slide and opens the presenter window: current slide,
+    next slide (hidden ones skipped, then "End of slide show"), the slide's speaker notes, a running timer (Pause /
+    Reset) and the clock; keys and buttons there drive the show; Esc there ends both; a blocked pop-up is explained."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    shown = lambda: page.evaluate(SHOWN_IN_SHOW)  # noqa: E731
+    with editor.context.expect_page() as popup_info:
+        page.keyboard.press("Alt+F5")
+    popup = popup_info.value
+    wait_until(page, SHOWN_IN_SHOW)
+    check(shown() == "s1", f"the show starts on the current slide: {shown()}")
+    wait_until(popup, "document.getElementById('presenter-count') && document.getElementById('presenter-count').textContent")
+    wait_until(popup, """() => {
+        const ready = (id) => { const d = document.getElementById(id).contentDocument;
+                                return !!(d && d.querySelector('section.slide.deck-player-current')); };
+        return ready('presenter-current') && ready('presenter-next');
+    }""")
+    check(popup.title().startswith("Presenter View"), popup.title())
+    check(popup.inner_text("#presenter-count") == "Slide 1 of 6", popup.inner_text("#presenter-count"))
+    check(presenter_frame_slide(popup, "presenter-current") == "s1", "current slide in the presenter window")
+    check(presenter_frame_slide(popup, "presenter-next") == "s2", "next slide")
+    notes_s1 = page.evaluate("App.notes.textOf(App.deck.getSlides()[0])")
+    check(notes_s1 and popup.inner_text("#presenter-notes") == notes_s1, f"the slide's notes: {popup.inner_text('#presenter-notes')!r}")
+    clock = popup.inner_text("#presenter-clock")
+    check(re.fullmatch(r"\d\d:\d\d", clock) and clock == time.strftime("%H:%M") or clock == time.strftime("%H:%M",
+          time.localtime(time.time() - 60)), f"the clock: {clock}")
+    time.sleep(1.6)
+    elapsed = popup.inner_text("#presenter-elapsed")
+    check(re.fullmatch(r"0:00:0[1-3]", elapsed), f"the timer runs: {elapsed}")
+    popup.screenshot(path=str(OUTPUT / "94-presenter-view.png"))
+
+    # Keys in the presenter window drive the show; both windows follow.
+    popup.keyboard.press("ArrowRight")
+    check(shown() == "s2" and presenter_frame_slide(popup, "presenter-current") == "s2", f"→ in the presenter window: {shown()}")
+    check(presenter_frame_slide(popup, "presenter-next") == "s3", "next follows")
+    notes_s2 = page.evaluate("App.notes.textOf(App.deck.getSlides()[1])")
+    check(popup.inner_text("#presenter-notes") == (notes_s2 or "No notes for this slide."), "the notes follow")
+    popup.keyboard.press("ArrowRight")
+    popup.keyboard.press("ArrowRight")
+    check(shown() == "s4" and presenter_frame_slide(popup, "presenter-next") == "s6", "next skips the hidden slide 5")
+    popup.click("#presenter-forward")
+    check(shown() == "s6" and popup.is_visible("#presenter-next-cover"), "Next ▶; after the last: End of slide show")
+    check(popup.inner_text("#presenter-next-cover") == "End of slide show", "the end comes next")
+    popup.click("#presenter-previous")
+    check(shown() == "s4", f"◀ Previous: {shown()}")
+
+    popup.click("#presenter-black")
+    check(page.is_visible("#slideshow .slideshow-curtain") and popup.get_attribute("#presenter-black", "aria-pressed") == "true",
+          "Black screen: the show is black, the button lit")
+    check(popup.is_visible("#presenter-current-cover"), "the presenter's current slide says so")
+    popup.keyboard.press("b")
+    check(not page.is_visible("#slideshow .slideshow-curtain"), "B in the presenter window: the slide back")
+
+    popup.click("#presenter-pause")
+    frozen = popup.inner_text("#presenter-elapsed")
+    time.sleep(1.3)
+    check(popup.inner_text("#presenter-elapsed") == frozen and popup.inner_text("#presenter-pause") == "Resume",
+          "Pause stops the timer")
+    popup.click("#presenter-pause")
+    popup.click("#presenter-reset")
+    check(popup.inner_text("#presenter-elapsed") == "0:00:00", "Reset: back to 0")
+
+    try:
+        popup.keyboard.press("Escape")
+    except Exception as error:  # noqa: BLE001 - the window may close between the key going down and up
+        check("closed" in str(error), f"only the window closing interrupts the key press: {error}")
+    wait_until(page, "!document.getElementById('slideshow')")
+    check(popup.is_closed(), "Esc in the presenter window ends the show and closes it")
+    check(page.evaluate("App.deck.getCurrentSlide().getAttribute('data-slide-id')") == "s4", "the editor shows slide 4")
+
+    # A blocked pop-up: the show does not start, a message says how to allow it.
+    page.evaluate("window.open = () => null")
+    page.click("[role='tab']:has-text('Slide Show')")
+    page.click("button[data-command='presenterView']")
+    wait_until(page, "!!document.querySelector('dialog[open]')")
+    text = editor.report_dialog_text()
+    check("blocked the presenter window" in text and "Always allow pop-ups" in text, text)
+    check(not page.evaluate("App.present.isActive()") and not page.evaluate("!!document.getElementById('slideshow')"),
+          "no show behind the message")
+    editor.click_dialog_button("OK")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+# Instead of the print window (a test cannot close it), keep the document the editor prints.
+CATCH_PRINT = """() => {
+    window.__printed = [];
+    App.pdf.printWindow = (frameWindow) => window.__printed.push(frameWindow.document.documentElement.outerHTML);
+}"""
+
+PRINTED_IDS = """(i) => {
+    const doc = new DOMParser().parseFromString(window.__printed[i], 'text/html');
+    return Array.from(doc.querySelectorAll('section.slide')).map((s) => s.getAttribute('data-slide-id')).join(',');
+}"""
+
+
+def print_with(editor, choice, range_text=None, include_hidden=False):
+    """Ctrl+P, pick the slides in the PDF dialog, Print…; returns how many documents were printed so far."""
+    page = editor.page
+    before = page.evaluate("window.__printed.length")
+    page.keyboard.press("Control+p")
+    wait_until(page, "!!document.querySelector('dialog[open] .pdf-dialog')")
+    page.check(f"dialog[open] input[name='pdf-slides'][value='{choice}']")
+    if range_text is not None:
+        page.fill("#pdf-range", range_text)
+    page.set_checked("#pdf-include-hidden", include_hidden)
+    page.click("dialog[open] button:has-text('Print')")
+    return before
+
+
+def test_pdf_export(browser):
+    """Phase 8 (SPEC 7.2): Ctrl+P / Export > PDF asks which slides (all, current, a range; hidden ones only when
+    ticked), then prints only those slides, with the "Save as PDF" hint the first time; the printed document is the
+    deck (no editor screen), 13.333 x 7.5 in pages, one slide per page, laid out as on screen."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate(CATCH_PRINT)
+    page.evaluate("App.deck.goTo(2)")
+
+    # First time: the hint; All slides (default): the hidden slide 5 left out.
+    page.keyboard.press("Control+p")
+    wait_until(page, "!!document.querySelector('dialog[open] .pdf-dialog')")
+    check(page.is_visible("dialog[open] .pdf-hint") and "Save as PDF" in page.inner_text("dialog[open] .pdf-hint"),
+          "the Save as PDF hint the first time")
+    check(page.is_checked("dialog[open] input[value='all']") and not page.is_checked("#pdf-include-hidden"),
+          "All slides, hidden left out: the defaults")
+    page.screenshot(path=str(OUTPUT / "95-pdf-dialog.png"))
+    page.click("dialog[open] button:has-text('Print')")
+    wait_until(page, "window.__printed.length === 1")
+    check(page.evaluate(PRINTED_IDS, 0) == "s1,s2,s3,s4,s6", f"all slides but the hidden one: {page.evaluate(PRINTED_IDS, 0)}")
+    printed = page.evaluate("window.__printed[0]")
+    for editor_part in ["ribbon", "thumbnail-rail", "data-editor", "editor-", "contenteditable"]:
+        check(editor_part not in printed, f"no editor screen in the print: {editor_part}")
+    check("@page { size: 13.333in 7.5in; margin: 0; }" in printed and "print-color-adjust: exact" in printed,
+          "the page size and exact colours")
+    check("<title>contract-deck</title>" in printed, "the PDF is named after the deck")
+
+    # Again: no hint. Current slide; a range with and without hidden slides; Export > PDF on the ribbon.
+    page.keyboard.press("Control+p")
+    wait_until(page, "!!document.querySelector('dialog[open] .pdf-dialog')")
+    check(not page.is_visible("dialog[open] .pdf-hint"), "the hint only the first time")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.querySelector('dialog[open]')")
+    check(page.evaluate("window.__printed.length") == 1, "Esc prints nothing")
+    index = print_with(editor, "current")
+    wait_until(page, f"window.__printed.length === {index + 1}")
+    check(page.evaluate(PRINTED_IDS, index) == "s3", "the current slide")
+    index = print_with(editor, "range", "1-2, 5")
+    wait_until(page, f"window.__printed.length === {index + 1}")
+    check(page.evaluate(PRINTED_IDS, index) == "s1,s2", "a range: the hidden slide 5 left out")
+    page.click("[role='tab']:has-text('Export')")
+    page.click("button[data-command='exportPdf']")
+    wait_until(page, "!!document.querySelector('dialog[open] .pdf-dialog')")
+    check(page.is_checked("dialog[open] input[value='range']") and page.input_value("#pdf-range") == "1-2, 5",
+          "the last choice is remembered")
+    page.check("#pdf-include-hidden")
+    page.click("dialog[open] button:has-text('Print')")
+    wait_until(page, f"window.__printed.length === {index + 2}")
+    check(page.evaluate(PRINTED_IDS, index + 1) == "s1,s2,s5", "with Include hidden slides: slide 5 too")
+
+    # A wrong range: the dialog says why and stays.
+    print_with(editor, "range", "2-9")
+    wait_until(page, "!!document.querySelector('dialog[open] .pdf-error')")
+    check(page.inner_text("dialog[open] .pdf-error") == "There is no slide 9: the deck has 6 slides.",
+          page.inner_text("dialog[open] .pdf-error"))
+    page.keyboard.press("Escape")
+
+    # The printed document laid out in print: one page per slide, each slide as on screen.
+    saved = editor.save_as_download("pdf-export-screen.html")
+    player, errors = play_saved_deck(browser, saved)
+    screen = {}
+    for _ in range(5):
+        screen.update(player.evaluate(PRINT_LAYOUT))
+        player.keyboard.press("ArrowRight")
+    player.context.close()
+    sheet = browser.new_context(viewport={"width": 1280, "height": 720})
+    sheet.route(re.compile(r"^https?://"), lambda route: route.abort())
+    print_page = sheet.new_page()
+    print_page.set_content(printed)
+    print_page.emulate_media(media="print")
+    layout = print_page.evaluate(PRINT_LAYOUT)
+    check(sorted(layout) == sorted(screen), f"the printed slides: {sorted(layout)}")
+    for slide_id, rows in layout.items():
+        check(rows == screen[slide_id], f"slide {slide_id} prints as on screen:\n{rows}\n{screen[slide_id]}")
+    pdf = OUTPUT / "pdf-export.pdf"
+    print_page.pdf(path=str(pdf), prefer_css_page_size=True, print_background=True)
+    data = pdf.read_bytes()
+    pages = len(re.findall(rb"/Type\s*/Page[^s]", data))
+    check(pages == 5, f"one PDF page per slide: {pages}")
+    box = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]", data)
+    check(box and abs(float(box.group(1)) - 960) < 1 and abs(float(box.group(2)) - 540) < 1,
+          f"13.333 x 7.5 in pages (960 x 540 pt): {box and box.groups()}")
+    sheet.close()
+    check(errors == [] and editor.errors == [], f"no errors: {errors} {editor.errors}")
+    editor.close()
+
+
+# Two PNGs compared at 1280 x 720 in the browser: mean colour difference (0-255) and the share of pixels
+# differing by more than 60 (text edges are smoothed differently when a 2x picture is shrunk).
+COMPARE_PICTURES = """async ({a, b}) => {
+    const load = (data) => new Promise((resolve) => { const i = new Image(); i.onload = () => resolve(i); i.src = 'data:image/png;base64,' + data; });
+    const pixels = (image) => {
+        const canvas = document.createElement('canvas'); canvas.width = 1280; canvas.height = 720;
+        const context = canvas.getContext('2d'); context.imageSmoothingQuality = 'high';
+        context.drawImage(image, 0, 0, 1280, 720);
+        return context.getImageData(0, 0, 1280, 720).data;
+    };
+    const p = pixels(await load(a)), q = pixels(await load(b));
+    let sum = 0, far = 0;
+    for (let k = 0; k < p.length; k += 4) {
+        const d = Math.max(Math.abs(p[k] - q[k]), Math.abs(p[k + 1] - q[k + 1]), Math.abs(p[k + 2] - q[k + 2]));
+        sum += d;
+        if (d > 60) far++;
+    }
+    return { mean: sum / (p.length / 4), far: far / (p.length / 4) };
+}"""
+
+
+def png_size(data):
+    """(width, height) from a PNG's header."""
+    check(data[:8] == b"\x89PNG\r\n\x1a\n", "a PNG file")
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+def saved_deck_screens(browser, saved, count):
+    """Screenshots (PNG bytes) of the first `count` shown slides of a saved deck, presented on its own."""
+    player, errors = play_saved_deck(browser, saved)
+    player.evaluate("document.querySelector('.deck-player-counter').style.display = 'none'")
+    shots = []
+    for _ in range(count):
+        shots.append(player.screenshot())
+        player.keyboard.press("ArrowRight")
+    player.context.close()
+    check(errors == [], f"the saved deck plays without errors: {errors}")
+    return shots
+
+
+def test_slide_pictures(browser):
+    """Phase 8 (SPEC 7.3): Export > PNG of This Slide downloads a 2560 x 1440 PNG that matches the slide on screen;
+    Copy Slide as Picture puts that PNG on the clipboard; where the browser refuses, the PNG is downloaded."""
+    editor = Editor(browser)
+    editor.context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(2)")
+    page.click("[role='tab']:has-text('Export')")
+    with page.expect_download() as download_info:
+        page.click("button[data-command='exportPng']")
+    download = download_info.value
+    check(download.suggested_filename == "contract-deck-slide-03.png", download.suggested_filename)
+    picture = OUTPUT / "96-slide-picture.png"
+    download.save_as(picture)
+    data = picture.read_bytes()
+    check(png_size(data) == (2560, 1440), f"2x the slide: {png_size(data)}")
+
+    # The same slide presented from the saved file, on screen.
+    saved = editor.save_as_download("slide-pictures.html")
+    screens = saved_deck_screens(browser, saved, 3)
+    compared = page.evaluate(COMPARE_PICTURES, {"a": base64.b64encode(data).decode(), "b": base64.b64encode(screens[2]).decode()})
+    check(compared["mean"] < 3 and compared["far"] < 0.03, f"the picture matches the slide on screen: {compared}")
+
+    # Copy Slide as Picture: on the clipboard.
+    page.click("button[data-command='copySlideImage']")
+    wait_until(page, "document.getElementById('status-message').textContent.includes('copied as a picture')")
+    copied = page.evaluate("""async () => {
+        const items = await navigator.clipboard.read();
+        const blob = await items[0].getType('image/png');
+        const bitmap = await createImageBitmap(blob);
+        return [items[0].types.join(','), bitmap.width, bitmap.height];
+    }""")
+    check(copied == ["image/png", 2560, 1440], f"a 2x PNG on the clipboard: {copied}")
+
+    # Refused: downloaded instead, and the status bar says so.
+    page.evaluate("() => { navigator.clipboard.write = () => Promise.reject(new DOMException('blocked', 'NotAllowedError')); }")
+    with page.expect_download() as download_info:
+        page.click("button[data-command='copySlideImage']")
+    check(download_info.value.suggested_filename == "contract-deck-slide-03.png", "the PNG downloaded instead")
+    wait_until(page, "document.getElementById('status-message').textContent.includes('Downloads')")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+def test_slide_pictures_zip(browser):
+    """Phase 8 (SPEC 7.3): Export > PNG of All Slides (ZIP) downloads deck-slides.zip with a 2560 x 1440 PNG of every
+    slide not hidden, named by slide number; made with the JSZip inside the vendored PptxGenJS bundle."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    check(page.evaluate("typeof PptxGenJS === 'function' && typeof JSZip === 'function'"), "the vendored bundle is in the editor")
+    page.click("[role='tab']:has-text('Export')")
+    with page.expect_download(timeout=60000) as download_info:
+        page.click("button[data-command='exportPngAll']")
+    download = download_info.value
+    check(download.suggested_filename == "contract-deck-slides.zip", download.suggested_filename)
+    target = OUTPUT / "slide-pictures.zip"
+    download.save_as(target)
+    import zipfile
+    with zipfile.ZipFile(target) as archive:
+        names = archive.namelist()
+        check(names == [f"contract-deck-slide-0{n}.png" for n in (1, 2, 3, 4, 6)], f"every shown slide, by number: {names}")
+        sizes = {png_size(archive.read(name)) for name in names}
+        check(sizes == {(2560, 1440)}, f"all 2x: {sizes}")
+        pictures = [archive.read(name) for name in names]
+    # Each picture looks like its slide presented from the saved file.
+    saved = editor.save_as_download("slide-pictures-zip.html")
+    screens = saved_deck_screens(browser, saved, 5)
+    for name, picture, screen in zip(names, pictures, screens):
+        compared = page.evaluate(COMPARE_PICTURES, {"a": base64.b64encode(picture).decode(), "b": base64.b64encode(screen).decode()})
+        check(compared["mean"] < 3 and compared["far"] < 0.03, f"{name} matches its slide on screen: {compared}")
+    check(page.is_hidden("#busy"), "the progress cover is gone")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -5698,6 +6133,11 @@ TESTS = [
     test_slide_master_own_footers,
     test_theme_editor,
     test_phase7_done_when,
+    test_slideshow,
+    test_presenter_view,
+    test_pdf_export,
+    test_slide_pictures,
+    test_slide_pictures_zip,
 ]
 
 

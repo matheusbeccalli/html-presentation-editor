@@ -522,11 +522,16 @@
     };
 
     function download(fileName, html) {
-        const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        App.fileio.downloadBlob(fileName, new Blob([html], { type: 'text/html' }));
+    }
+
+    /* Hand a file to the browser's downloads (Save As fallback, PNG / PowerPoint exports). */
+    App.fileio.downloadBlob = function downloadBlob(fileName, blob) {
+        const url = URL.createObjectURL(blob);
         const link = App.util.el('a', { href: url, download: fileName });
         document.body.appendChild(link);
         link.click();
         link.remove();
         setTimeout(() => URL.revokeObjectURL(url), 10000);
-    }
+    };
 })();

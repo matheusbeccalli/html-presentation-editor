@@ -81,7 +81,7 @@ html-deck-editor/
 ├── vendor/
 │   ├── README.md           ← name, version, license, source URL, SHA-256 per library
 │   ├── pptxgenjs/          ← library file + LICENSE
-│   └── html2canvas/        ← library file + LICENSE
+│   └── (html2canvas/: not needed, see 7.3)
 ├── samples/                ← test decks with fake data only (never real deal files)
 ├── tests/                  ← automated tests (section 8)
 └── dist/
@@ -457,7 +457,7 @@ PDF export comes first because it is how IC materials usually circulate; PPTX ex
 
 **7.3 Images**
 
-- Export the current slide or all slides as PNG at 2× resolution, using the vendored **html2canvas** (MIT).
+- Export the current slide or all slides as PNG at 2× resolution, drawn by the browser itself (the slide wrapped in an SVG `<foreignObject>` and drawn into a canvas; decided in the Phase 8 Q&A, 2026-11-11, instead of the vendored html2canvas: no library, and the picture matches the screen).
 - "Copy slide as image" to the clipboard, for pasting into Outlook or Teams (`navigator.clipboard.write`; if blocked, fall back to downloading the PNG).
 - All slides at once: download as a ZIP using **JSZip** (MIT). Reuse the copy bundled inside PptxGenJS's bundle build if present; otherwise vendor JSZip separately.
 
@@ -475,7 +475,7 @@ PDF export comes first because it is how IC materials usually circulate; PPTX ex
 | Chart (column, bar, line, combo, donut, pie, area, scatter, bubble) | Native editable chart built from the chart JSON |
 | Waterfall chart | Stacked column with an invisible base series (editable), or image if that fails |
 | Speaker notes | PowerPoint speaker notes |
-| Anything unsupported | Rasterized with html2canvas and inserted as an image |
+| Anything unsupported | Rasterized by the browser (as for PNG export, 7.3) and inserted as an image |
 
 - After export, show a report listing anything that was rasterized or simplified, so the user knows what to check in PowerPoint.
 

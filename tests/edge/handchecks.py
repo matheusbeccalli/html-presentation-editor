@@ -82,4 +82,16 @@ HAND_CHECKS = [
      "left": 'a real Copilot deck: the test uses a made-up deck with its own footers (6 slides); no sample deck has them'},
     {"key": "Theme: Design > Edit Theme", "tests": ["test_theme_editor", "test_phase7_done_when"], "auto": False,
      "left": "the thumbnails following the new theme (not checked); a deck you saved yourself (tests use made-up ones)"},
+    # ---- Phase 8 -----------------------------------------------------
+    {"key": "Slide show: open samples/contract-deck.html", "tests": ["test_slideshow"], "auto": False,
+     "left": "Esc in real full screen is taken by Edge itself (it leaves full screen; the show ends on that): "
+             "the test's Esc reaches the page instead"},
+    {"key": "Presenter view: on slide 1 press Alt+F5", "tests": ["test_presenter_view"], "auto": False,
+     "left": "the show full screen beside the presenter window (headless browsers leave that request pending; checked once "
+             "by hand in headed Edge 157); moving the window to a second screen"},
+    {"key": "PDF: on slide 3 press Ctrl+P", "tests": ["test_pdf_export"], "auto": False,
+     "left": "Edge's real print window and its Save as PDF (the test keeps the printed document and prints it itself)"},
+    {"key": "Pictures: Export > PNG of This Slide", "tests": ["test_slide_pictures"], "auto": False,
+     "left": "pasting into Outlook and Teams: " + OFFICE},
+    {"key": "Pictures ZIP: open samples/contract-deck.html", "tests": ["test_slide_pictures_zip"], "auto": True},
 ]

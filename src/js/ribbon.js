@@ -161,8 +161,13 @@
         },
         {
             id: 'slideshow', label: 'Slide Show',
-            groups: [{ label: 'Set Up', commands: [['hideSlide', 'hidden']] }],
-            note: 'Presenting from the editor arrives in Phase 8. Saved decks already present on their own: open the saved file in the browser and use the arrow keys (F = full screen).',
+            groups: [
+                { label: 'Start Slide Show', commands: [['slideShowFromStart', 'play'], ['slideShowFromCurrent', 'playCurrent'], ['presenterView', 'presenter']] },
+                { label: 'Set Up', commands: [['hideSlide', 'hidden']] },
+            ],
+            note: 'During the show: arrows, Space or a click move on; a number then Enter jumps to that slide; ' +
+                'B blacks the screen; Esc ends. Hidden slides are skipped. Presenter View (Alt+F5) also opens a window with the next slide, ' +
+                'your notes, a timer and the clock: move it to your own screen. Saved decks also present on their own in the browser.',
         },
         {
             id: 'view', label: 'View',
@@ -174,7 +179,16 @@
                 'other elements within 5 px. Hold Alt while dragging to place it freely. Gridlines are every 40 px; nothing snaps to them. ' +
                 'Slide Master: a logo, footer, label and slide numbers on every slide, set in one dialog (also Insert > Header & Footer).',
         },
-        { id: 'export', label: 'Export', note: 'PDF, PNG and PowerPoint export arrive in Phase 8.' },
+        {
+            id: 'export', label: 'Export',
+            groups: [
+                { label: 'PDF', commands: [['exportPdf', 'pdf']] },
+                { label: 'Picture', commands: [['exportPng', 'picture'], ['exportPngAll', 'pictures'], ['copySlideImage', 'copy']] },
+            ],
+            note: 'PDF: choose the slides, then in the print window set Destination to "Save as PDF". ' +
+                'Charts, shapes and text stay sharp in the PDF. Pictures are PNG at twice the slide\'s size ' +
+                '(2560 × 1440); all slides (hidden ones left out) come in one ZIP file; Copy Slide as Picture puts one on the clipboard for Outlook or Teams.',
+        },
     ];
 
     const FILE_MENU = [
@@ -183,6 +197,7 @@
         ['openRecent', 'recent', ''],
         ['save', 'save', 'Ctrl+S'],
         ['saveAs', 'saveAs', 'Ctrl+Shift+S'],
+        ['exportPdf', 'pdf', 'Ctrl+P'],
         ['revertToOpened', 'undo', ''],
         ['settings', 'settings', ''],
     ];

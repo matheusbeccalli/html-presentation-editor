@@ -79,3 +79,10 @@
 .theme-row input[type="text"] { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px;
     font: inherit; background: var(--surface); color: var(--text); }
 .theme-copy-note:empty { display: none; }
+
+/* Export > PDF (pdf.js): which slides to print. */
+.pdf-dialog { display: flex; flex-direction: column; gap: 8px; min-width: 320px; }
+.pdf-choice { display: flex; align-items: center; gap: 4px; }
+.pdf-choice input[type="text"] { width: 140px; margin-left: 4px; }
+.pdf-error { margin: 4px 0 0; color: #a4262c; }
+.pdf-hint { margin: 6px 0 0; padding: 6px 8px; background: #fff4ce; border-radius: 3px; }

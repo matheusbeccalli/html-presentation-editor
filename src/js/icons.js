@@ -127,6 +127,11 @@
         continueNumbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M9 5h8.5"/>' +
             '<path d="M4.5 10.5v6M2.5 14.5l2 2 2-2"/><path d="M9 14h8.5"/>',
         slides: '<rect x="2.5" y="4" width="15" height="9.5"/><path d="M6 16.5h8"/>',
+        play: '<rect x="2.5" y="3.5" width="15" height="11" rx="1"/><path d="M8.5 6.5v5l4-2.5z" fill="currentColor"/><path d="M7 17.5h6"/>',
+        playCurrent: '<rect x="2.5" y="3.5" width="15" height="11" rx="1"/><path d="M8.5 6.5v5l4-2.5z" fill="currentColor"/><path d="M4.5 17.5h11"/><path d="M4.5 5.5v7" stroke-width="2"/>',
+        presenter: '<rect x="1.5" y="3.5" width="10" height="7" rx="0.5"/><rect x="13" y="3.5" width="5.5" height="3.5" rx="0.5"/><path d="M13 9.5h5.5M13 11.5h4M1.5 13.5h17M7 16.5h6"/>',
+        pdf: '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M7 14.5c2-1 4.5-5 3.5-7s-2 2 0 4.5 3 2.5 3 2.5"/>',
+        pictures: '<rect x="5.5" y="2.5" width="12" height="10" rx="1"/><path d="M2.5 6v10.5h12"/><path d="M5.5 10.5l3.5-3 2.5 2 2.5-2.5 3.5 3.5"/>',
         hidden: '<path d="M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z"/><path d="M3.5 16.5l13-13"/>',
         file: '<path d="M5 2.5h7l3.5 3.5v11.5H5z"/><path d="M12 2.5V6h3.5"/><path d="M7.5 10h5M7.5 13h5"/>',
         cut: '<circle cx="6" cy="14.5" r="2.5"/><circle cx="14" cy="14.5" r="2.5"/><path d="M7.5 12.5L14 3M12.5 12.5L6 3"/>',

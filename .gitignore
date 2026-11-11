@@ -10,6 +10,3 @@ tests/output/
 __pycache__/
 *.pyc
 .vscode/
-
-# Home-only automation: e2e tests in the real Windows Edge + hand-check ticking.
-tests/edge/

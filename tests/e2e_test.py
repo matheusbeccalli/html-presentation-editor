@@ -4281,7 +4281,9 @@ def test_theme_editor(browser):
     editor.click_dialog_button("Apply")
     check(label() == "Theme" and root("--color-accent") == "#0070C0" and root("--font-heading") == "Georgia, serif",
           f"applied: {label()} {root('--color-accent')} {root('--font-heading')}")
-    check(page.evaluate("App.deck.getDocument().querySelectorAll('style[data-deck-theme]').length") == 1, "one theme stylesheet")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('style[data-deck-theme]').length") == 0 and
+          "--color-accent: #0070C0;" in page.evaluate("App.deck.getDocument().head.querySelector('style:not([data-deck-lists])').textContent"),
+          "written where the deck declares it, no block of its own")
     page.keyboard.press("Control+z")
     check(root("--color-accent") == "#1F2A44" and title("color") == "rgb(31, 42, 68)", "undo: the old theme")
     page.keyboard.press("Control+y")
@@ -4321,6 +4323,22 @@ def test_theme_editor(browser):
     check(page.inner_text("#status-save") == "Saved" and root("--color-accent") == "#123456", "reopened as it was")
     again = editor.save_as_download("themed-again.html")
     check(again.read_text(encoding="utf-8") == first, "saved again: the same file")
+
+    # Edited by hand afterwards (VS Code, Copilot): the hand-edited colour shows.
+    check(first.count("--color-accent: #123456;") == 1, "the accent is in the file once, where the deck declares it")
+    by_hand = OUTPUT / "themed-by-hand.html"
+    by_hand.write_text(first.replace("--color-accent: #123456;", "--color-accent: #FF0000;"), encoding="utf-8")
+    editor.open(by_hand)
+    check(root("--color-accent") == "#FF0000", f"the hand edit shows: {root('--color-accent')}")
+
+    # A deck saved by the earlier theme editor (a block of its own) is folded into its own :root on open.
+    older = OUTPUT / "themed-older.html"
+    older.write_text(first.replace("<style data-deck-table", "<style data-deck-theme>:root { --color-accent: #0070C0; }</style>"
+                                   "<style data-deck-table", 1), encoding="utf-8")
+    editor.open(older)
+    editor.close_dialog_if_open()
+    check(root("--color-accent") == "#0070C0" and
+          page.evaluate("App.deck.getDocument().querySelectorAll('style[data-deck-theme]').length") == 0, "folded in on open")
 
 
 def fifteen_slide_deck(name):

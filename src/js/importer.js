@@ -458,6 +458,7 @@
         finishTables(deckDoc);
         finishGroups(deckDoc);   // before the text model: the bullet stylesheet stays last
         App.master.refreshStyle(deckDoc);   // the slide master's stylesheet, current, its logo kept
+        App.theme.fold(deckDoc);   // theme values into the deck's own :root (an older editor kept them apart)
         finishTextModel(deckDoc);
         ensureDeckFormatMeta(deckDoc);
 

@@ -4,14 +4,16 @@
  * one place with a live preview (Design > Edit Theme), or copied from another
  * deck together with its slide master (Design > Copy Theme from Deck…).
  *
- * The deck's own stylesheet is never rewritten: the new values go in one
- * :root rule of their own,
+ * A new value goes where the deck's own CSS declares it (the last :root
+ * declaration of that variable; only the value's text changes), so the deck
+ * stays one stylesheet that can still be edited by hand in VS Code or by
+ * Copilot. A variable the deck never declares goes in a :root rule of its own,
  *
- *   <style data-deck-theme>:root { --color-primary: #0070C0; --font-heading: Georgia, serif; }</style>
+ *   <style data-deck-theme>:root { --color-extra: #0070C0; }</style>
  *
- * after the deck's own CSS (so it wins) and before the editor's generated
- * stylesheets (their place after an import). Only what uses the variables
- * follows: a colour typed on an element as #CC092F stays as it is.
+ * after the deck's own CSS and before the editor's generated stylesheets.
+ * Opening a deck folds an older data-deck-theme block back in (fold). Only
+ * what uses the variables follows: a colour typed on an element stays.
  *
  * While the panel is open the slide shows the new values from a
  * <style data-editor-only> (never saved, even by an autosave meanwhile);
@@ -156,6 +158,80 @@
         style.setAttribute('data-deck-theme', '');
         style.textContent = text;
         doc.head.insertBefore(style, doc.head.querySelector(EDITOR_STYLES));
+    };
+
+    /* The deck's own stylesheets: not the editor's (data-deck-…) and not its editing-only ones. */
+    function ownStyles(doc) {
+        return Array.from(doc.head.querySelectorAll('style')).filter((style) => !Array.from(style.attributes)
+            .some((attribute) => attribute.name.indexOf('data-deck-') === 0 || attribute.name === 'data-editor-only'));
+    }
+
+    /*
+     * Where `name` is declared in a :root rule of stylesheet text `css` (the
+     * last such declaration, the one that wins): { start, end } of its value,
+     * or null. Comments are skipped, so a commented-out rule is never changed.
+     */
+    App.theme.declarationIn = function declarationIn(css, name) {
+        const blank = String(css).replace(/\/\*[\s\S]*?\*\//g, (comment) => ' '.repeat(comment.length));
+        const ruleRe = /([^{}]+)\{([^{}]*)\}/g;
+        const declarationRe = new RegExp('(^|[;\\s])' + name + '\\s*:', 'g');
+        let found = null;
+        let rule;
+        while ((rule = ruleRe.exec(blank)) !== null) {
+            if (rule[1].split(',').map((part) => part.trim()).indexOf(':root') === -1) {
+                continue;
+            }
+            const bodyStart = rule.index + rule[1].length + 1;
+            const body = rule[2];
+            declarationRe.lastIndex = 0;
+            let match;
+            while ((match = declarationRe.exec(body)) !== null) {
+                let start = match.index + match[0].length;
+                let end = body.indexOf(';', start);
+                end = end === -1 ? body.length : end;
+                while (start < end && /\s/.test(body[start])) {
+                    start += 1;
+                }
+                while (end > start && /\s/.test(body[end - 1])) {
+                    end -= 1;
+                }
+                found = { start: bodyStart + start, end: bodyStart + end };
+            }
+        }
+        return found;
+    };
+
+    /*
+     * Theme values into the deck: each one where the deck's own CSS declares it
+     * (only that value's text changes, so a later hand edit there still works);
+     * what the deck never declares goes in <style data-deck-theme>.
+     */
+    App.theme.applyValues = function applyValues(doc, values) {
+        const override = App.theme.readOverride(doc);
+        Object.keys(values).forEach((name) => {
+            let target = null;
+            ownStyles(doc).forEach((style) => {
+                const at = App.theme.declarationIn(style.textContent, name);
+                if (at) {
+                    target = { style: style, at: at };
+                }
+            });
+            if (target) {
+                const text = target.style.textContent;
+                target.style.textContent = text.slice(0, target.at.start) + values[name] + text.slice(target.at.end);
+                delete override[name];   // or it would still win over the deck's own
+            } else {
+                override[name] = values[name];
+            }
+        });
+        App.theme.write(doc, override);
+    };
+
+    /* On open: a data-deck-theme block (saved by an earlier version) moved into the deck's own :root where it can. */
+    App.theme.fold = function fold(doc) {
+        const values = App.theme.readOverride(doc);
+        doc.head.querySelectorAll('style[data-deck-theme]').forEach((old) => old.remove());
+        App.theme.applyValues(doc, values);
     };
 
     const DATA_LOGO = /^data:image\/[a-z0-9+.-]+;base64,[a-z0-9+/=\s]+$/i;
@@ -353,7 +429,7 @@
         }
         const fontsChanged = Object.keys(changed).some((name) => name.indexOf('--font-') === 0);
         App.history.change('Theme', 'deck', () => {
-            App.theme.write(doc, Object.assign(App.theme.readOverride(doc), changed));
+            App.theme.applyValues(doc, changed);
             if (copiedMaster) {
                 App.master.applyInStep(doc, copiedMaster, own);
             }

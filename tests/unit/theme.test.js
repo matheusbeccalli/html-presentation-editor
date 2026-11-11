@@ -67,3 +67,39 @@ test('theme: another deck\'s theme and master: only safe values, a logo only as 
     assertEqual(remote.master.logo, null, 'a remote logo is dropped');
     assertEqual(App.theme.fromDeckText('<html><head></head><body></body></html>'), { values: {}, master: null });
 });
+
+// ---- Into the deck's own :root (so a later hand edit in VS Code or by Copilot still works) ----
+
+const OWN_THEME_HEAD = '<style>/* brand: :root { --color-primary: red; } */\n' +
+    ':root { --font-heading: Calibri, Arial, sans-serif;\n  --color-primary: #CC092F; --color-accent: var(--color-primary); }\n' +
+    'body { color: var(--color-text); }\n:root { --color-text: #222 }</style>' +
+    '<style data-deck-lists>:root { --list-1-indent: 24px; }</style>';
+
+test('theme: a value the deck declares is changed where it is declared; the rest of its CSS stays as written', () => {
+    const doc = parseDoc('<html><head>' + OWN_THEME_HEAD + '<style data-deck-text></style></head><body></body></html>');
+    App.theme.applyValues(doc, { '--color-primary': '#0070C0', '--color-accent': '#123456', '--color-text': '#0B0B0B' });
+    assertEqual(doc.head.querySelector('style').textContent, '/* brand: :root { --color-primary: red; } */\n' +
+        ':root { --font-heading: Calibri, Arial, sans-serif;\n  --color-primary: #0070C0; --color-accent: #123456; }\n' +
+        'body { color: var(--color-text); }\n:root { --color-text: #0B0B0B }');
+    assertEqual(doc.querySelector('style[data-deck-theme]'), null, 'no block of our own needed');
+    assertEqual(doc.head.querySelector('style[data-deck-lists]').textContent, ':root { --list-1-indent: 24px; }', 'the editor\'s styles untouched');
+});
+
+test('theme: the declaration that wins (the last one) is changed; a colour the deck never declared goes in data-deck-theme', () => {
+    const doc = parseDoc('<html><head><style>:root { --color-primary: #111111; }</style><style>:root { --color-primary: #222222; }</style>' +
+        '<style data-deck-text></style></head><body></body></html>');
+    App.theme.applyValues(doc, { '--color-primary': '#333333', '--color-extra': '#ABCDEF' });
+    const own = doc.head.querySelectorAll('style:not([data-deck-theme]):not([data-deck-text])');
+    assertEqual([own[0].textContent, own[1].textContent], [':root { --color-primary: #111111; }', ':root { --color-primary: #333333; }']);
+    assertEqual(App.theme.readOverride(doc), { '--color-extra': '#ABCDEF' });
+});
+
+test('theme: a deck saved with a data-deck-theme block gets it folded into its own :root on open', async () => {
+    const doc = parseDoc('<html><head>' + OWN_THEME_HEAD + '<style data-deck-theme>:root { --color-primary: #0070C0; --color-extra: #ABCDEF; }</style>' +
+        '</head><body></body></html>');
+    App.theme.fold(doc);
+    assert(doc.head.querySelector('style').textContent.indexOf('--color-primary: #0070C0;') !== -1, 'moved into the deck\'s own rule');
+    assertEqual(App.theme.readOverride(doc), { '--color-extra': '#ABCDEF' }, 'only what the deck never declares stays apart');
+    App.theme.fold(doc);
+    assertEqual(App.theme.readOverride(doc), { '--color-extra': '#ABCDEF' }, 'folding again changes nothing');
+});

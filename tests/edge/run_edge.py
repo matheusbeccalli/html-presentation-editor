@@ -24,6 +24,7 @@ Needs, on Windows: py -m pip install --user playwright   (uses the installed Edg
 import argparse
 import datetime
 import html
+import re
 import shutil
 import subprocess
 import sys
@@ -58,6 +59,38 @@ def unticked_hand_checks(text):
         if line.startswith("  - [ ] "):
             found.append((index, line[len("  - [ ] "):].rstrip("\r\n")))
     return found
+
+
+TICK_NOTE = re.compile(r" \*\(ticked by the Edge run, \d{4}-\d{2}-\d{2}\)\*$")
+
+
+def machine_ticked_hand_checks(text):
+    """(line index, text without the note) of every hand check this run ticked earlier (it has the note)."""
+    found = []
+    for index, line in enumerate(text.splitlines(keepends=True)):
+        body = line.rstrip("\r\n")
+        if body.startswith("  - [x] ") and TICK_NOTE.search(body):
+            found.append((index, TICK_NOTE.sub("", body[len("  - [x] "):])))
+    return found
+
+
+def untick_lines(texts):
+    """Take back the Edge run's own ticks on these lines (never a tick without the note: those are the user's)."""
+    lines = FEATURES.read_bytes().decode("utf-8").splitlines(keepends=True)
+    unticked = []
+    for text in texts:
+        hits = [i for i, line in enumerate(lines)
+                if line.startswith("  - [x] " + text) and TICK_NOTE.search(line.rstrip("\r\n"))
+                and TICK_NOTE.sub("", line.rstrip("\r\n")) == "  - [x] " + text]
+        if len(hits) != 1:
+            print(f"  NOT UNTICKED (line changed or not unique): {text[:70]}")
+            continue
+        line = lines[hits[0]]
+        ending = line[len(line.rstrip("\r\n")):]
+        lines[hits[0]] = "  - [ ] " + text + ending
+        unticked.append(text)
+    FEATURES.write_bytes("".join(lines).encode("utf-8"))
+    return unticked
 
 
 def match(check_text, table):
@@ -177,7 +210,7 @@ def build_report(rows, results, edge_version, report_path):
     counts = {}
     for row in rows:
         counts[row["status"]] = counts.get(row["status"], 0) + 1
-    labels = {"ticked": "Ticked", "left": "Passed, rest by hand", "failed": "Test failed",
+    labels = {"kept": "Ticked, still passing", "unticked": "Ticked before, now FAILS", "ticked": "Ticked", "left": "Passed, rest by hand", "failed": "Test failed",
               "manual": "By hand only", "unmapped": "No test mapped"}
     summary = " · ".join(f"{labels[k]}: {v}" for k, v in counts.items())
     out = [f"<!doctype html><html lang=en><head><meta charset=utf-8>"
@@ -186,7 +219,7 @@ def build_report(rows, results, edge_version, report_path):
            f"<h1>Hand checks run in Edge</h1><p class=muted>{html.escape(edge_version)} · "
            f"{datetime.datetime.now():%Y-%m-%d %H:%M} · {html.escape(summary)}</p>"]
     for row in rows:
-        css = {"ticked": "ticked", "failed": "failed", "left": "left"}.get(row["status"], "none")
+        css = {"ticked": "ticked", "kept": "ticked", "failed": "failed", "unticked": "failed", "left": "left"}.get(row["status"], "none")
         out.append(f"<div class=check><span class='badge {css}'>{labels[row['status']]}</span>"
                    f"<span class=muted>FEATURES.md line {row['line']}</span>"
                    f"<div class=text>{html.escape(row['text'])}</div>")
@@ -267,6 +300,27 @@ def main():
                 row["status"] = "left"
         rows.append(row)
 
+    # The run's own earlier ticks: a failing test takes its tick back (the user's own ticks are never touched).
+    to_untick = []
+    for index, text in machine_ticked_hand_checks(FEATURES.read_text(encoding="utf-8")):
+        entry = match(text, HAND_CHECKS)
+        if entry is None or not entry["tests"]:
+            continue
+        ran = [results.get(name) for name in entry["tests"]]
+        if any(r is None for r in ran):
+            continue   # not run this time (-k): nothing to say
+        row = {"line": index + 1, "text": text, "tests": entry["tests"], "left": ""}
+        if all(r["ok"] for r in ran):
+            row["status"] = "kept"
+        else:
+            row["status"] = "unticked"
+            row["left"] = "its test failed: the Edge run took its tick back" if not args.no_tick else \
+                "its test failed (--no-tick: still ticked in FEATURES.md)"
+            to_untick.append(text)
+        rows.append(row)
+    rows.sort(key=lambda row: row["line"])
+    unticked = untick_lines(to_untick) if to_untick and not args.no_tick else []
+
     ticked = []
     if to_tick and not args.no_tick:
         ticked = tick_lines(to_tick, f"ticked by the Edge run, {datetime.date.today():%Y-%m-%d}")
@@ -286,6 +340,10 @@ def main():
     failed = [n for n, r in results.items() if not r["ok"]]
     print(f"\n  {len(results) - len(failed)} passed, {len(failed)} failed in Edge")
     print(f"  hand checks ticked: {len(ticked)}")
+    if to_untick:
+        print(f"  hand checks whose test FAILED: {len(to_untick)} ({'ticks taken back' if unticked else 'not changed: --no-tick'})")
+        for text in to_untick:
+            print(f"    - {text[:90]}")
     print(f"  report (open in Edge): {report}")
     return 1 if failed else 0
 

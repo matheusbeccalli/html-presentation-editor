@@ -288,7 +288,7 @@ def test_gap_p4_table_design(browser):
     deck as cell formatting, so its boxes are unticked) click "Beta Foods": Shading ▾ > Red: Beta Foods turns red;
     Shading ▾ > Table style fill: back. Drag from "2.450" to "8,9x", pen weight 3 px, pen colour ▾ a colour,
     Borders ▾ > Outside Borders: a thick frame around the four cells, none inside; Borders ▾ > No Border: the lines
-    around them go. Layout > Align Bottom: the numbers sit at the bottom of their cells. Esc, Esc (whole table),
+    around them go. Layout > Align Bottom: the numbers sit at the bottom of their cells. Esc (the whole table),
     Layout > Cell Margins ▾ > Wide: every row gets taller. Ctrl+Z each; Save, reopen: the look is kept"""
     editor = Editor(browser)
     editor.open(e2e.CONTRACT)
@@ -411,17 +411,10 @@ def test_gap_p4_table_design(browser):
           and after[1][0]["valign"] == "middle" and after[3][1]["valign"] == "middle", "the four numbers sit at the bottom, the rest stays centred")
     page.screenshot(path=str(e2e.OUTPUT / "gap-p4-design-cells.png"))
 
-    # Esc, Esc (whole table).
+    # Esc (the whole table): the cells are let go, the table stays selected.
     page.keyboard.press("Escape")
-    page.keyboard.press("Escape")
-    whole = page.evaluate("App.selection.selectedIds()") == ["e9"] and key() is None and page.is_hidden(".cell-block") and page.is_visible(LAYOUT_TAB)
-    if not whole:
-        findings.append("Esc, Esc after selecting cells does not leave the whole table selected: "
-                        f"selection {page.evaluate('App.selection.selectedIds()')}, Layout tab visible: {page.is_visible(LAYOUT_TAB)}")
-        page.mouse.click(*_cell(page, "e9", 1, 0))   # carry on: select the whole table the other way (click a cell, Esc)
-        page.keyboard.press("Escape")
-        check(page.evaluate("App.selection.selectedIds()") == ["e9"] and key() is None and page.is_hidden(".cell-block"),
-              "the whole table selected (click a cell, Esc)")
+    check(page.evaluate("App.selection.selectedIds()") == ["e9"] and key() is None and page.is_hidden(".cell-block")
+          and page.is_visible(LAYOUT_TAB), f"Esc: the whole table selected: {page.evaluate('App.selection.selectedIds()')}")
 
     # Layout > Cell Margins > Wide: every row taller.
     rows = e9()["rows"]
@@ -670,4 +663,35 @@ def test_gap_p4_insert_table(browser):
     editor.close()
 
 
-TESTS = [test_gap_p4_format1_table, test_gap_p4_column_borders, test_gap_p4_table_design, test_gap_p4_numbers, test_gap_p4_insert_table]
+def test_gap_p4_typing_new_row_undo(browser):
+    """Typing in cells (the part the e2e test leaves out): "Click the last cell (18,4%), Tab: a new row, type in it;
+    Esc, Ctrl+Z takes your typing back and a second Ctrl+Z removes the row". The rest of that hand check is
+    covered by tests/e2e_test.py test_table_cell_editing."""
+    editor = Editor(browser)
+    editor.open(e2e.CONTRACT)
+    page = editor.page
+    page.click(".thumb[data-index='2']")
+    e2e.wait_until(page, "App.deck.getCurrentIndex() === 2")
+    text = lambda r, c: page.evaluate(e2e.CELL_TEXT, [r, c])  # noqa: E731
+    key = lambda: page.evaluate(e2e.EDITING_KEY)  # noqa: E731
+    rows = lambda: page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e9\"] > table').rows.length")  # noqa: E731
+    height = lambda: sum(page.evaluate(e2e.DRAWN_ROWS, "e9"))  # noqa: E731
+
+    page.mouse.click(*slide_to_screen(page, 1100, 345))
+    check(key() == "e9/5/3" and text(5, 3) == "18,4%", f"the last cell (18,4%): {key()} {text(5, 3)!r}")
+    start_rows, start_height = rows(), height()
+    page.keyboard.press("Tab")
+    check(rows() == start_rows + 1 and key() == "e9/6/0" and height() > start_height + 30, f"Tab: a new row: {rows()} {key()}")
+    page.keyboard.type("Nova")
+    check(text(6, 0) == "Nova", f"typing in it: {text(6, 0)!r}")
+    page.keyboard.press("Escape")
+    check(key() is None and page.evaluate("App.selection.selectedId()") == "e9", "Esc: the table selected")
+    page.keyboard.press("Control+z")
+    check(rows() == start_rows + 1 and text(6, 0) == "", f"first Ctrl+Z: the typing goes, the row stays: {rows()} {text(6, 0)!r}")
+    page.keyboard.press("Control+z")
+    check(rows() == start_rows and abs(height() - start_height) < 0.5, f"second Ctrl+Z: the row goes: {rows()} {height()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+TESTS = [test_gap_p4_typing_new_row_undo, test_gap_p4_format1_table, test_gap_p4_column_borders, test_gap_p4_table_design, test_gap_p4_numbers, test_gap_p4_insert_table]

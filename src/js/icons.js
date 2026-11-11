@@ -37,6 +37,8 @@
         distributeVertically: '<path d="M3 2.5h14M3 17.5h14"/><rect x="7" y="5" width="6" height="2.5"/><rect x="7" y="8.75" width="6" height="2.5"/><rect x="7" y="12.5" width="6" height="2.5"/>',
         group: '<rect x="2.5" y="2.5" width="15" height="15" stroke-dasharray="2 1.5"/><rect x="5" y="5" width="6" height="5"/><rect x="9" y="9" width="6" height="6" fill="currentColor" fill-opacity="0.25"/>',
         ungroup: '<rect x="2.5" y="2.5" width="7" height="6"/><rect x="10.5" y="11.5" width="7" height="6" fill="currentColor" fill-opacity="0.25"/><path d="M11 4.5l5 5M16 4.5l-5 5"/>',
+        rotateRight90: '<rect x="3.5" y="9.5" width="9" height="7"/><path d="M8 5.5a7 7 0 0 1 8.5 4.5"/><path d="M13.5 9.5l3 .8.8-3"/>',
+        rotateLeft90: '<rect x="7.5" y="9.5" width="9" height="7"/><path d="M12 5.5a7 7 0 0 0-8.5 4.5"/><path d="M6.5 9.5l-3 .8-.8-3"/>',
         grid: '<rect x="3" y="3" width="14" height="14"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14"/>',
         ruler: '<rect x="2.5" y="6.5" width="15" height="7" rx="0.5"/><path d="M5.5 6.5v3M8.5 6.5v2M11.5 6.5v3M14.5 6.5v2"/>',
         alignToSlide: '<rect x="2.5" y="4" width="15" height="12" rx="1"/><rect x="7" y="8" width="6" height="4" fill="currentColor" fill-opacity="0.25"/>',

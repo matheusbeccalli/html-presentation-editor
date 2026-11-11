@@ -482,6 +482,16 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .selection-handle[hidden], .selection-box.line .selection-handle:not([data-handle="start"]):not([data-handle="end"]) { display: none; }
 .selection-box.line { outline: none; }
 .selection-handle[data-handle="start"], .selection-handle[data-handle="end"] { cursor: crosshair; }
+/* Rotate (Phase 7): the round handle above the box, on a short stem; it turns with the box. */
+.selection-handle[data-handle="rotate"] {
+    left: 50%; top: calc(-24px * var(--inverse-zoom)); cursor: grab;
+    width: calc(11px * var(--inverse-zoom)); height: calc(11px * var(--inverse-zoom));
+}
+.selection-handle[data-handle="rotate"]::after {
+    content: ""; position: absolute; left: 50%; top: 100%;
+    height: calc(18px * var(--inverse-zoom)); border-left: calc(1px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;
+}
 .selection-handle[data-handle="adjust"] {
     background: #FFD600; border-color: #7A6200; cursor: pointer;
     width: calc(10px * var(--inverse-zoom)); height: calc(10px * var(--inverse-zoom));
@@ -828,8 +838,9 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
                 <label for="format-y">Y</label><input id="format-y" data-field="top" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
                 <label for="format-w">Width</label><input id="format-w" data-field="width" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
                 <label for="format-h">Height</label><input id="format-h" data-field="height" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-rotation">Rotation</label><input id="format-rotation" type="text" inputmode="decimal" autocomplete="off"><span>°</span>
             </div>
-            <p class="panel-hint format-tip">Enter or Tab applies a value, Esc cancels. Arrow keys step 1 px (Shift: 10 px).</p>
+            <p class="panel-hint format-tip">Enter or Tab applies a value, Esc cancels. Arrow keys step 1 px or 1° (Shift: 10).</p>
         </section>
         <!-- Shapes (shapecontrols.js): the look, as on the Shape Format tab. -->
         <section id="format-shape" hidden>
@@ -10936,6 +10947,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         distributeVertically: '<path d="M3 2.5h14M3 17.5h14"/><rect x="7" y="5" width="6" height="2.5"/><rect x="7" y="8.75" width="6" height="2.5"/><rect x="7" y="12.5" width="6" height="2.5"/>',
         group: '<rect x="2.5" y="2.5" width="15" height="15" stroke-dasharray="2 1.5"/><rect x="5" y="5" width="6" height="5"/><rect x="9" y="9" width="6" height="6" fill="currentColor" fill-opacity="0.25"/>',
         ungroup: '<rect x="2.5" y="2.5" width="7" height="6"/><rect x="10.5" y="11.5" width="7" height="6" fill="currentColor" fill-opacity="0.25"/><path d="M11 4.5l5 5M16 4.5l-5 5"/>',
+        rotateRight90: '<rect x="3.5" y="9.5" width="9" height="7"/><path d="M8 5.5a7 7 0 0 1 8.5 4.5"/><path d="M13.5 9.5l3 .8.8-3"/>',
+        rotateLeft90: '<rect x="7.5" y="9.5" width="9" height="7"/><path d="M12 5.5a7 7 0 0 0-8.5 4.5"/><path d="M6.5 9.5l-3 .8-.8-3"/>',
         grid: '<rect x="3" y="3" width="14" height="14"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14"/>',
         ruler: '<rect x="2.5" y="6.5" width="15" height="7" rx="0.5"/><path d="M5.5 6.5v3M8.5 6.5v2M11.5 6.5v3M14.5 6.5v2"/>',
         alignToSlide: '<rect x="2.5" y="4" width="15" height="12" rx="1"/><rect x="7" y="8" width="6" height="4" fill="currentColor" fill-opacity="0.25"/>',
@@ -11730,7 +11743,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     const HIT_MIN = 10;   // slide px
 
     /*
-     * items: [{ id, rect, z }] in slide order. Returns the id of the element
+     * items: [{ id, rect, z, angle }] in slide order (angle: optional, degrees). Returns the id of the element
      * drawn on top at point (x, y), or null. Higher z-index wins; with equal
      * z-index the later element wins, because the browser draws it last.
      */
@@ -11738,10 +11751,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         let best = null;
         items.forEach((item, index) => {
             const r = item.rect;
+            // A turned element (item.angle, degrees) is hit where it shows: the point is turned back instead.
+            const p = item.angle ? App.transform.toLocal(r, item.angle, { x: x, y: y }) : { x: x, y: y };
             // A line can be 0 px thin: anything thinner than HIT_MIN can still be clicked a few px either side.
             const padX = Math.max(0, (HIT_MIN - r.width) / 2);
             const padY = Math.max(0, (HIT_MIN - r.height) / 2);
-            const inside = x >= r.left - padX && x <= r.left + r.width + padX && y >= r.top - padY && y <= r.top + r.height + padY;
+            const inside = p.x >= r.left - padX && p.x <= r.left + r.width + padX && p.y >= r.top - padY && p.y <= r.top + r.height + padY;
             if (inside && (!best || item.z > best.z || (item.z === best.z && index > best.index))) {
                 best = { id: item.id, z: item.z, index: index };
             }
@@ -11828,6 +11843,103 @@ App.template.newDeckHtml = function newDeckHtml() {
             position += out[index][size] + gap;
         });
         return out;
+    };
+
+    // ---- Rotate (Phase 7) ----
+    //
+    // An element turns about its centre (CSS's default transform-origin) by
+    // `transform: rotate(30deg)` on its inline style, clockwise as on screen.
+    // Its left / top / width / height stay those of the upright box, so
+    // everything that reads a rect keeps working; only what is about where it
+    // shows (clicks, handles, snapping, the box around it) turns points or
+    // rects with the helpers here.
+
+    const RADIANS = Math.PI / 180;
+    const ROTATE_RE = /rotate\(\s*(-?\d+(?:\.\d+)?)deg\s*\)/;
+
+    /* Any angle as 0 <= angle < 360, to 1/100 degree. */
+    App.transform.normalizeAngle = function normalizeAngle(degrees) {
+        const angle = hundredths((((Number(degrees) || 0) % 360) + 360) % 360);
+        return angle >= 360 ? 0 : angle + 0;   // + 0 turns -0 into 0
+    };
+
+    /* How far `element` is turned, in degrees (0: upright, or a transform this editor did not write). */
+    App.transform.rotationOf = function rotationOf(element) {
+        const match = ROTATE_RE.exec(element.style.transform || '');
+        return match ? App.transform.normalizeAngle(parseFloat(match[1])) : 0;
+    };
+
+    /* Turn `element` to `degrees`; upright leaves no transform at all, so untouched decks stay as they were. */
+    App.transform.setRotation = function setRotation(element, degrees) {
+        const angle = App.transform.normalizeAngle(degrees);
+        if (angle === 0) {
+            element.style.removeProperty('transform');
+        } else {
+            element.style.transform = 'rotate(' + angle + 'deg)';
+        }
+    };
+
+    /* The angle of `point` seen from `center`: 0 straight up, 90 to the right. snap: to 15 degree steps (Shift). */
+    App.transform.angleAt = function angleAt(center, point, snap) {
+        const degrees = Math.atan2(point.x - center.x, center.y - point.y) / RADIANS;
+        return App.transform.normalizeAngle(snap ? Math.round(degrees / 15) * 15 : degrees);
+    };
+
+    function centerOf(rect) {
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+
+    /* Turn `point` by `degrees` about `center`. */
+    function turn(point, center, degrees) {
+        const cos = Math.cos(degrees * RADIANS);
+        const sin = Math.sin(degrees * RADIANS);
+        const x = point.x - center.x;
+        const y = point.y - center.y;
+        return { x: center.x + x * cos - y * sin, y: center.y + x * sin + y * cos };
+    }
+
+    /* Slide point `point` as it would be if `rect`, turned by `angle`, stood upright (to hit it or drag its handles). */
+    App.transform.toLocal = function toLocal(rect, angle, point) {
+        const p = turn(point, centerOf(rect), -angle);
+        return { x: hundredths(p.x), y: hundredths(p.y) };
+    };
+
+    /* Where the centre of a rect that sits at `local` inside a box turned by `angle` (about its own centre `rect`) shows. */
+    App.transform.turnAbout = function turnAbout(rect, angle, local) {
+        const p = turn(local, centerOf(rect), angle);
+        return { x: hundredths(p.x), y: hundredths(p.y) };
+    };
+
+    /* The upright box around `rect` turned by `angle`: what snapping, aligning and the rubber band see. */
+    App.transform.visualRect = function visualRect(rect, angle) {
+        if (!angle) {
+            return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+        }
+        const cos = Math.abs(Math.cos(angle * RADIANS));
+        const sin = Math.abs(Math.sin(angle * RADIANS));
+        const width = rect.width * cos + rect.height * sin;
+        const height = rect.width * sin + rect.height * cos;
+        const center = centerOf(rect);
+        return { left: hundredths(center.x - width / 2), top: hundredths(center.y - height / 2),
+            width: hundredths(width), height: hundredths(height) };
+    };
+
+    /*
+     * resizeRect for a rect turned by `angle`: the mouse's (dx, dy) on screen
+     * is measured along the rect's own sides, and the box is placed so the
+     * side or corner opposite the handle stays where it shows.
+     */
+    App.transform.resizeRotated = function resizeRotated(rect, angle, handle, dx, dy, keepAspect) {
+        if (!angle) {
+            return App.transform.resizeRect(rect, handle, dx, dy, keepAspect);
+        }
+        const along = turn({ x: dx, y: dy }, { x: 0, y: 0 }, -angle);
+        const sized = App.transform.resizeRect(rect, handle, along.x, along.y, keepAspect);
+        // resizeRect moved the centre as if upright; the same move, turned, keeps the fixed side in place.
+        const before = centerOf(rect);
+        const shift = turn(centerOf(sized), before, angle);
+        return { left: hundredths(shift.x - sized.width / 2), top: hundredths(shift.y - sized.height / 2),
+            width: sized.width, height: sized.height };
     };
 
     // ---- Reading and writing elements (DOM, but no page state) ----
@@ -12004,7 +12116,9 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* The targets on `slide` for a drag of `moving` (the elements being dragged do not attract themselves). */
     App.snap.targetsFor = function targetsFor(slide, moving) {
         const others = App.transform.topLevelElements(slide).filter((element) => moving.indexOf(element) === -1);
-        return App.snap.targetsOf(others.map(App.transform.readRect), { width: 1280, height: 720 });
+        // A turned element is lined up by the upright box round what shows.
+        const shown = others.map((element) => App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element)));
+        return App.snap.targetsOf(shown, { width: 1280, height: 720 });
     };
 
     let layer = null;
@@ -12155,7 +12269,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const zoom = App.canvas.getZoom();
         const elements = App.selection.getElements();
-        const bounds = elements.length ? App.transform.boundsOf(elements.map(App.transform.readRect)) : null;
+        const bounds = elements.length ? App.transform.boundsOf(elements.map((element) =>
+            App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element)))) : null;
         drawRuler(top, 1280, zoom, true, bounds && [bounds.left, bounds.left + bounds.width]);
         drawRuler(left, 720, zoom, false, bounds && [bounds.top, bounds.top + bounds.height]);
     };
@@ -12184,6 +12299,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  * On the slide a group is one element: selection, snapping, align, copy /
  * paste, delete and the stacking order see only the outermost group.
  * Double-clicking text inside a group types in that part (selection.js).
+ * A group can be turned like any element (its parts turn with it); ungrouping
+ * a turned group leaves each part where it shows, turned as much.
  *
  * The maths and the slide operations at the top are tested in
  * tests/unit/groups.test.js (no page state).
@@ -12253,7 +12370,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         const order = App.transform.topLevelElements(slide);
         const parts = order.filter((element) => elements.indexOf(element) !== -1);
         const topmost = parts[parts.length - 1];
-        const { bounds, inner } = App.groups.layout(parts.map(App.transform.readRect));
+        const rects = parts.map(App.transform.readRect);
+        // The group's box is round what shows: a turned part's corners stay inside it.
+        const bounds = App.transform.boundsOf(parts.map((part, i) => App.transform.visualRect(rects[i], App.transform.rotationOf(part))));
+        const inner = rects.map((rect) => ({ left: hundredths(rect.left - bounds.left), top: hundredths(rect.top - bounds.top),
+            width: rect.width, height: rect.height }));
         const group = slide.ownerDocument.createElement('div');
         group.className = 'el';
         group.setAttribute('data-type', 'group');
@@ -12275,11 +12396,19 @@ App.template.newDeckHtml = function newDeckHtml() {
         const slide = group.parentElement;
         const order = App.transform.topLevelElements(slide);
         const offset = App.transform.readRect(group);
+        const angle = App.transform.rotationOf(group);
         const parts = App.transform.topLevelElements(group);
         parts.forEach((part) => {
             const rect = App.transform.readRect(part);
             rect.left = hundredths(rect.left + offset.left);
             rect.top = hundredths(rect.top + offset.top);
+            if (angle) {
+                // A turned group: each part goes where it shows, turned as much as it looked.
+                const center = App.transform.turnAbout(offset, angle, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+                rect.left = hundredths(center.x - rect.width / 2);
+                rect.top = hundredths(center.y - rect.height / 2);
+                App.transform.setRotation(part, App.transform.rotationOf(part) + angle);
+            }
             App.transform.writeRect(part, rect);
             slide.insertBefore(part, group);
         });
@@ -12292,12 +12421,15 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* The part (not a group) of `group` under slide point (x, y), the topmost one; null if none. */
     App.groups.childAt = function childAt(group, x, y) {
         const offset = App.transform.readRect(group);
+        // A turned group: the point turned back, then measured from the group's corner.
+        const local = App.transform.toLocal(offset, App.transform.rotationOf(group), { x: x, y: y });
+        const px = local.x - offset.left;
+        const py = local.y - offset.top;
         const parts = App.transform.topLevelElements(group).reverse();   // front first
         for (const part of parts) {
             const rect = App.transform.readRect(part);
-            const px = x - offset.left;
-            const py = y - offset.top;
-            if (px >= rect.left && px <= rect.left + rect.width && py >= rect.top && py <= rect.top + rect.height) {
+            const p = App.transform.toLocal(rect, App.transform.rotationOf(part), { x: px, y: py });
+            if (p.x >= rect.left && p.x <= rect.left + rect.width && p.y >= rect.top && p.y <= rect.top + rect.height) {
                 return App.groups.isGroup(part) ? App.groups.childAt(part, px, py) : part;
             }
         }
@@ -12410,7 +12542,12 @@ App.template.newDeckHtml = function newDeckHtml() {
  * Listens to deck-loaded, slide-changed,
  * history-changed and zoom-changed.
  *
- * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom), text.js (edit mode).
+ * Rotate (Phase 7): the round handle above the box turns the element; a
+ * turned element's box and outline turn with it, and clicks, handles and the
+ * rubber band all go by where it shows.
+ *
+ * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom), text.js (edit mode),
+ *           elements.js (what can turn).
  */
 
 (function () {
@@ -12456,7 +12593,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     // Shapes (Phase 5): a line or arrow has a handle at each end instead of the 8; some shapes a yellow one.
-    const SHAPE_HANDLES = ['start', 'end', 'adjust'];
+    // Phase 7: the round rotate handle above the box.
+    const SHAPE_HANDLES = ['start', 'end', 'adjust', 'rotate'];
 
     function buildBox() {
         const element = App.util.el('div', { class: 'selection-box', hidden: true });
@@ -12572,6 +12710,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         setIds([]);
     };
 
+    /* Give an overlay box the same turn as `element` (rotate, Phase 7). */
+    function turnLike(overlayBox, element) {
+        const angle = App.transform.rotationOf(element);
+        overlayBox.style.transform = angle ? 'rotate(' + angle + 'deg)' : '';
+    }
+
     /* Several selected: a plain outline round each (handles only for one, as resizing is one at a time). */
     function drawOutlines(elements) {
         while (outlines.length < elements.length) {
@@ -12583,6 +12727,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             outline.hidden = i >= elements.length;
             if (i < elements.length) {
                 App.transform.writeRect(outline, App.transform.readRect(elements[i]));
+                turnLike(outline, elements[i]);
             }
         });
     }
@@ -12603,7 +12748,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (element) {
             const rect = App.transform.readRect(element);
             App.transform.writeRect(box, rect);
+            turnLike(box, element);   // a turned element's box turns with it, handles and all
             placeShapeHandles(element, rect);
+            box.querySelector('[data-handle="rotate"]').hidden = !App.elements.canRotateElement(element);
         }
         drawOutlines(selectedIds.length > 1 ? App.selection.getElements() : []);
     };
@@ -12643,6 +12790,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const elements = App.transform.topLevelElements(slide);
         const items = elements.map((element, index) => ({
             id: index, rect: App.transform.readRect(element), z: App.transform.zIndexOf(element),
+            angle: App.transform.rotationOf(element),   // a turned element is hit where it shows
         }));
         const hit = App.transform.hitTest(items, x, y);
         return hit === null ? null : elements[hit];
@@ -12731,7 +12879,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const handle = event.target.getAttribute && event.target.getAttribute('data-handle');
         if (handle && event.button === 0) {
-            startDrag(event, handle === 'adjust' ? 'adjust' : handle === 'start' || handle === 'end' ? 'line' : 'resize', handle);
+            startDrag(event, handle === 'adjust' ? 'adjust' : handle === 'rotate' ? 'rotate'
+                : handle === 'start' || handle === 'end' ? 'line' : 'resize', handle);
             return;
         }
         const point = toSlidePoint(event);
@@ -12806,7 +12955,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             const rect = App.transform.bandRect(start, point);
             App.transform.writeRect(band, rect);
             const caught = App.transform.topLevelElements(slide)
-                .filter((element) => App.transform.containsRect(rect, App.transform.readRect(element)))
+                .filter((element) => App.transform.containsRect(rect,
+                    App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element))))
                 .map((element) => element.getAttribute('data-id'))
                 .filter((id) => !kept.includes(id));
             setIds(kept.concat(caught));
@@ -12878,6 +13028,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     }
 
+    /* The selection box as a preview of what is being inserted: upright, no rotate handle. */
+    function showPreview(rect) {
+        App.transform.writeRect(box, rect);
+        box.style.transform = '';
+        box.querySelector('[data-handle="rotate"]').hidden = true;
+        box.hidden = false;
+    }
+
     function startInsertGesture(downEvent) {
         const callback = insertCallback;
         const preview = insertPreview;
@@ -12893,8 +13051,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             gesture = { start: start, end: point, shiftKey: event.shiftKey, dragged: gesture.dragged || moved };
             if (preview) {
                 if (gesture.dragged) {
-                    App.transform.writeRect(box, preview(gesture));
-                    box.hidden = false;
+                    showPreview(preview(gesture));
                 }
                 return;
             }
@@ -12903,8 +13060,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
             spot = { left: Math.min(start.x, point.x), top: start.y, width: Math.abs(point.x - start.x) };
             // The selection box shows where the new box will go.
-            App.transform.writeRect(box, { left: spot.left, top: spot.top, width: spot.width, height: 40 });
-            box.hidden = false;
+            showPreview({ left: spot.left, top: spot.top, width: spot.width, height: 40 });
         }
 
         function onUp(event) {
@@ -12920,13 +13076,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         overlay.addEventListener('pointerup', onUp);
     }
 
-    const DRAG_LABELS = { move: 'Move', resize: 'Resize', line: 'Move line end', adjust: 'Adjust shape' };
+    const DRAG_LABELS = { move: 'Move', resize: 'Resize', line: 'Move line end', adjust: 'Adjust shape', rotate: 'Rotate' };
 
     /*
      * Follow the mouse until it is released. kind is 'move', 'resize', 'line'
-     * (a line's end handle: 'start' or 'end') or 'adjust' (a shape's yellow
-     * handle). Shift while resizing keeps the aspect ratio (a picture's corners
-     * always do); on a line's end it snaps to 45 degrees.
+     * (a line's end handle: 'start' or 'end'), 'adjust' (a shape's yellow
+     * handle) or 'rotate' (the round handle above: Shift turns in 15 degree
+     * steps). Shift while resizing keeps the aspect ratio (a picture's corners
+     * always do); on a line's end it snaps to 45 degrees. A turned element is
+     * resized along its own sides, without snapping.
      */
     function startDrag(downEvent, kind, handle) {
         // A move takes every selected element along; the other kinds work on the one selected.
@@ -12937,7 +13095,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         const startRects = elements.map((item) => App.transform.readRect(item));
+        const angles = elements.map((item) => App.transform.rotationOf(item));
         const startRect = startRects[0];
+        const startAngle = angles[0];
         const startFlip = element.getAttribute('data-flip') || '';
         const startParts = kind === 'resize' && App.groups.isGroup(element) ? App.groups.partsOf(element) : null;
         const start = toSlidePoint(downEvent);
@@ -12966,12 +13126,18 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (kind === 'line') {
                 App.shapes.setLine(element, App.shapes.moveLineEnd(startRect, startFlip, handle, point, event.shiftKey));
             } else if (kind === 'adjust') {
+                const local = App.transform.toLocal(startRect, startAngle, point);   // a turned shape: along its own sides
                 App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
-                    startRect.height, { x: point.x - startRect.left, y: point.y - startRect.top }));
+                    startRect.height, { x: local.x - startRect.left, y: local.y - startRect.top }));
+            } else if (kind === 'rotate') {
+                const center = { x: startRect.left + startRect.width / 2, y: startRect.top + startRect.height / 2 };
+                App.transform.setRotation(element, App.transform.angleAt(center, point, event.shiftKey));
             } else if (kind === 'move') {
                 let moved = startRects.map((rect) => App.transform.moveRect(rect, dx, dy));
                 if (!free) {
-                    const snapped = App.snap.snapMove(App.transform.boundsOf(moved), targets, App.snap.threshold(zoom));
+                    // What snaps is what shows: a turned element by the upright box round it.
+                    const shown = moved.map((rect, i) => App.transform.visualRect(rect, angles[i]));
+                    const snapped = App.snap.snapMove(App.transform.boundsOf(shown), targets, App.snap.threshold(zoom));
                     // Not moveRect: it rounds, and a centre line can be half a pixel.
                     moved = moved.map((rect) => Object.assign({}, rect, { left: rect.left + snapped.dx, top: rect.top + snapped.dy }));
                     guides = snapped.guides;
@@ -12979,8 +13145,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 elements.forEach((item, i) => App.transform.writeRect(item, moved[i]));
             } else {
                 const keepAspect = App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey);
-                let rect = App.transform.resizeRect(startRect, handle, dx, dy, keepAspect);
-                if (!free && !keepAspect) {
+                let rect = App.transform.resizeRotated(startRect, startAngle, handle, dx, dy, keepAspect);
+                if (!free && !keepAspect && !startAngle) {
                     const snapped = App.snap.snapResize(rect, handle, targets, App.snap.threshold(zoom));
                     rect = snapped.rect;
                     guides = snapped.guides;
@@ -13167,7 +13333,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     App.crop.start = function start() {
         const element = App.selection.getElement();
-        if (state || !App.images.isPictureSelected() || !element.naturalWidth) {
+        if (state || !App.commands.isEnabled('cropPicture') || !element.naturalWidth) {   // not a picture, or turned
             return;
         }
         const full = App.transform.readRect(element);
@@ -13305,7 +13471,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  * elements.js - actions on the selected element(s) (SPEC 4, Phase 2; several
  * at once since Phase 7's multi-select): nudge with the arrow keys, delete,
  * cut / copy / paste / duplicate (also across slides), and the stacking order
- * (bring forward, send to back ...), align and distribute (Phase 7).
+ * (bring forward, send to back ...), align and distribute, and rotate
+ * (Arrange > Rotate, the Format pane's Rotation field) (Phase 7).
  *
  * Every action is one undoable step on the current slide (history.js).
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
@@ -13756,17 +13923,25 @@ App.template.newDeckHtml = function newDeckHtml() {
         return App.elements.canAlign() && App.selection.count() >= (App.elements.alignsToSlide() ? 1 : 3);
     };
 
-    /* Move the selected elements to the rects `place(rects, area)` gives; one undo step, none when nothing moves. */
+    /*
+     * Move the selected elements to the rects `place(rects, area)` gives; one undo step, none when nothing moves.
+     * A turned element is placed by the upright box round what shows (as in PowerPoint), and moved as much as that box.
+     */
     function placeSelected(label, place) {
         const elements = App.selection.getElements();
         const rects = elements.map(App.transform.readRect);
-        const area = App.elements.alignsToSlide() ? SLIDE_AREA : App.transform.boundsOf(rects);
-        const placed = place(rects, area);
-        if (placed.every((rect, index) => rect.left === rects[index].left && rect.top === rects[index].top)) {
+        const shown = elements.map((element, index) => App.transform.visualRect(rects[index], App.transform.rotationOf(element)));
+        const area = App.elements.alignsToSlide() ? SLIDE_AREA : App.transform.boundsOf(shown);
+        const placed = place(shown, area);
+        if (placed.every((rect, index) => rect.left === shown[index].left && rect.top === shown[index].top)) {
             return;
         }
+        const round = (value) => Math.round(value * 100) / 100;
         App.history.change(label, currentSlideScope(), () => {
-            elements.forEach((element, index) => App.transform.writeRect(element, placed[index]));
+            elements.forEach((element, index) => App.transform.writeRect(element, Object.assign({}, rects[index], {
+                left: round(rects[index].left + placed[index].left - shown[index].left),
+                top: round(rects[index].top + placed[index].top - shown[index].top),
+            })));
         });
     }
 
@@ -13783,6 +13958,56 @@ App.template.newDeckHtml = function newDeckHtml() {
             placeSelected('Distribute ' + axis + 'ly', (rects, area) => App.transform.distributeRects(rects, axis, area));
         }
     };
+
+    // ---------------------------------------------------------------
+    // Rotate (Phase 7)
+    // ---------------------------------------------------------------
+
+    /*
+     * Can `element` be turned? Not a table or a chart (PowerPoint does not turn
+     * them either), nor a group holding one; not a line, whose two end handles
+     * already point it any way.
+     */
+    App.elements.canRotateElement = function canRotateElement(element) {
+        if (!element) {
+            return false;
+        }
+        const type = element.getAttribute('data-type');
+        if (type === 'table' || type === 'chart') {
+            return false;
+        }
+        if (type === 'group') {
+            return !element.querySelector('.el[data-type="table"], .el[data-type="chart"]');
+        }
+        return !(type === 'shape' && App.shapes.isLine(element.getAttribute('data-shape')));
+    };
+
+    function rotatableSelected() {
+        return App.selection.getElements().filter(App.elements.canRotateElement);
+    }
+
+    App.elements.canRotate = function canRotate() {
+        return !App.text.isEditing() && rotatableSelected().length > 0;
+    };
+
+    /* Arrange > Rotate Right 90 / Left 90: each selected element turns about its own centre; one undo step. */
+    App.elements.rotateBy = function rotateBy(degrees) {
+        const elements = App.elements.canRotate() ? rotatableSelected() : [];
+        if (elements.length) {
+            App.history.change('Rotate', currentSlideScope(), () => {
+                elements.forEach((element) => App.transform.setRotation(element, App.transform.rotationOf(element) + degrees));
+            });
+        }
+    };
+
+    /* The Format pane's Rotation field: one undo step, none when it is already at that angle. */
+    App.elements.rotateTo = function rotateTo(element, degrees) {
+        if (!App.elements.canRotateElement(element) ||
+            App.transform.normalizeAngle(degrees) === App.transform.rotationOf(element)) {
+            return;
+        }
+        App.history.change('Rotate', currentSlideScope(), () => App.transform.setRotation(element, degrees));
+    };
 })();
 
 </script>
@@ -13791,7 +14016,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 /*
  * formatpane.js - the Format pane on the right (SPEC 4, Phase 2: "Size & position").
  *
- * Shows X, Y, Width and Height of the selected element in px. Typing a value
+ * Shows X, Y, Width and Height of the selected element in px, and its
+ * Rotation in degrees (Phase 7; off for what cannot turn: tables, charts, lines). Typing a value
  * and pressing Enter or Tab (or clicking elsewhere) applies it as one undo
  * step; Esc puts the old value back. Arrow keys in a field step 1 px, Shift
  * 10 px, like PowerPoint's spinner fields. Later phases add their own
@@ -13820,11 +14046,11 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /*
      * Read a number typed by the user: "120", "12.5", "12,5" (decimal comma,
-     * as typed in Brazil) or "120 px". Rounded to 2 decimals. null if it is
+     * as typed in Brazil), "120 px" or "45°" (the rotation). Rounded to 2 decimals. null if it is
      * not a number.
      */
     App.formatPane.parseNumber = function parseNumber(text) {
-        const cleaned = String(text).trim().replace(/\s*px$/i, '').replace(',', '.');
+        const cleaned = String(text).trim().replace(/\s*(px|°)$/i, '').replace(',', '.');
         if (!/^-?\d+(\.\d+)?$/.test(cleaned)) {
             return null;
         }
@@ -13848,6 +14074,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     let section = null;
     let typeLabel = null;
     let inputs = [];
+    let rotation = null;   // the Rotation field (degrees): not a rect field, so kept apart from `inputs`
     let textSection = null;
     let autofitHint = null;
     const edited = new Set();   // fields the user is typing in, not applied yet
@@ -13858,8 +14085,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         section = document.getElementById('format-size');
         typeLabel = document.getElementById('format-type');
         inputs = Array.from(section.querySelectorAll('input[data-field]'));
+        rotation = document.getElementById('format-rotation');
 
-        inputs.forEach((input) => {
+        inputs.concat([rotation]).forEach((input) => {
             input.addEventListener('input', () => edited.add(input));
             input.addEventListener('change', () => apply(input));   // fires on Tab / click elsewhere
             input.addEventListener('keydown', (event) => onFieldKey(event, input));
@@ -13904,6 +14132,10 @@ App.template.newDeckHtml = function newDeckHtml() {
                 input.value = String(App.util.round2(rect[input.getAttribute('data-field')]));
             }
         });
+        rotation.disabled = !App.elements.canRotateElement(element);
+        if (!edited.has(rotation)) {
+            rotation.value = String(App.transform.rotationOf(element));
+        }
     };
 
     function revert(input) {
@@ -13918,6 +14150,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         edited.delete(input);
         if (!element || value === null) {
             App.formatPane.refresh();   // not a number: show the old value again
+            return;
+        }
+        if (input === rotation) {
+            App.elements.rotateTo(element, value);   // -30 is 330, 400 is 40
+            App.formatPane.refresh();
             return;
         }
         const field = input.getAttribute('data-field');
@@ -16711,7 +16948,8 @@ App.template.newDeckHtml = function newDeckHtml() {
             run: () => App.images.chooseReplacement(),
         });
         App.commands.define('cropPicture', {
-            label: 'Crop', isEnabled: () => App.images.isPictureSelected(),
+            // Not while the picture is turned (Phase 7): the crop frame and its handles are drawn upright.
+            label: 'Crop', isEnabled: () => App.images.isPictureSelected() && !App.transform.rotationOf(App.selection.getElement()),
             isChecked: () => App.crop.isCropping(),
             run: () => App.crop.toggle(),
         });
@@ -16791,6 +17029,10 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Arrange > Group (groups.js).
         App.commands.define('group', { label: 'Group', isEnabled: () => App.groups.canGroup(), run: () => App.groups.group() });
         App.commands.define('ungroup', { label: 'Ungroup', isEnabled: () => App.groups.canUngroup(), run: () => App.groups.ungroup() });
+        App.commands.define('rotateRight90', { label: 'Rotate Right 90°', isEnabled: () => App.elements.canRotate(),
+            run: () => App.elements.rotateBy(90) });
+        App.commands.define('rotateLeft90', { label: 'Rotate Left 90°', isEnabled: () => App.elements.canRotate(),
+            run: () => App.elements.rotateBy(-90) });
         // View tab (rulers.js): remembered in the settings.
         App.commands.define('toggleGridlines', {
             label: 'Gridlines', isEnabled: hasDeck, isChecked: () => App.settings.get().showGridlines,
@@ -21315,10 +21557,11 @@ App.template.newDeckHtml = function newDeckHtml() {
                     [{ command: 'alignToSlide', icon: 'alignToSlide' }]],
                 },
                 { label: 'Group', rows: [[{ command: 'group', icon: 'group' }], [{ command: 'ungroup', icon: 'ungroup' }]] },
+                { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }], [{ command: 'rotateLeft90', icon: 'rotateLeft90' }]] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
                 'Distribute: equal gaps between three or more. Group: one element of several; double-click text in it to type. ' +
-                'Rotate arrives later in Phase 7.',
+                'Rotate: also by the round handle above the selection (Shift: 15° steps) or the Format pane\'s Rotation.',
         },
         {
             id: 'slideshow', label: 'Slide Show',

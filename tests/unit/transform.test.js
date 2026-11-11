@@ -180,3 +180,58 @@ test('transform: distribute rounds to 1/100 px; ties keep their order; one rect 
     assertEqual(lefts(App.transform.distributeRects(rects, 'horizontal', App.transform.boundsOf(rects))), [0, 33.33, 66.67, 100]);
     assertEqual(lefts(App.transform.distributeRects([{ left: 0, top: 0, width: 280, height: 10 }], 'horizontal', SLIDE_AREA)), [500]);
 });
+
+// ---- Rotate (Phase 7) ----
+
+test('transform: an angle is kept between 0 and 360 degrees, to 1/100', () => {
+    const angle = App.transform.normalizeAngle;
+    assertEqual([angle(0), angle(45), angle(-30), angle(360), angle(725), angle(12.345), angle(-0.001)], [0, 45, 330, 0, 5, 12.35, 0]);
+});
+
+test('transform: an element\'s rotation is its transform: rotate(…deg); 0 leaves no transform', () => {
+    const element = document.createElement('div');
+    assertEqual(App.transform.rotationOf(element), 0, 'none yet');
+    App.transform.setRotation(element, 30);
+    assertEqual([element.style.transform, App.transform.rotationOf(element)], ['rotate(30deg)', 30]);
+    App.transform.setRotation(element, -90);
+    assertEqual(App.transform.rotationOf(element), 270, 'turned back is the same as turned on');
+    App.transform.setRotation(element, 360);
+    assertEqual(element.getAttribute('style'), '', 'no transform left at 0');
+});
+
+test('transform: the angle of the rotate handle from the centre (0 straight up, clockwise); Shift: 15 degree steps', () => {
+    const at = (x, y, snap) => App.transform.angleAt({ x: 100, y: 100 }, { x: x, y: y }, snap);
+    assertEqual([at(100, 0), at(200, 100), at(100, 200), at(0, 100)], [0, 90, 180, 270]);
+    // 37 degrees clockwise from straight up
+    const x = 100 + 100 * Math.sin(37 * Math.PI / 180);
+    const y = 100 - 100 * Math.cos(37 * Math.PI / 180);
+    assertEqual([at(x, y, false), at(x, y, true)], [37, 30]);
+});
+
+test('transform: a slide point as seen from inside a turned rect (to hit it, or drag its handles)', () => {
+    const rect = { left: 0, top: 0, width: 100, height: 50 };   // centre 50, 25
+    assertEqual(App.transform.toLocal(rect, 90, { x: 50, y: 75 }), { x: 100, y: 25 }, 'the right edge turned to the bottom');
+    assertEqual(App.transform.toLocal(rect, 0, { x: 7, y: 8 }), { x: 7, y: 8 });
+});
+
+test('transform: hit test follows the rotation', () => {
+    // 200 x 20 turned 90 degrees: now stands upright from y 10 to 210 around x 100.
+    const items = [{ id: 'bar', rect: { left: 0, top: 100, width: 200, height: 20 }, z: 1, angle: 90 }];
+    assertEqual(App.transform.hitTest(items, 100, 30), 'bar');
+    assertEqual(App.transform.hitTest(items, 20, 110), null, 'where it was before turning');
+});
+
+test('transform: the upright box around a turned rect', () => {
+    assertEqual(App.transform.visualRect({ left: 0, top: 0, width: 100, height: 50 }, 90), { left: 25, top: -25, width: 50, height: 100 });
+    assertEqual(App.transform.visualRect({ left: 0, top: 0, width: 100, height: 100 }, 45),
+        { left: -20.71, top: -20.71, width: 141.42, height: 141.42 });
+    assertEqual(App.transform.visualRect({ left: 5, top: 6, width: 7, height: 8 }, 0), { left: 5, top: 6, width: 7, height: 8 });
+});
+
+test('transform: resizing a turned rect: the mouse is followed along its own sides, the opposite side stays put', () => {
+    const rect = { left: 100, top: 100, width: 200, height: 100 };
+    // Turned 90 degrees, its right handle points down: dragging 50 px down widens it by 50.
+    // Its left side (now at the top, centre 200, 50) must stay where it is.
+    assertEqual(App.transform.resizeRotated(rect, 90, 'e', 0, 50, false), { left: 75, top: 125, width: 250, height: 100 });
+    assertEqual(App.transform.resizeRotated(rect, 0, 'se', 10, 20, false), App.transform.resizeRect(rect, 'se', 10, 20, false));
+});

@@ -18,6 +18,8 @@
  * On the slide a group is one element: selection, snapping, align, copy /
  * paste, delete and the stacking order see only the outermost group.
  * Double-clicking text inside a group types in that part (selection.js).
+ * A group can be turned like any element (its parts turn with it); ungrouping
+ * a turned group leaves each part where it shows, turned as much.
  *
  * The maths and the slide operations at the top are tested in
  * tests/unit/groups.test.js (no page state).
@@ -87,7 +89,11 @@
         const order = App.transform.topLevelElements(slide);
         const parts = order.filter((element) => elements.indexOf(element) !== -1);
         const topmost = parts[parts.length - 1];
-        const { bounds, inner } = App.groups.layout(parts.map(App.transform.readRect));
+        const rects = parts.map(App.transform.readRect);
+        // The group's box is round what shows: a turned part's corners stay inside it.
+        const bounds = App.transform.boundsOf(parts.map((part, i) => App.transform.visualRect(rects[i], App.transform.rotationOf(part))));
+        const inner = rects.map((rect) => ({ left: hundredths(rect.left - bounds.left), top: hundredths(rect.top - bounds.top),
+            width: rect.width, height: rect.height }));
         const group = slide.ownerDocument.createElement('div');
         group.className = 'el';
         group.setAttribute('data-type', 'group');
@@ -109,11 +115,19 @@
         const slide = group.parentElement;
         const order = App.transform.topLevelElements(slide);
         const offset = App.transform.readRect(group);
+        const angle = App.transform.rotationOf(group);
         const parts = App.transform.topLevelElements(group);
         parts.forEach((part) => {
             const rect = App.transform.readRect(part);
             rect.left = hundredths(rect.left + offset.left);
             rect.top = hundredths(rect.top + offset.top);
+            if (angle) {
+                // A turned group: each part goes where it shows, turned as much as it looked.
+                const center = App.transform.turnAbout(offset, angle, { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+                rect.left = hundredths(center.x - rect.width / 2);
+                rect.top = hundredths(center.y - rect.height / 2);
+                App.transform.setRotation(part, App.transform.rotationOf(part) + angle);
+            }
             App.transform.writeRect(part, rect);
             slide.insertBefore(part, group);
         });
@@ -126,12 +140,15 @@
     /* The part (not a group) of `group` under slide point (x, y), the topmost one; null if none. */
     App.groups.childAt = function childAt(group, x, y) {
         const offset = App.transform.readRect(group);
+        // A turned group: the point turned back, then measured from the group's corner.
+        const local = App.transform.toLocal(offset, App.transform.rotationOf(group), { x: x, y: y });
+        const px = local.x - offset.left;
+        const py = local.y - offset.top;
         const parts = App.transform.topLevelElements(group).reverse();   // front first
         for (const part of parts) {
             const rect = App.transform.readRect(part);
-            const px = x - offset.left;
-            const py = y - offset.top;
-            if (px >= rect.left && px <= rect.left + rect.width && py >= rect.top && py <= rect.top + rect.height) {
+            const p = App.transform.toLocal(rect, App.transform.rotationOf(part), { x: px, y: py });
+            if (p.x >= rect.left && p.x <= rect.left + rect.width && p.y >= rect.top && p.y <= rect.top + rect.height) {
                 return App.groups.isGroup(part) ? App.groups.childAt(part, px, py) : part;
             }
         }

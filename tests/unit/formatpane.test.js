@@ -6,6 +6,7 @@ test('formatpane: parseNumber accepts whole numbers, decimals with a dot or a co
     assertEqual(App.formatPane.parseNumber('12.345'), 12.35);
     assertEqual(App.formatPane.parseNumber('-5'), -5);
     assertEqual(App.formatPane.parseNumber('120 px'), 120);
+    assertEqual(App.formatPane.parseNumber('45°'), 45, 'the rotation field (Phase 7)');
 });
 
 test('formatpane: parseNumber returns null for text that is not a number', () => {

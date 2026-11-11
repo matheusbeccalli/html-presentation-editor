@@ -2,7 +2,8 @@
  * elements.js - actions on the selected element(s) (SPEC 4, Phase 2; several
  * at once since Phase 7's multi-select): nudge with the arrow keys, delete,
  * cut / copy / paste / duplicate (also across slides), and the stacking order
- * (bring forward, send to back ...), align and distribute (Phase 7).
+ * (bring forward, send to back ...), align and distribute, and rotate
+ * (Arrange > Rotate, the Format pane's Rotation field) (Phase 7).
  *
  * Every action is one undoable step on the current slide (history.js).
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
@@ -453,17 +454,25 @@
         return App.elements.canAlign() && App.selection.count() >= (App.elements.alignsToSlide() ? 1 : 3);
     };
 
-    /* Move the selected elements to the rects `place(rects, area)` gives; one undo step, none when nothing moves. */
+    /*
+     * Move the selected elements to the rects `place(rects, area)` gives; one undo step, none when nothing moves.
+     * A turned element is placed by the upright box round what shows (as in PowerPoint), and moved as much as that box.
+     */
     function placeSelected(label, place) {
         const elements = App.selection.getElements();
         const rects = elements.map(App.transform.readRect);
-        const area = App.elements.alignsToSlide() ? SLIDE_AREA : App.transform.boundsOf(rects);
-        const placed = place(rects, area);
-        if (placed.every((rect, index) => rect.left === rects[index].left && rect.top === rects[index].top)) {
+        const shown = elements.map((element, index) => App.transform.visualRect(rects[index], App.transform.rotationOf(element)));
+        const area = App.elements.alignsToSlide() ? SLIDE_AREA : App.transform.boundsOf(shown);
+        const placed = place(shown, area);
+        if (placed.every((rect, index) => rect.left === shown[index].left && rect.top === shown[index].top)) {
             return;
         }
+        const round = (value) => Math.round(value * 100) / 100;
         App.history.change(label, currentSlideScope(), () => {
-            elements.forEach((element, index) => App.transform.writeRect(element, placed[index]));
+            elements.forEach((element, index) => App.transform.writeRect(element, Object.assign({}, rects[index], {
+                left: round(rects[index].left + placed[index].left - shown[index].left),
+                top: round(rects[index].top + placed[index].top - shown[index].top),
+            })));
         });
     }
 
@@ -479,5 +488,55 @@
         if (App.elements.canDistribute()) {
             placeSelected('Distribute ' + axis + 'ly', (rects, area) => App.transform.distributeRects(rects, axis, area));
         }
+    };
+
+    // ---------------------------------------------------------------
+    // Rotate (Phase 7)
+    // ---------------------------------------------------------------
+
+    /*
+     * Can `element` be turned? Not a table or a chart (PowerPoint does not turn
+     * them either), nor a group holding one; not a line, whose two end handles
+     * already point it any way.
+     */
+    App.elements.canRotateElement = function canRotateElement(element) {
+        if (!element) {
+            return false;
+        }
+        const type = element.getAttribute('data-type');
+        if (type === 'table' || type === 'chart') {
+            return false;
+        }
+        if (type === 'group') {
+            return !element.querySelector('.el[data-type="table"], .el[data-type="chart"]');
+        }
+        return !(type === 'shape' && App.shapes.isLine(element.getAttribute('data-shape')));
+    };
+
+    function rotatableSelected() {
+        return App.selection.getElements().filter(App.elements.canRotateElement);
+    }
+
+    App.elements.canRotate = function canRotate() {
+        return !App.text.isEditing() && rotatableSelected().length > 0;
+    };
+
+    /* Arrange > Rotate Right 90 / Left 90: each selected element turns about its own centre; one undo step. */
+    App.elements.rotateBy = function rotateBy(degrees) {
+        const elements = App.elements.canRotate() ? rotatableSelected() : [];
+        if (elements.length) {
+            App.history.change('Rotate', currentSlideScope(), () => {
+                elements.forEach((element) => App.transform.setRotation(element, App.transform.rotationOf(element) + degrees));
+            });
+        }
+    };
+
+    /* The Format pane's Rotation field: one undo step, none when it is already at that angle. */
+    App.elements.rotateTo = function rotateTo(element, degrees) {
+        if (!App.elements.canRotateElement(element) ||
+            App.transform.normalizeAngle(degrees) === App.transform.rotationOf(element)) {
+            return;
+        }
+        App.history.change('Rotate', currentSlideScope(), () => App.transform.setRotation(element, degrees));
     };
 })();

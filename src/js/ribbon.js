@@ -145,10 +145,11 @@
                     [{ command: 'alignToSlide', icon: 'alignToSlide' }]],
                 },
                 { label: 'Group', rows: [[{ command: 'group', icon: 'group' }], [{ command: 'ungroup', icon: 'ungroup' }]] },
+                { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }], [{ command: 'rotateLeft90', icon: 'rotateLeft90' }]] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
                 'Distribute: equal gaps between three or more. Group: one element of several; double-click text in it to type. ' +
-                'Rotate arrives later in Phase 7.',
+                'Rotate: also by the round handle above the selection (Shift: 15° steps) or the Format pane\'s Rotation.',
         },
         {
             id: 'slideshow', label: 'Slide Show',

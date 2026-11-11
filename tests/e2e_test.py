@@ -3910,6 +3910,96 @@ def test_group_and_ungroup(browser):
     check(on_slide("e4") == [64, 378, 1100, 70], f"the part in place after reopening: {on_slide('e4')}")
 
 
+def test_rotate(browser):
+    """Phase 7: the round handle above the selection turns it (Shift: 15 degree steps), so does the Format pane's
+    Rotation field and Arrange > Rotate; a turned element is clicked and resized where it shows; tables and charts
+    do not turn; each one undo step; saved and reopened, it stays turned."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    angle = lambda: page.evaluate("App.transform.rotationOf(App.deck.getDocument().querySelector('[data-id=\"e1\"]'))")  # noqa: E731
+    shows = lambda: page.evaluate("""() => {  // where the logo shows on the slide (slide px)
+        const r = App.deck.getDocument().querySelector('[data-id="e1"]').getBoundingClientRect();
+        return [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]; }""")  # noqa: E731
+    button = lambda name: "button[data-command='" + name + "']"  # noqa: E731
+    rotate_handle = "#overlay .selection-handle[data-handle='rotate']"
+    # Slide 1: e1 logo (64,56 120x40, centre 124,76).
+
+    page.mouse.click(*slide_to_screen(page, 124, 76))
+    check(page.is_visible(rotate_handle), "a round rotate handle above the selection")
+    handle = page.locator(rotate_handle).bounding_box()
+    start = [handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2]
+    check(start[1] < slide_to_screen(page, 124, 56)[1], "above the top edge")
+    page.keyboard.down("Shift")
+    drag(page, start, slide_to_screen(page, 324, 80), steps=10)   # to the right of the centre, Shift: 90 exactly
+    page.keyboard.up("Shift")
+    check(angle() == 90 and label() == "Rotate", f"turned a quarter: {angle()} {label()}")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').style.transform") == "rotate(90deg)", "stored")
+    check(shows() == [104, 16, 40, 120], f"turned about its centre: {shows()}")
+    check(page.input_value("#format-rotation") == "90", "the Format pane shows 90")
+    page.screenshot(path=str(OUTPUT / "86-rotated.png"))
+
+    # A click where it shows now (but where it was not) selects it.
+    page.click("#overlay", position={"x": 5, "y": 5})
+    page.mouse.click(*slide_to_screen(page, 124, 125))
+    check(page.evaluate("App.selection.selectedIds()") == ["e1"], "selected where it shows")
+
+    # The Rotation field: 45, Enter; Ctrl+Z: 90 again.
+    page.fill("#format-rotation", "45")
+    page.press("#format-rotation", "Enter")
+    check(angle() == 45 and label() == "Rotate", f"typed 45: {angle()}")
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 124, 76))
+    page.keyboard.press("Control+z")
+    check(angle() == 90, f"undo: {angle()}")
+
+    # Resizing the turned logo: its right handle now points down; dragging it down 40 px makes it 40 px wider,
+    # and its other end (at the top) stays where it is.
+    side = page.locator("#overlay .selection-handle[data-handle='e']").bounding_box()
+    start = [side["x"] + side["width"] / 2, side["y"] + side["height"] / 2]
+    zoom = page.evaluate("App.canvas.getZoom()")
+    drag(page, start, [start[0], start[1] + 40 * zoom], steps=8)
+    check(element_rect(page, "e1") == {"left": 44, "top": 76, "width": 160, "height": 40}, f"wider: {element_rect(page, 'e1')}")
+    check(shows() == [104, 16, 40, 160], f"its top end stayed: {shows()}")
+    page.keyboard.press("Control+z")
+
+    # Snapping goes by what shows: the turned logo (40 px wide on screen, from x 104) dragged 100 px left
+    # snaps its shown left edge onto the slide's edge.
+    drag(page, slide_to_screen(page, 124, 100), slide_to_screen(page, 24, 100), steps=10)
+    check(shows()[0] == 0 and element_rect(page, "e1")["left"] == -40, f"snapped by what shows: {shows()} {element_rect(page, 'e1')}")
+    page.keyboard.press("Control+z")
+
+    # Arrange > Rotate Right 90 / Rotate Left 90.
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.click(button("rotateRight90"))
+    check(angle() == 180 and label() == "Rotate", f"right 90: {angle()}")
+    page.click(button("rotateLeft90"))
+    page.click(button("rotateLeft90"))
+    check(angle() == 0 and page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').style.transform") == "",
+          "left 90 twice: upright, no transform left")
+    for _ in range(3):
+        page.keyboard.press("Control+z")
+    check(angle() == 90, f"undo three times: {angle()}")
+
+    # A turned picture is not cropped (the crop frame is upright): Crop is off until it is upright again.
+    page.mouse.click(*slide_to_screen(page, 124, 76))
+    check(page.evaluate("App.selection.selectedIds()") == ["e1"] and angle() == 90, "the turned logo selected")
+    check(not page.evaluate("App.commands.isEnabled('cropPicture')"), "no crop while turned")
+
+    # A table does not turn (nor does a chart), as in PowerPoint.
+    page.evaluate("App.deck.goTo(2)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e9\"]'))")
+    check(page.is_hidden(rotate_handle) and page.is_disabled("#format-rotation") and page.is_disabled(button("rotateRight90")),
+          "no rotation for a table")
+    page.evaluate("App.deck.goTo(0)")
+
+    # Saved and reopened: still turned.
+    saved = editor.save_as_download("rotated.html")
+    editor.open(saved)
+    check(angle() == 90 and shows() == [104, 16, 40, 120], f"turned after reopening: {angle()} {shows()}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -4151,7 +4241,8 @@ def test_select_move_resize(browser):
     # Click selects; the box with 8 handles sits exactly on the element.
     page.mouse.click(*slide_to_screen(page, 300, 290))
     check(page.evaluate(selected) == "e2", "click selects the text box e2")
-    check(page.locator("#overlay .selection-handle:visible").count() == 8, "8 resize handles")
+    check(page.locator("#overlay .selection-handle:visible:not([data-handle='rotate'])").count() == 8, "8 resize handles")
+    check(page.is_visible("#overlay .selection-handle[data-handle='rotate']"), "and the rotate handle (Phase 7)")
     check(page.is_visible("#overlay .selection-box"), "selection box visible")
     box = page.evaluate("App.transform.readRect(document.querySelector('#overlay .selection-box'))")
     check(box == element_rect(page, "e2"), f"box matches the element: {box}")
@@ -5001,6 +5092,7 @@ TESTS = [
     test_align_and_distribute,
     test_smart_guides_gridlines_and_rulers,
     test_group_and_ungroup,
+    test_rotate,
 ]
 
 

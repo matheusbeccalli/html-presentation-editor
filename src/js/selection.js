@@ -33,7 +33,12 @@
  * Listens to deck-loaded, slide-changed,
  * history-changed and zoom-changed.
  *
- * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom), text.js (edit mode).
+ * Rotate (Phase 7): the round handle above the box turns the element; a
+ * turned element's box and outline turn with it, and clicks, handles and the
+ * rubber band all go by where it shows.
+ *
+ * Talks to: transform.js (maths), history.js, deck.js, canvas.js (zoom), text.js (edit mode),
+ *           elements.js (what can turn).
  */
 
 (function () {
@@ -79,7 +84,8 @@
     };
 
     // Shapes (Phase 5): a line or arrow has a handle at each end instead of the 8; some shapes a yellow one.
-    const SHAPE_HANDLES = ['start', 'end', 'adjust'];
+    // Phase 7: the round rotate handle above the box.
+    const SHAPE_HANDLES = ['start', 'end', 'adjust', 'rotate'];
 
     function buildBox() {
         const element = App.util.el('div', { class: 'selection-box', hidden: true });
@@ -195,6 +201,12 @@
         setIds([]);
     };
 
+    /* Give an overlay box the same turn as `element` (rotate, Phase 7). */
+    function turnLike(overlayBox, element) {
+        const angle = App.transform.rotationOf(element);
+        overlayBox.style.transform = angle ? 'rotate(' + angle + 'deg)' : '';
+    }
+
     /* Several selected: a plain outline round each (handles only for one, as resizing is one at a time). */
     function drawOutlines(elements) {
         while (outlines.length < elements.length) {
@@ -206,6 +218,7 @@
             outline.hidden = i >= elements.length;
             if (i < elements.length) {
                 App.transform.writeRect(outline, App.transform.readRect(elements[i]));
+                turnLike(outline, elements[i]);
             }
         });
     }
@@ -226,7 +239,9 @@
         if (element) {
             const rect = App.transform.readRect(element);
             App.transform.writeRect(box, rect);
+            turnLike(box, element);   // a turned element's box turns with it, handles and all
             placeShapeHandles(element, rect);
+            box.querySelector('[data-handle="rotate"]').hidden = !App.elements.canRotateElement(element);
         }
         drawOutlines(selectedIds.length > 1 ? App.selection.getElements() : []);
     };
@@ -266,6 +281,7 @@
         const elements = App.transform.topLevelElements(slide);
         const items = elements.map((element, index) => ({
             id: index, rect: App.transform.readRect(element), z: App.transform.zIndexOf(element),
+            angle: App.transform.rotationOf(element),   // a turned element is hit where it shows
         }));
         const hit = App.transform.hitTest(items, x, y);
         return hit === null ? null : elements[hit];
@@ -354,7 +370,8 @@
         }
         const handle = event.target.getAttribute && event.target.getAttribute('data-handle');
         if (handle && event.button === 0) {
-            startDrag(event, handle === 'adjust' ? 'adjust' : handle === 'start' || handle === 'end' ? 'line' : 'resize', handle);
+            startDrag(event, handle === 'adjust' ? 'adjust' : handle === 'rotate' ? 'rotate'
+                : handle === 'start' || handle === 'end' ? 'line' : 'resize', handle);
             return;
         }
         const point = toSlidePoint(event);
@@ -429,7 +446,8 @@
             const rect = App.transform.bandRect(start, point);
             App.transform.writeRect(band, rect);
             const caught = App.transform.topLevelElements(slide)
-                .filter((element) => App.transform.containsRect(rect, App.transform.readRect(element)))
+                .filter((element) => App.transform.containsRect(rect,
+                    App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element))))
                 .map((element) => element.getAttribute('data-id'))
                 .filter((id) => !kept.includes(id));
             setIds(kept.concat(caught));
@@ -501,6 +519,14 @@
         }
     }
 
+    /* The selection box as a preview of what is being inserted: upright, no rotate handle. */
+    function showPreview(rect) {
+        App.transform.writeRect(box, rect);
+        box.style.transform = '';
+        box.querySelector('[data-handle="rotate"]').hidden = true;
+        box.hidden = false;
+    }
+
     function startInsertGesture(downEvent) {
         const callback = insertCallback;
         const preview = insertPreview;
@@ -516,8 +542,7 @@
             gesture = { start: start, end: point, shiftKey: event.shiftKey, dragged: gesture.dragged || moved };
             if (preview) {
                 if (gesture.dragged) {
-                    App.transform.writeRect(box, preview(gesture));
-                    box.hidden = false;
+                    showPreview(preview(gesture));
                 }
                 return;
             }
@@ -526,8 +551,7 @@
             }
             spot = { left: Math.min(start.x, point.x), top: start.y, width: Math.abs(point.x - start.x) };
             // The selection box shows where the new box will go.
-            App.transform.writeRect(box, { left: spot.left, top: spot.top, width: spot.width, height: 40 });
-            box.hidden = false;
+            showPreview({ left: spot.left, top: spot.top, width: spot.width, height: 40 });
         }
 
         function onUp(event) {
@@ -543,13 +567,15 @@
         overlay.addEventListener('pointerup', onUp);
     }
 
-    const DRAG_LABELS = { move: 'Move', resize: 'Resize', line: 'Move line end', adjust: 'Adjust shape' };
+    const DRAG_LABELS = { move: 'Move', resize: 'Resize', line: 'Move line end', adjust: 'Adjust shape', rotate: 'Rotate' };
 
     /*
      * Follow the mouse until it is released. kind is 'move', 'resize', 'line'
-     * (a line's end handle: 'start' or 'end') or 'adjust' (a shape's yellow
-     * handle). Shift while resizing keeps the aspect ratio (a picture's corners
-     * always do); on a line's end it snaps to 45 degrees.
+     * (a line's end handle: 'start' or 'end'), 'adjust' (a shape's yellow
+     * handle) or 'rotate' (the round handle above: Shift turns in 15 degree
+     * steps). Shift while resizing keeps the aspect ratio (a picture's corners
+     * always do); on a line's end it snaps to 45 degrees. A turned element is
+     * resized along its own sides, without snapping.
      */
     function startDrag(downEvent, kind, handle) {
         // A move takes every selected element along; the other kinds work on the one selected.
@@ -560,7 +586,9 @@
             return;
         }
         const startRects = elements.map((item) => App.transform.readRect(item));
+        const angles = elements.map((item) => App.transform.rotationOf(item));
         const startRect = startRects[0];
+        const startAngle = angles[0];
         const startFlip = element.getAttribute('data-flip') || '';
         const startParts = kind === 'resize' && App.groups.isGroup(element) ? App.groups.partsOf(element) : null;
         const start = toSlidePoint(downEvent);
@@ -589,12 +617,18 @@
             if (kind === 'line') {
                 App.shapes.setLine(element, App.shapes.moveLineEnd(startRect, startFlip, handle, point, event.shiftKey));
             } else if (kind === 'adjust') {
+                const local = App.transform.toLocal(startRect, startAngle, point);   // a turned shape: along its own sides
                 App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
-                    startRect.height, { x: point.x - startRect.left, y: point.y - startRect.top }));
+                    startRect.height, { x: local.x - startRect.left, y: local.y - startRect.top }));
+            } else if (kind === 'rotate') {
+                const center = { x: startRect.left + startRect.width / 2, y: startRect.top + startRect.height / 2 };
+                App.transform.setRotation(element, App.transform.angleAt(center, point, event.shiftKey));
             } else if (kind === 'move') {
                 let moved = startRects.map((rect) => App.transform.moveRect(rect, dx, dy));
                 if (!free) {
-                    const snapped = App.snap.snapMove(App.transform.boundsOf(moved), targets, App.snap.threshold(zoom));
+                    // What snaps is what shows: a turned element by the upright box round it.
+                    const shown = moved.map((rect, i) => App.transform.visualRect(rect, angles[i]));
+                    const snapped = App.snap.snapMove(App.transform.boundsOf(shown), targets, App.snap.threshold(zoom));
                     // Not moveRect: it rounds, and a centre line can be half a pixel.
                     moved = moved.map((rect) => Object.assign({}, rect, { left: rect.left + snapped.dx, top: rect.top + snapped.dy }));
                     guides = snapped.guides;
@@ -602,8 +636,8 @@
                 elements.forEach((item, i) => App.transform.writeRect(item, moved[i]));
             } else {
                 const keepAspect = App.transform.keepsAspect(element.getAttribute('data-type'), handle, event.shiftKey);
-                let rect = App.transform.resizeRect(startRect, handle, dx, dy, keepAspect);
-                if (!free && !keepAspect) {
+                let rect = App.transform.resizeRotated(startRect, startAngle, handle, dx, dy, keepAspect);
+                if (!free && !keepAspect && !startAngle) {
                     const snapped = App.snap.snapResize(rect, handle, targets, App.snap.threshold(zoom));
                     rect = snapped.rect;
                     guides = snapped.guides;

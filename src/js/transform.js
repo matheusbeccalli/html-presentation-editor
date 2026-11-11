@@ -90,7 +90,7 @@
     const HIT_MIN = 10;   // slide px
 
     /*
-     * items: [{ id, rect, z }] in slide order. Returns the id of the element
+     * items: [{ id, rect, z, angle }] in slide order (angle: optional, degrees). Returns the id of the element
      * drawn on top at point (x, y), or null. Higher z-index wins; with equal
      * z-index the later element wins, because the browser draws it last.
      */
@@ -98,10 +98,12 @@
         let best = null;
         items.forEach((item, index) => {
             const r = item.rect;
+            // A turned element (item.angle, degrees) is hit where it shows: the point is turned back instead.
+            const p = item.angle ? App.transform.toLocal(r, item.angle, { x: x, y: y }) : { x: x, y: y };
             // A line can be 0 px thin: anything thinner than HIT_MIN can still be clicked a few px either side.
             const padX = Math.max(0, (HIT_MIN - r.width) / 2);
             const padY = Math.max(0, (HIT_MIN - r.height) / 2);
-            const inside = x >= r.left - padX && x <= r.left + r.width + padX && y >= r.top - padY && y <= r.top + r.height + padY;
+            const inside = p.x >= r.left - padX && p.x <= r.left + r.width + padX && p.y >= r.top - padY && p.y <= r.top + r.height + padY;
             if (inside && (!best || item.z > best.z || (item.z === best.z && index > best.index))) {
                 best = { id: item.id, z: item.z, index: index };
             }
@@ -188,6 +190,103 @@
             position += out[index][size] + gap;
         });
         return out;
+    };
+
+    // ---- Rotate (Phase 7) ----
+    //
+    // An element turns about its centre (CSS's default transform-origin) by
+    // `transform: rotate(30deg)` on its inline style, clockwise as on screen.
+    // Its left / top / width / height stay those of the upright box, so
+    // everything that reads a rect keeps working; only what is about where it
+    // shows (clicks, handles, snapping, the box around it) turns points or
+    // rects with the helpers here.
+
+    const RADIANS = Math.PI / 180;
+    const ROTATE_RE = /rotate\(\s*(-?\d+(?:\.\d+)?)deg\s*\)/;
+
+    /* Any angle as 0 <= angle < 360, to 1/100 degree. */
+    App.transform.normalizeAngle = function normalizeAngle(degrees) {
+        const angle = hundredths((((Number(degrees) || 0) % 360) + 360) % 360);
+        return angle >= 360 ? 0 : angle + 0;   // + 0 turns -0 into 0
+    };
+
+    /* How far `element` is turned, in degrees (0: upright, or a transform this editor did not write). */
+    App.transform.rotationOf = function rotationOf(element) {
+        const match = ROTATE_RE.exec(element.style.transform || '');
+        return match ? App.transform.normalizeAngle(parseFloat(match[1])) : 0;
+    };
+
+    /* Turn `element` to `degrees`; upright leaves no transform at all, so untouched decks stay as they were. */
+    App.transform.setRotation = function setRotation(element, degrees) {
+        const angle = App.transform.normalizeAngle(degrees);
+        if (angle === 0) {
+            element.style.removeProperty('transform');
+        } else {
+            element.style.transform = 'rotate(' + angle + 'deg)';
+        }
+    };
+
+    /* The angle of `point` seen from `center`: 0 straight up, 90 to the right. snap: to 15 degree steps (Shift). */
+    App.transform.angleAt = function angleAt(center, point, snap) {
+        const degrees = Math.atan2(point.x - center.x, center.y - point.y) / RADIANS;
+        return App.transform.normalizeAngle(snap ? Math.round(degrees / 15) * 15 : degrees);
+    };
+
+    function centerOf(rect) {
+        return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+
+    /* Turn `point` by `degrees` about `center`. */
+    function turn(point, center, degrees) {
+        const cos = Math.cos(degrees * RADIANS);
+        const sin = Math.sin(degrees * RADIANS);
+        const x = point.x - center.x;
+        const y = point.y - center.y;
+        return { x: center.x + x * cos - y * sin, y: center.y + x * sin + y * cos };
+    }
+
+    /* Slide point `point` as it would be if `rect`, turned by `angle`, stood upright (to hit it or drag its handles). */
+    App.transform.toLocal = function toLocal(rect, angle, point) {
+        const p = turn(point, centerOf(rect), -angle);
+        return { x: hundredths(p.x), y: hundredths(p.y) };
+    };
+
+    /* Where the centre of a rect that sits at `local` inside a box turned by `angle` (about its own centre `rect`) shows. */
+    App.transform.turnAbout = function turnAbout(rect, angle, local) {
+        const p = turn(local, centerOf(rect), angle);
+        return { x: hundredths(p.x), y: hundredths(p.y) };
+    };
+
+    /* The upright box around `rect` turned by `angle`: what snapping, aligning and the rubber band see. */
+    App.transform.visualRect = function visualRect(rect, angle) {
+        if (!angle) {
+            return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+        }
+        const cos = Math.abs(Math.cos(angle * RADIANS));
+        const sin = Math.abs(Math.sin(angle * RADIANS));
+        const width = rect.width * cos + rect.height * sin;
+        const height = rect.width * sin + rect.height * cos;
+        const center = centerOf(rect);
+        return { left: hundredths(center.x - width / 2), top: hundredths(center.y - height / 2),
+            width: hundredths(width), height: hundredths(height) };
+    };
+
+    /*
+     * resizeRect for a rect turned by `angle`: the mouse's (dx, dy) on screen
+     * is measured along the rect's own sides, and the box is placed so the
+     * side or corner opposite the handle stays where it shows.
+     */
+    App.transform.resizeRotated = function resizeRotated(rect, angle, handle, dx, dy, keepAspect) {
+        if (!angle) {
+            return App.transform.resizeRect(rect, handle, dx, dy, keepAspect);
+        }
+        const along = turn({ x: dx, y: dy }, { x: 0, y: 0 }, -angle);
+        const sized = App.transform.resizeRect(rect, handle, along.x, along.y, keepAspect);
+        // resizeRect moved the centre as if upright; the same move, turned, keeps the fixed side in place.
+        const before = centerOf(rect);
+        const shift = turn(centerOf(sized), before, angle);
+        return { left: hundredths(shift.x - sized.width / 2), top: hundredths(shift.y - sized.height / 2),
+            width: sized.width, height: sized.height };
     };
 
     // ---- Reading and writing elements (DOM, but no page state) ----

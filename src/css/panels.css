@@ -137,6 +137,16 @@
 .selection-handle[hidden], .selection-box.line .selection-handle:not([data-handle="start"]):not([data-handle="end"]) { display: none; }
 .selection-box.line { outline: none; }
 .selection-handle[data-handle="start"], .selection-handle[data-handle="end"] { cursor: crosshair; }
+/* Rotate (Phase 7): the round handle above the box, on a short stem; it turns with the box. */
+.selection-handle[data-handle="rotate"] {
+    left: 50%; top: calc(-24px * var(--inverse-zoom)); cursor: grab;
+    width: calc(11px * var(--inverse-zoom)); height: calc(11px * var(--inverse-zoom));
+}
+.selection-handle[data-handle="rotate"]::after {
+    content: ""; position: absolute; left: 50%; top: 100%;
+    height: calc(18px * var(--inverse-zoom)); border-left: calc(1px * var(--inverse-zoom)) solid var(--focus);
+    pointer-events: none;
+}
 .selection-handle[data-handle="adjust"] {
     background: #FFD600; border-color: #7A6200; cursor: pointer;
     width: calc(10px * var(--inverse-zoom)); height: calc(10px * var(--inverse-zoom));

@@ -301,7 +301,8 @@
             run: () => App.images.chooseReplacement(),
         });
         App.commands.define('cropPicture', {
-            label: 'Crop', isEnabled: () => App.images.isPictureSelected(),
+            // Not while the picture is turned (Phase 7): the crop frame and its handles are drawn upright.
+            label: 'Crop', isEnabled: () => App.images.isPictureSelected() && !App.transform.rotationOf(App.selection.getElement()),
             isChecked: () => App.crop.isCropping(),
             run: () => App.crop.toggle(),
         });
@@ -381,6 +382,10 @@
         // Arrange > Group (groups.js).
         App.commands.define('group', { label: 'Group', isEnabled: () => App.groups.canGroup(), run: () => App.groups.group() });
         App.commands.define('ungroup', { label: 'Ungroup', isEnabled: () => App.groups.canUngroup(), run: () => App.groups.ungroup() });
+        App.commands.define('rotateRight90', { label: 'Rotate Right 90°', isEnabled: () => App.elements.canRotate(),
+            run: () => App.elements.rotateBy(90) });
+        App.commands.define('rotateLeft90', { label: 'Rotate Left 90°', isEnabled: () => App.elements.canRotate(),
+            run: () => App.elements.rotateBy(-90) });
         // View tab (rulers.js): remembered in the settings.
         App.commands.define('toggleGridlines', {
             label: 'Gridlines', isEnabled: hasDeck, isChecked: () => App.settings.get().showGridlines,

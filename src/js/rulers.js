@@ -115,7 +115,8 @@
         }
         const zoom = App.canvas.getZoom();
         const elements = App.selection.getElements();
-        const bounds = elements.length ? App.transform.boundsOf(elements.map(App.transform.readRect)) : null;
+        const bounds = elements.length ? App.transform.boundsOf(elements.map((element) =>
+            App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element)))) : null;
         drawRuler(top, 1280, zoom, true, bounds && [bounds.left, bounds.left + bounds.width]);
         drawRuler(left, 720, zoom, false, bounds && [bounds.top, bounds.top + bounds.height]);
     };

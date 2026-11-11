@@ -1,7 +1,8 @@
 /*
  * formatpane.js - the Format pane on the right (SPEC 4, Phase 2: "Size & position").
  *
- * Shows X, Y, Width and Height of the selected element in px. Typing a value
+ * Shows X, Y, Width and Height of the selected element in px, and its
+ * Rotation in degrees (Phase 7; off for what cannot turn: tables, charts, lines). Typing a value
  * and pressing Enter or Tab (or clicking elsewhere) applies it as one undo
  * step; Esc puts the old value back. Arrow keys in a field step 1 px, Shift
  * 10 px, like PowerPoint's spinner fields. Later phases add their own
@@ -30,11 +31,11 @@
 
     /*
      * Read a number typed by the user: "120", "12.5", "12,5" (decimal comma,
-     * as typed in Brazil) or "120 px". Rounded to 2 decimals. null if it is
+     * as typed in Brazil), "120 px" or "45°" (the rotation). Rounded to 2 decimals. null if it is
      * not a number.
      */
     App.formatPane.parseNumber = function parseNumber(text) {
-        const cleaned = String(text).trim().replace(/\s*px$/i, '').replace(',', '.');
+        const cleaned = String(text).trim().replace(/\s*(px|°)$/i, '').replace(',', '.');
         if (!/^-?\d+(\.\d+)?$/.test(cleaned)) {
             return null;
         }
@@ -58,6 +59,7 @@
     let section = null;
     let typeLabel = null;
     let inputs = [];
+    let rotation = null;   // the Rotation field (degrees): not a rect field, so kept apart from `inputs`
     let textSection = null;
     let autofitHint = null;
     const edited = new Set();   // fields the user is typing in, not applied yet
@@ -68,8 +70,9 @@
         section = document.getElementById('format-size');
         typeLabel = document.getElementById('format-type');
         inputs = Array.from(section.querySelectorAll('input[data-field]'));
+        rotation = document.getElementById('format-rotation');
 
-        inputs.forEach((input) => {
+        inputs.concat([rotation]).forEach((input) => {
             input.addEventListener('input', () => edited.add(input));
             input.addEventListener('change', () => apply(input));   // fires on Tab / click elsewhere
             input.addEventListener('keydown', (event) => onFieldKey(event, input));
@@ -114,6 +117,10 @@
                 input.value = String(App.util.round2(rect[input.getAttribute('data-field')]));
             }
         });
+        rotation.disabled = !App.elements.canRotateElement(element);
+        if (!edited.has(rotation)) {
+            rotation.value = String(App.transform.rotationOf(element));
+        }
     };
 
     function revert(input) {
@@ -128,6 +135,11 @@
         edited.delete(input);
         if (!element || value === null) {
             App.formatPane.refresh();   // not a number: show the old value again
+            return;
+        }
+        if (input === rotation) {
+            App.elements.rotateTo(element, value);   // -30 is 330, 400 is 40
+            App.formatPane.refresh();
             return;
         }
         const field = input.getAttribute('data-field');

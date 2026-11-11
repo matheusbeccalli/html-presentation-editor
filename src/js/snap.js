@@ -127,7 +127,9 @@
     /* The targets on `slide` for a drag of `moving` (the elements being dragged do not attract themselves). */
     App.snap.targetsFor = function targetsFor(slide, moving) {
         const others = App.transform.topLevelElements(slide).filter((element) => moving.indexOf(element) === -1);
-        return App.snap.targetsOf(others.map(App.transform.readRect), { width: 1280, height: 720 });
+        // A turned element is lined up by the upright box round what shows.
+        const shown = others.map((element) => App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element)));
+        return App.snap.targetsOf(shown, { width: 1280, height: 720 });
     };
 
     let layer = null;

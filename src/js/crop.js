@@ -112,7 +112,7 @@
 
     App.crop.start = function start() {
         const element = App.selection.getElement();
-        if (state || !App.images.isPictureSelected() || !element.naturalWidth) {
+        if (state || !App.commands.isEnabled('cropPicture') || !element.naturalWidth) {   // not a picture, or turned
             return;
         }
         const full = App.transform.readRect(element);

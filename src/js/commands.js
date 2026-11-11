@@ -159,7 +159,8 @@
                 run: () => App.elements.nudge(dx * 10, dy * 10),
             });
         });
-        App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
+        // Delete / Cut: not a locked element (Phase 7).
+        App.commands.define('delete', { label: 'Delete', isEnabled: () => App.elements.canDelete(), run: () => App.elements.remove() });
         // Ctrl+A: every element on the slide (Phase 7 multi-select); while typing it stays the text's own Select All.
         App.commands.define('selectAll', {
             label: 'Select all', isEnabled: () => hasDeck() && !App.text.isEditing(), run: () => App.selection.selectAll(),
@@ -302,12 +303,13 @@
         });
         App.commands.define('cropPicture', {
             // Not while the picture is turned (Phase 7): the crop frame and its handles are drawn upright.
-            label: 'Crop', isEnabled: () => App.images.isPictureSelected() && !App.transform.rotationOf(App.selection.getElement()),
+            label: 'Crop', isEnabled: () => App.images.isPictureSelected() && !App.transform.rotationOf(App.selection.getElement()) &&
+                !App.elements.isLocked(App.selection.getElement()),
             isChecked: () => App.crop.isCropping(),
             run: () => App.crop.toggle(),
         });
         App.commands.define('resetPictureSize', {
-            label: 'Reset Size', isEnabled: () => App.images.isPictureSelected(),
+            label: 'Reset Size', isEnabled: () => App.images.isPictureSelected() && !App.elements.isLocked(App.selection.getElement()),
             run: () => App.images.resetSize(),
         });
         // Insert > Shapes: the gallery (shapecontrols.js) passes the kind it picked.
@@ -357,7 +359,7 @@
         App.commands.define('replace', {
             label: 'Replace', keepsEdit: true, isEnabled: hasDeck, run: () => App.findReplace.open('replace'),
         });
-        App.commands.define('cut', { label: 'Cut', isEnabled: hasSelection, run: () => App.elements.cut() });
+        App.commands.define('cut', { label: 'Cut', isEnabled: () => App.elements.canDelete(), run: () => App.elements.cut() });
         App.commands.define('copy', { label: 'Copy', isEnabled: hasSelection, run: () => App.elements.copy() });
         App.commands.define('paste', { label: 'Paste', isEnabled: () => App.elements.canPaste(), run: () => App.elements.paste() });
         App.commands.define('duplicate', { label: 'Duplicate', isEnabled: hasSelection, run: () => App.elements.duplicate() });
@@ -382,6 +384,8 @@
         // Arrange > Group (groups.js).
         App.commands.define('group', { label: 'Group', isEnabled: () => App.groups.canGroup(), run: () => App.groups.group() });
         App.commands.define('ungroup', { label: 'Ungroup', isEnabled: () => App.groups.canUngroup(), run: () => App.groups.ungroup() });
+        App.commands.define('lock', { label: 'Lock', isEnabled: () => App.elements.canLock(),
+            isChecked: () => App.elements.allLocked(), run: () => App.elements.toggleLock() });
         App.commands.define('rotateRight90', { label: 'Rotate Right 90°', isEnabled: () => App.elements.canRotate(),
             run: () => App.elements.rotateBy(90) });
         App.commands.define('rotateLeft90', { label: 'Rotate Left 90°', isEnabled: () => App.elements.canRotate(),

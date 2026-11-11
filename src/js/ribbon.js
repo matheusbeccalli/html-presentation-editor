@@ -146,10 +146,12 @@
                 },
                 { label: 'Group', rows: [[{ command: 'group', icon: 'group' }], [{ command: 'ungroup', icon: 'ungroup' }]] },
                 { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }], [{ command: 'rotateLeft90', icon: 'rotateLeft90' }]] },
+                { label: 'Lock', commands: [['lock', 'lock']] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
                 'Distribute: equal gaps between three or more. Group: one element of several; double-click text in it to type. ' +
-                'Rotate: also by the round handle above the selection (Shift: 15° steps) or the Format pane\'s Rotation.',
+                'Rotate: also by the round handle above the selection (Shift: 15° steps) or the Format pane\'s Rotation. ' +
+                'Lock: it stays where it is (no moving, resizing, turning or deleting) until unlocked.',
         },
         {
             id: 'slideshow', label: 'Slide Show',

@@ -185,12 +185,15 @@
         return { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
     }
 
+    /* Not with a locked element among them: grouping would let it move with the group. */
     App.groups.canGroup = function canGroup() {
-        return App.selection.count() > 1 && !App.text.isEditing() && Boolean(App.deck.getCurrentSlide());
+        return App.selection.count() > 1 && !App.text.isEditing() && Boolean(App.deck.getCurrentSlide()) &&
+            !App.selection.getElements().some(App.elements.isLocked);
     };
 
     App.groups.canUngroup = function canUngroup() {
-        return !App.text.isEditing() && App.selection.getElements().some(App.groups.isGroup);
+        return !App.text.isEditing() && App.selection.getElements().some((element) => App.groups.isGroup(element) &&
+            !App.elements.isLocked(element));
     };
 
     App.groups.group = function group() {
@@ -216,7 +219,8 @@
         let selected = [];
         App.history.change('Ungroup', slideScope(), () => {
             elements.forEach((element) => {
-                selected = selected.concat(App.groups.isGroup(element) ? App.groups.breakGroup(element) : [element]);
+                const breaks = App.groups.isGroup(element) && !App.elements.isLocked(element);
+                selected = selected.concat(breaks ? App.groups.breakGroup(element) : [element]);
             });
         });
         App.selection.selectMany(selected);

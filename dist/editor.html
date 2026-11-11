@@ -482,6 +482,15 @@ button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus)
 .selection-handle[hidden], .selection-box.line .selection-handle:not([data-handle="start"]):not([data-handle="end"]) { display: none; }
 .selection-box.line { outline: none; }
 .selection-handle[data-handle="start"], .selection-handle[data-handle="end"] { cursor: crosshair; }
+/* Lock (Phase 7): a locked element's box is grey, with a small padlock and no handles. */
+.selection-box.locked, .selection-outline.locked { outline-color: var(--text-muted); }
+.selection-box.locked .selection-handle { display: none; }
+.selection-box.locked::after {
+    content: ""; position: absolute; right: calc(-6px * var(--inverse-zoom)); top: calc(-6px * var(--inverse-zoom));
+    width: calc(12px * var(--inverse-zoom)); height: calc(12px * var(--inverse-zoom));
+    border-radius: 50%; background: var(--text-muted) no-repeat center / 70%;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='white' stroke-width='2'%3E%3Crect x='4.5' y='9.5' width='11' height='8' rx='1'/%3E%3Cpath d='M7 9.5V7a3 3 0 0 1 6 0v2.5'/%3E%3C/svg%3E");
+}
 /* Rotate (Phase 7): the round handle above the box, on a short stem; it turns with the box. */
 .selection-handle[data-handle="rotate"] {
     left: 50%; top: calc(-24px * var(--inverse-zoom)); cursor: grab;
@@ -10947,6 +10956,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         distributeVertically: '<path d="M3 2.5h14M3 17.5h14"/><rect x="7" y="5" width="6" height="2.5"/><rect x="7" y="8.75" width="6" height="2.5"/><rect x="7" y="12.5" width="6" height="2.5"/>',
         group: '<rect x="2.5" y="2.5" width="15" height="15" stroke-dasharray="2 1.5"/><rect x="5" y="5" width="6" height="5"/><rect x="9" y="9" width="6" height="6" fill="currentColor" fill-opacity="0.25"/>',
         ungroup: '<rect x="2.5" y="2.5" width="7" height="6"/><rect x="10.5" y="11.5" width="7" height="6" fill="currentColor" fill-opacity="0.25"/><path d="M11 4.5l5 5M16 4.5l-5 5"/>',
+        lock: '<rect x="4.5" y="9.5" width="11" height="8" rx="1"/><path d="M7 9.5V7a3 3 0 0 1 6 0v2.5"/><path d="M10 12.5v2"/>',
         rotateRight90: '<rect x="3.5" y="9.5" width="9" height="7"/><path d="M8 5.5a7 7 0 0 1 8.5 4.5"/><path d="M13.5 9.5l3 .8.8-3"/>',
         rotateLeft90: '<rect x="7.5" y="9.5" width="9" height="7"/><path d="M12 5.5a7 7 0 0 0-8.5 4.5"/><path d="M6.5 9.5l-3 .8-.8-3"/>',
         grid: '<rect x="3" y="3" width="14" height="14"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14"/>',
@@ -12466,12 +12476,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') };
     }
 
+    /* Not with a locked element among them: grouping would let it move with the group. */
     App.groups.canGroup = function canGroup() {
-        return App.selection.count() > 1 && !App.text.isEditing() && Boolean(App.deck.getCurrentSlide());
+        return App.selection.count() > 1 && !App.text.isEditing() && Boolean(App.deck.getCurrentSlide()) &&
+            !App.selection.getElements().some(App.elements.isLocked);
     };
 
     App.groups.canUngroup = function canUngroup() {
-        return !App.text.isEditing() && App.selection.getElements().some(App.groups.isGroup);
+        return !App.text.isEditing() && App.selection.getElements().some((element) => App.groups.isGroup(element) &&
+            !App.elements.isLocked(element));
     };
 
     App.groups.group = function group() {
@@ -12497,7 +12510,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         let selected = [];
         App.history.change('Ungroup', slideScope(), () => {
             elements.forEach((element) => {
-                selected = selected.concat(App.groups.isGroup(element) ? App.groups.breakGroup(element) : [element]);
+                const breaks = App.groups.isGroup(element) && !App.elements.isLocked(element);
+                selected = selected.concat(breaks ? App.groups.breakGroup(element) : [element]);
             });
         });
         App.selection.selectMany(selected);
@@ -12541,6 +12555,9 @@ App.template.newDeckHtml = function newDeckHtml() {
  * Events: emits 'selection-changed' and, during a drag, 'selection-dragged'.
  * Listens to deck-loaded, slide-changed,
  * history-changed and zoom-changed.
+ *
+ * Lock (Phase 7): a locked element's box has no handles (class "locked"),
+ * and a drag leaves it where it is (the others selected with it still move).
  *
  * Rotate (Phase 7): the round handle above the box turns the element; a
  * turned element's box and outline turn with it, and clicks, handles and the
@@ -12728,6 +12745,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (i < elements.length) {
                 App.transform.writeRect(outline, App.transform.readRect(elements[i]));
                 turnLike(outline, elements[i]);
+                outline.classList.toggle('locked', App.elements.isLocked(elements[i]));
             }
         });
     }
@@ -12749,6 +12767,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             const rect = App.transform.readRect(element);
             App.transform.writeRect(box, rect);
             turnLike(box, element);   // a turned element's box turns with it, handles and all
+            box.classList.toggle('locked', App.elements.isLocked(element));   // no handles: it cannot move or change size
             placeShapeHandles(element, rect);
             box.querySelector('[data-handle="rotate"]').hidden = !App.elements.canRotateElement(element);
         }
@@ -12860,7 +12879,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const element = App.selection.elementAt(point.x, point.y);
         const cells = inTableCells(element, point);
         overlay.style.cursor = cells && App.tableControls.borderAt(element, point) >= 0 ? 'col-resize'
-            : cells ? 'text' : element ? 'move' : '';
+            : cells ? 'text' : element && !App.elements.isLocked(element) ? 'move' : '';
     }
 
     function onPointerDown(event) {
@@ -13032,6 +13051,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     function showPreview(rect) {
         App.transform.writeRect(box, rect);
         box.style.transform = '';
+        box.classList.remove('locked');
         box.querySelector('[data-handle="rotate"]').hidden = true;
         box.hidden = false;
     }
@@ -13087,8 +13107,9 @@ App.template.newDeckHtml = function newDeckHtml() {
      * resized along its own sides, without snapping.
      */
     function startDrag(downEvent, kind, handle) {
-        // A move takes every selected element along; the other kinds work on the one selected.
-        const elements = kind === 'move' ? App.selection.getElements() : [App.selection.getElement()].filter(Boolean);
+        // A move takes every selected element along; the other kinds work on the one selected. Locked ones stay (Phase 7).
+        const elements = (kind === 'move' ? App.selection.getElements() : [App.selection.getElement()].filter(Boolean))
+            .filter((item) => !App.elements.isLocked(item));
         const element = elements[0];
         const slide = App.deck.getCurrentSlide();
         if (!element || !slide) {
@@ -13472,7 +13493,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * at once since Phase 7's multi-select): nudge with the arrow keys, delete,
  * cut / copy / paste / duplicate (also across slides), and the stacking order
  * (bring forward, send to back ...), align and distribute, and rotate
- * (Arrange > Rotate, the Format pane's Rotation field) (Phase 7).
+ * (Arrange > Rotate, the Format pane's Rotation field) and lock (Phase 7).
  *
  * Every action is one undoable step on the current slide (history.js).
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
@@ -13675,7 +13696,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* Move the selected elements by (dx, dy) px; a held key is one undo step. */
     App.elements.nudge = function nudge(dx, dy) {
-        const elements = App.selection.getElements();
+        const elements = App.selection.getElements().filter((element) => !App.elements.isLocked(element));
         if (!elements.length) {
             return;
         }
@@ -13686,13 +13707,23 @@ App.template.newDeckHtml = function newDeckHtml() {
         }, { mergeKey: 'nudge:' + App.selection.selectedIds().join(',') });
     };
 
+    /* Delete the selected elements; locked ones stay (still selected). */
     App.elements.remove = function remove(label) {
-        const elements = App.selection.getElements();
+        const all = App.selection.getElements();
+        const elements = all.filter((element) => !App.elements.isLocked(element));
         if (!elements.length) {
+            if (all.length) {
+                App.ui.setStatus('Locked: Arrange > Lock unlocks it first');
+            }
             return;
         }
         App.history.change(label || 'Delete', currentSlideScope(), () => elements.forEach((element) => element.remove()));
-        App.selection.clear();
+        App.selection.selectMany(all.filter((element) => !elements.includes(element)));
+    };
+
+    /* Delete and Cut need something that is not locked. */
+    App.elements.canDelete = function canDelete() {
+        return App.selection.getElements().some((element) => !App.elements.isLocked(element));
     };
 
     App.elements.copy = function copy() {
@@ -13738,6 +13769,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             const topZ = others.reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
             elements.forEach((element, index) => {
                 App.elements.giveFreshIds(element, usedIds);
+                element.removeAttribute('data-locked');   // a copy is free to move, as in PowerPoint
                 App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element),
                     spot.left - first.left, spot.top - first.top));
                 element.style.zIndex = String(topZ + 1 + index);
@@ -13933,15 +13965,21 @@ App.template.newDeckHtml = function newDeckHtml() {
         const shown = elements.map((element, index) => App.transform.visualRect(rects[index], App.transform.rotationOf(element)));
         const area = App.elements.alignsToSlide() ? SLIDE_AREA : App.transform.boundsOf(shown);
         const placed = place(shown, area);
-        if (placed.every((rect, index) => rect.left === shown[index].left && rect.top === shown[index].top)) {
+        if (placed.every((rect, index) => App.elements.isLocked(elements[index]) ||
+            (rect.left === shown[index].left && rect.top === shown[index].top))) {
             return;
         }
         const round = (value) => Math.round(value * 100) / 100;
         App.history.change(label, currentSlideScope(), () => {
-            elements.forEach((element, index) => App.transform.writeRect(element, Object.assign({}, rects[index], {
-                left: round(rects[index].left + placed[index].left - shown[index].left),
-                top: round(rects[index].top + placed[index].top - shown[index].top),
-            })));
+            elements.forEach((element, index) => {
+                if (App.elements.isLocked(element)) {
+                    return;   // a locked one stays, and the others line up with it
+                }
+                App.transform.writeRect(element, Object.assign({}, rects[index], {
+                    left: round(rects[index].left + placed[index].left - shown[index].left),
+                    top: round(rects[index].top + placed[index].top - shown[index].top),
+                }));
+            });
         });
     }
 
@@ -13964,12 +14002,12 @@ App.template.newDeckHtml = function newDeckHtml() {
     // ---------------------------------------------------------------
 
     /*
-     * Can `element` be turned? Not a table or a chart (PowerPoint does not turn
+     * Can `element` be turned? Not when locked; not a table or a chart (PowerPoint does not turn
      * them either), nor a group holding one; not a line, whose two end handles
      * already point it any way.
      */
     App.elements.canRotateElement = function canRotateElement(element) {
-        if (!element) {
+        if (!element || App.elements.isLocked(element)) {
             return false;
         }
         const type = element.getAttribute('data-type');
@@ -14007,6 +14045,49 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         App.history.change('Rotate', currentSlideScope(), () => App.transform.setRotation(element, degrees));
+    };
+
+    // ---------------------------------------------------------------
+    // Lock (Phase 7)
+    // ---------------------------------------------------------------
+    //
+    // A locked element carries data-locked="true". It can still be selected
+    // (to unlock it, give it a look, type in it), but not moved, resized,
+    // turned or deleted: no handles, and drag, arrows, Delete, Cut, align and
+    // the Format pane's size fields leave it where it is. With others
+    // selected, they move and it stays. Its lock is its own: a group holding
+    // a locked part is not locked.
+
+    App.elements.isLocked = function isLocked(element) {
+        return !!element && element.getAttribute('data-locked') === 'true';
+    };
+
+    App.elements.canLock = function canLock() {
+        return App.selection.count() > 0 && !App.text.isEditing();
+    };
+
+    /* Ticked when every selected element is locked. */
+    App.elements.allLocked = function allLocked() {
+        const elements = App.selection.getElements();
+        return elements.length > 0 && elements.every(App.elements.isLocked);
+    };
+
+    /* Arrange > Lock: lock the selected elements, or unlock them when all are locked; one undo step. */
+    App.elements.toggleLock = function toggleLock() {
+        if (!App.elements.canLock()) {
+            return;
+        }
+        const elements = App.selection.getElements();
+        const unlock = App.elements.allLocked();
+        App.history.change(unlock ? 'Unlock' : 'Lock', currentSlideScope(), () => {
+            elements.forEach((element) => {
+                if (unlock) {
+                    element.removeAttribute('data-locked');
+                } else {
+                    element.setAttribute('data-locked', 'true');
+                }
+            });
+        });
     };
 })();
 
@@ -14127,7 +14208,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         typeLabel.textContent = TYPE_LABELS[element.getAttribute('data-type')] || 'Object';
         const rect = App.transform.readRect(element);
+        const locked = App.elements.isLocked(element);   // Phase 7: a locked element keeps its size and place
         inputs.forEach((input) => {
+            input.disabled = locked;
             if (!edited.has(input)) {
                 input.value = String(App.util.round2(rect[input.getAttribute('data-field')]));
             }
@@ -14238,7 +14321,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.contextMenu = {};
 
     const ELEMENT_ITEMS = ['cut', 'copy', 'paste', 'duplicate', 'delete', '-',
-        'bringToFront', 'bringForward', 'sendBackward', 'sendToBack', '-', 'group', 'ungroup'];
+        'bringToFront', 'bringForward', 'sendBackward', 'sendToBack', '-', 'group', 'ungroup', 'lock'];
     const PICTURE_ITEMS = ELEMENT_ITEMS.concat(['-', 'changePicture']);
     const EMPTY_SLIDE_ITEMS = ['paste'];
 
@@ -16806,7 +16889,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 run: () => App.elements.nudge(dx * 10, dy * 10),
             });
         });
-        App.commands.define('delete', { label: 'Delete', isEnabled: hasSelection, run: () => App.elements.remove() });
+        // Delete / Cut: not a locked element (Phase 7).
+        App.commands.define('delete', { label: 'Delete', isEnabled: () => App.elements.canDelete(), run: () => App.elements.remove() });
         // Ctrl+A: every element on the slide (Phase 7 multi-select); while typing it stays the text's own Select All.
         App.commands.define('selectAll', {
             label: 'Select all', isEnabled: () => hasDeck() && !App.text.isEditing(), run: () => App.selection.selectAll(),
@@ -16949,12 +17033,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
         App.commands.define('cropPicture', {
             // Not while the picture is turned (Phase 7): the crop frame and its handles are drawn upright.
-            label: 'Crop', isEnabled: () => App.images.isPictureSelected() && !App.transform.rotationOf(App.selection.getElement()),
+            label: 'Crop', isEnabled: () => App.images.isPictureSelected() && !App.transform.rotationOf(App.selection.getElement()) &&
+                !App.elements.isLocked(App.selection.getElement()),
             isChecked: () => App.crop.isCropping(),
             run: () => App.crop.toggle(),
         });
         App.commands.define('resetPictureSize', {
-            label: 'Reset Size', isEnabled: () => App.images.isPictureSelected(),
+            label: 'Reset Size', isEnabled: () => App.images.isPictureSelected() && !App.elements.isLocked(App.selection.getElement()),
             run: () => App.images.resetSize(),
         });
         // Insert > Shapes: the gallery (shapecontrols.js) passes the kind it picked.
@@ -17004,7 +17089,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('replace', {
             label: 'Replace', keepsEdit: true, isEnabled: hasDeck, run: () => App.findReplace.open('replace'),
         });
-        App.commands.define('cut', { label: 'Cut', isEnabled: hasSelection, run: () => App.elements.cut() });
+        App.commands.define('cut', { label: 'Cut', isEnabled: () => App.elements.canDelete(), run: () => App.elements.cut() });
         App.commands.define('copy', { label: 'Copy', isEnabled: hasSelection, run: () => App.elements.copy() });
         App.commands.define('paste', { label: 'Paste', isEnabled: () => App.elements.canPaste(), run: () => App.elements.paste() });
         App.commands.define('duplicate', { label: 'Duplicate', isEnabled: hasSelection, run: () => App.elements.duplicate() });
@@ -17029,6 +17114,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Arrange > Group (groups.js).
         App.commands.define('group', { label: 'Group', isEnabled: () => App.groups.canGroup(), run: () => App.groups.group() });
         App.commands.define('ungroup', { label: 'Ungroup', isEnabled: () => App.groups.canUngroup(), run: () => App.groups.ungroup() });
+        App.commands.define('lock', { label: 'Lock', isEnabled: () => App.elements.canLock(),
+            isChecked: () => App.elements.allLocked(), run: () => App.elements.toggleLock() });
         App.commands.define('rotateRight90', { label: 'Rotate Right 90°', isEnabled: () => App.elements.canRotate(),
             run: () => App.elements.rotateBy(90) });
         App.commands.define('rotateLeft90', { label: 'Rotate Left 90°', isEnabled: () => App.elements.canRotate(),
@@ -21558,10 +21645,12 @@ App.template.newDeckHtml = function newDeckHtml() {
                 },
                 { label: 'Group', rows: [[{ command: 'group', icon: 'group' }], [{ command: 'ungroup', icon: 'ungroup' }]] },
                 { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }], [{ command: 'rotateLeft90', icon: 'rotateLeft90' }]] },
+                { label: 'Lock', commands: [['lock', 'lock']] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
                 'Distribute: equal gaps between three or more. Group: one element of several; double-click text in it to type. ' +
-                'Rotate: also by the round handle above the selection (Shift: 15° steps) or the Format pane\'s Rotation.',
+                'Rotate: also by the round handle above the selection (Shift: 15° steps) or the Format pane\'s Rotation. ' +
+                'Lock: it stays where it is (no moving, resizing, turning or deleting) until unlocked.',
         },
         {
             id: 'slideshow', label: 'Slide Show',

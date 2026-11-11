@@ -47,3 +47,13 @@ test('elements: restackMany - a block already at the top or bottom stays', () =>
     assertEqual(App.elements.restackMany(['a', 'b', 'c', 'd'], ['b', 'c'], 'forward'), ['a', 'd', 'b', 'c'], 'the block passes d');
     assertEqual(App.elements.restackMany(['a', 'b', 'c'], ['a', 'b'], 'backward'), ['a', 'b', 'c']);
 });
+
+test('elements: a locked element (data-locked) does not turn; its lock is its own, not its group\'s', () => {
+    const doc = parseDoc('<html><body><section class="slide">' +
+        '<div class="el" data-type="shape" data-shape="rect" data-id="a" data-locked="true"></div>' +
+        '<div class="el" data-type="group" data-id="g"><div class="el" data-type="text" data-id="b" data-locked="true"></div></div>' +
+        '</section></body></html>');
+    const byId = (id) => doc.querySelector('[data-id="' + id + '"]');
+    assertEqual([App.elements.isLocked(byId('a')), App.elements.isLocked(byId('g')), App.elements.isLocked(null)], [true, false, false]);
+    assertEqual([App.elements.canRotateElement(byId('a')), App.elements.canRotateElement(byId('g'))], [false, true]);
+});

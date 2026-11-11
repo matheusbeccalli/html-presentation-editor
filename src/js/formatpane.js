@@ -112,7 +112,9 @@
         }
         typeLabel.textContent = TYPE_LABELS[element.getAttribute('data-type')] || 'Object';
         const rect = App.transform.readRect(element);
+        const locked = App.elements.isLocked(element);   // Phase 7: a locked element keeps its size and place
         inputs.forEach((input) => {
+            input.disabled = locked;
             if (!edited.has(input)) {
                 input.value = String(App.util.round2(rect[input.getAttribute('data-field')]));
             }

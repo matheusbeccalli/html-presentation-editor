@@ -137,6 +137,15 @@
 .selection-handle[hidden], .selection-box.line .selection-handle:not([data-handle="start"]):not([data-handle="end"]) { display: none; }
 .selection-box.line { outline: none; }
 .selection-handle[data-handle="start"], .selection-handle[data-handle="end"] { cursor: crosshair; }
+/* Lock (Phase 7): a locked element's box is grey, with a small padlock and no handles. */
+.selection-box.locked, .selection-outline.locked { outline-color: var(--text-muted); }
+.selection-box.locked .selection-handle { display: none; }
+.selection-box.locked::after {
+    content: ""; position: absolute; right: calc(-6px * var(--inverse-zoom)); top: calc(-6px * var(--inverse-zoom));
+    width: calc(12px * var(--inverse-zoom)); height: calc(12px * var(--inverse-zoom));
+    border-radius: 50%; background: var(--text-muted) no-repeat center / 70%;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none' stroke='white' stroke-width='2'%3E%3Crect x='4.5' y='9.5' width='11' height='8' rx='1'/%3E%3Cpath d='M7 9.5V7a3 3 0 0 1 6 0v2.5'/%3E%3C/svg%3E");
+}
 /* Rotate (Phase 7): the round handle above the box, on a short stem; it turns with the box. */
 .selection-handle[data-handle="rotate"] {
     left: 50%; top: calc(-24px * var(--inverse-zoom)); cursor: grab;

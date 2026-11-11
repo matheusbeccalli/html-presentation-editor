@@ -4000,6 +4000,80 @@ def test_rotate(browser):
     check(angle() == 90 and shows() == [104, 16, 40, 120], f"turned after reopening: {angle()} {shows()}")
 
 
+def test_lock(browser):
+    """Phase 7: Arrange > Lock (and the right-click menu): a locked element stays selectable (to unlock it, format it,
+    type in it) but cannot be moved, resized, turned or deleted: no handles; drag, arrows, Delete, Ctrl+X, align and
+    the Format pane leave it; with others selected they move, it stays. One undo step; kept when saved; copies are not locked."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    rect = lambda name: element_rect(page, name)  # noqa: E731
+    exists = lambda name: page.evaluate("id => !!App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]')", name)  # noqa: E731
+    button = lambda name: "button[data-command='" + name + "']"  # noqa: E731
+    logo = {"left": 64, "top": 56, "width": 120, "height": 40}
+    # Slide 1: e1 logo (64,56 120x40), e2 title (64,230 1100x120).
+
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.mouse.click(*slide_to_screen(page, 124, 76))
+    check(page.get_attribute(button("lock"), "aria-pressed") == "false", "not locked yet")
+    page.click(button("lock"))
+    check(label() == "Lock" and page.get_attribute(button("lock"), "aria-pressed") == "true", f"locked: {label()}")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').getAttribute('data-locked')") == "true", "stored")
+    check(page.evaluate("App.selection.selectedIds()") == ["e1"], "still selected")
+    check(page.locator("#overlay .selection-handle:visible").count() == 0, "no handles")
+    check(page.is_visible("#overlay .selection-box.locked"), "the box shows it is locked")
+    page.screenshot(path=str(OUTPUT / "87-locked.png"))
+
+    # Nothing moves it.
+    drag(page, slide_to_screen(page, 124, 76), slide_to_screen(page, 424, 176), steps=8)
+    page.keyboard.press("ArrowRight")
+    page.keyboard.press("Delete")
+    page.keyboard.press("Control+x")
+    page.click(button("alignObjectsCenter"))
+    check(rect("e1") == logo and exists("e1"), f"not moved, not deleted: {rect('e1')}")
+    check(label() == "Lock", f"no undo steps: {label()}")
+    check(page.is_disabled("#format-x") and page.is_disabled("#format-w") and page.is_disabled("#format-rotation"),
+          "the Format pane's size and position are off")
+    check(page.is_disabled(button("rotateRight90")), "no turning")
+
+    # With others selected: they move, it stays.
+    page.keyboard.press("Control+a")
+    drag(page, slide_to_screen(page, 600, 290), slide_to_screen(page, 600, 340), steps=8)
+    check(rect("e2")["top"] == 280 and rect("e1") == logo, f"the title moved, the logo did not: {rect('e2')} {rect('e1')}")
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Delete")
+    check(exists("e1") and not exists("e2"), "Delete takes the others, the locked one stays")
+    page.keyboard.press("Control+z")
+
+    # A copy is not locked.
+    page.click("#overlay", position={"x": 5, "y": 5})
+    page.mouse.click(*slide_to_screen(page, 124, 76))
+    page.keyboard.press("Control+d")
+    copy = page.evaluate("App.selection.selectedIds()")[0]
+    check(copy != "e1" and page.evaluate("id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').hasAttribute('data-locked')",
+                                         copy) is False, "the copy is not locked")
+    page.keyboard.press("Control+z")
+
+    # Right-click > Lock is ticked; clicking it unlocks; then the logo moves again.
+    page.mouse.click(*slide_to_screen(page, 124, 76), button="right")
+    check(page.get_attribute(".context-menu [data-command='lock']", "aria-checked") == "true", "ticked in the menu")
+    page.click(".context-menu [data-command='lock']")
+    check(label() == "Unlock" and not page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').hasAttribute('data-locked')"),
+          "unlocked")
+    page.keyboard.press("ArrowRight")
+    check(rect("e1")["left"] == 65, f"moves again: {rect('e1')}")
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').getAttribute('data-locked')") == "true", "undo: locked")
+
+    # Saved and reopened: still locked.
+    saved = editor.save_as_download("locked.html")
+    editor.open(saved)
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').getAttribute('data-locked')") == "true",
+          "locked after reopening")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -5093,6 +5167,7 @@ TESTS = [
     test_smart_guides_gridlines_and_rulers,
     test_group_and_ungroup,
     test_rotate,
+    test_lock,
 ]
 
 

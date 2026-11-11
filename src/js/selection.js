@@ -33,6 +33,9 @@
  * Listens to deck-loaded, slide-changed,
  * history-changed and zoom-changed.
  *
+ * Lock (Phase 7): a locked element's box has no handles (class "locked"),
+ * and a drag leaves it where it is (the others selected with it still move).
+ *
  * Rotate (Phase 7): the round handle above the box turns the element; a
  * turned element's box and outline turn with it, and clicks, handles and the
  * rubber band all go by where it shows.
@@ -219,6 +222,7 @@
             if (i < elements.length) {
                 App.transform.writeRect(outline, App.transform.readRect(elements[i]));
                 turnLike(outline, elements[i]);
+                outline.classList.toggle('locked', App.elements.isLocked(elements[i]));
             }
         });
     }
@@ -240,6 +244,7 @@
             const rect = App.transform.readRect(element);
             App.transform.writeRect(box, rect);
             turnLike(box, element);   // a turned element's box turns with it, handles and all
+            box.classList.toggle('locked', App.elements.isLocked(element));   // no handles: it cannot move or change size
             placeShapeHandles(element, rect);
             box.querySelector('[data-handle="rotate"]').hidden = !App.elements.canRotateElement(element);
         }
@@ -351,7 +356,7 @@
         const element = App.selection.elementAt(point.x, point.y);
         const cells = inTableCells(element, point);
         overlay.style.cursor = cells && App.tableControls.borderAt(element, point) >= 0 ? 'col-resize'
-            : cells ? 'text' : element ? 'move' : '';
+            : cells ? 'text' : element && !App.elements.isLocked(element) ? 'move' : '';
     }
 
     function onPointerDown(event) {
@@ -523,6 +528,7 @@
     function showPreview(rect) {
         App.transform.writeRect(box, rect);
         box.style.transform = '';
+        box.classList.remove('locked');
         box.querySelector('[data-handle="rotate"]').hidden = true;
         box.hidden = false;
     }
@@ -578,8 +584,9 @@
      * resized along its own sides, without snapping.
      */
     function startDrag(downEvent, kind, handle) {
-        // A move takes every selected element along; the other kinds work on the one selected.
-        const elements = kind === 'move' ? App.selection.getElements() : [App.selection.getElement()].filter(Boolean);
+        // A move takes every selected element along; the other kinds work on the one selected. Locked ones stay (Phase 7).
+        const elements = (kind === 'move' ? App.selection.getElements() : [App.selection.getElement()].filter(Boolean))
+            .filter((item) => !App.elements.isLocked(item));
         const element = elements[0];
         const slide = App.deck.getCurrentSlide();
         if (!element || !slide) {

@@ -3,7 +3,7 @@
  * at once since Phase 7's multi-select): nudge with the arrow keys, delete,
  * cut / copy / paste / duplicate (also across slides), and the stacking order
  * (bring forward, send to back ...), align and distribute, and rotate
- * (Arrange > Rotate, the Format pane's Rotation field) (Phase 7).
+ * (Arrange > Rotate, the Format pane's Rotation field) and lock (Phase 7).
  *
  * Every action is one undoable step on the current slide (history.js).
  * The pure helpers at the top are tested in tests/unit/elements.test.js.
@@ -206,7 +206,7 @@
 
     /* Move the selected elements by (dx, dy) px; a held key is one undo step. */
     App.elements.nudge = function nudge(dx, dy) {
-        const elements = App.selection.getElements();
+        const elements = App.selection.getElements().filter((element) => !App.elements.isLocked(element));
         if (!elements.length) {
             return;
         }
@@ -217,13 +217,23 @@
         }, { mergeKey: 'nudge:' + App.selection.selectedIds().join(',') });
     };
 
+    /* Delete the selected elements; locked ones stay (still selected). */
     App.elements.remove = function remove(label) {
-        const elements = App.selection.getElements();
+        const all = App.selection.getElements();
+        const elements = all.filter((element) => !App.elements.isLocked(element));
         if (!elements.length) {
+            if (all.length) {
+                App.ui.setStatus('Locked: Arrange > Lock unlocks it first');
+            }
             return;
         }
         App.history.change(label || 'Delete', currentSlideScope(), () => elements.forEach((element) => element.remove()));
-        App.selection.clear();
+        App.selection.selectMany(all.filter((element) => !elements.includes(element)));
+    };
+
+    /* Delete and Cut need something that is not locked. */
+    App.elements.canDelete = function canDelete() {
+        return App.selection.getElements().some((element) => !App.elements.isLocked(element));
     };
 
     App.elements.copy = function copy() {
@@ -269,6 +279,7 @@
             const topZ = others.reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
             elements.forEach((element, index) => {
                 App.elements.giveFreshIds(element, usedIds);
+                element.removeAttribute('data-locked');   // a copy is free to move, as in PowerPoint
                 App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element),
                     spot.left - first.left, spot.top - first.top));
                 element.style.zIndex = String(topZ + 1 + index);
@@ -464,15 +475,21 @@
         const shown = elements.map((element, index) => App.transform.visualRect(rects[index], App.transform.rotationOf(element)));
         const area = App.elements.alignsToSlide() ? SLIDE_AREA : App.transform.boundsOf(shown);
         const placed = place(shown, area);
-        if (placed.every((rect, index) => rect.left === shown[index].left && rect.top === shown[index].top)) {
+        if (placed.every((rect, index) => App.elements.isLocked(elements[index]) ||
+            (rect.left === shown[index].left && rect.top === shown[index].top))) {
             return;
         }
         const round = (value) => Math.round(value * 100) / 100;
         App.history.change(label, currentSlideScope(), () => {
-            elements.forEach((element, index) => App.transform.writeRect(element, Object.assign({}, rects[index], {
-                left: round(rects[index].left + placed[index].left - shown[index].left),
-                top: round(rects[index].top + placed[index].top - shown[index].top),
-            })));
+            elements.forEach((element, index) => {
+                if (App.elements.isLocked(element)) {
+                    return;   // a locked one stays, and the others line up with it
+                }
+                App.transform.writeRect(element, Object.assign({}, rects[index], {
+                    left: round(rects[index].left + placed[index].left - shown[index].left),
+                    top: round(rects[index].top + placed[index].top - shown[index].top),
+                }));
+            });
         });
     }
 
@@ -495,12 +512,12 @@
     // ---------------------------------------------------------------
 
     /*
-     * Can `element` be turned? Not a table or a chart (PowerPoint does not turn
+     * Can `element` be turned? Not when locked; not a table or a chart (PowerPoint does not turn
      * them either), nor a group holding one; not a line, whose two end handles
      * already point it any way.
      */
     App.elements.canRotateElement = function canRotateElement(element) {
-        if (!element) {
+        if (!element || App.elements.isLocked(element)) {
             return false;
         }
         const type = element.getAttribute('data-type');
@@ -538,5 +555,48 @@
             return;
         }
         App.history.change('Rotate', currentSlideScope(), () => App.transform.setRotation(element, degrees));
+    };
+
+    // ---------------------------------------------------------------
+    // Lock (Phase 7)
+    // ---------------------------------------------------------------
+    //
+    // A locked element carries data-locked="true". It can still be selected
+    // (to unlock it, give it a look, type in it), but not moved, resized,
+    // turned or deleted: no handles, and drag, arrows, Delete, Cut, align and
+    // the Format pane's size fields leave it where it is. With others
+    // selected, they move and it stays. Its lock is its own: a group holding
+    // a locked part is not locked.
+
+    App.elements.isLocked = function isLocked(element) {
+        return !!element && element.getAttribute('data-locked') === 'true';
+    };
+
+    App.elements.canLock = function canLock() {
+        return App.selection.count() > 0 && !App.text.isEditing();
+    };
+
+    /* Ticked when every selected element is locked. */
+    App.elements.allLocked = function allLocked() {
+        const elements = App.selection.getElements();
+        return elements.length > 0 && elements.every(App.elements.isLocked);
+    };
+
+    /* Arrange > Lock: lock the selected elements, or unlock them when all are locked; one undo step. */
+    App.elements.toggleLock = function toggleLock() {
+        if (!App.elements.canLock()) {
+            return;
+        }
+        const elements = App.selection.getElements();
+        const unlock = App.elements.allLocked();
+        App.history.change(unlock ? 'Unlock' : 'Lock', currentSlideScope(), () => {
+            elements.forEach((element) => {
+                if (unlock) {
+                    element.removeAttribute('data-locked');
+                } else {
+                    element.setAttribute('data-locked', 'true');
+                }
+            });
+        });
     };
 })();

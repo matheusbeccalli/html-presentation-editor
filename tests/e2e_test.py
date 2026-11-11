@@ -4225,7 +4225,7 @@ def test_slide_master_own_footers(browser):
     check(own() == 12, f"the deck's own boxes: {own()}")
     fill_master()
     listed = page.inner_text("dialog[open] .master-own")
-    check("Slide numbers on 5 slides" in listed and "“Atlas · material confidencial” on 5 slides" in listed, f"listed: {listed}")
+    check("Slide numbers on slides 2–6" in listed and "“Atlas · material confidencial” on slides 2–6" in listed, f"listed: {listed}")
     page.screenshot(path=str(OUTPUT / "90-slide-master-own-footers.png"))
     editor.click_dialog_button("Remove them")
     check(own() == 2 and masters() == 1, f"removed (the title slide's stay), the master on: {own()} {masters()}")

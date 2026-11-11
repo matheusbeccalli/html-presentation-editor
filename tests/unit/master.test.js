@@ -131,14 +131,39 @@ test('master: the deck\'s own footers, slide numbers and label are found, so the
         'only what the master is going to show');
 });
 
+const NUMBERS_ONLY = { logo: null, footer: '', label: '', numbers: 'n', skipTitle: true };
+const foundIds = (doc, settings) => App.master.findOwn(doc, settings || NUMBERS_ONLY)
+    .map((g) => g.elements.map((element) => element.getAttribute('data-id')).join(','));
+
 test('master: locked boxes and parts of a group are left alone', () => {
-    const doc = parseDoc(OWN_FOOTERS_DECK);
+    let doc = parseDoc(OWN_FOOTERS_DECK);
     doc.querySelector('[data-id="n2"]').setAttribute('data-locked', 'true');
+    assertEqual(foundIds(doc), ['n3,n4']);
+    doc = parseDoc(OWN_FOOTERS_DECK);
     const group = doc.createElement('div');
     group.className = 'el';
     group.setAttribute('data-type', 'group');
     doc.querySelector('[data-slide-id="s3"]').appendChild(group);
     group.appendChild(doc.querySelector('[data-id="n3"]'));
-    const found = App.master.findOwn(doc, { logo: null, footer: '', label: '', numbers: 'n', skipTitle: true });
-    assertEqual(found.map((g) => g.elements.map((element) => element.getAttribute('data-id')).join(',')), ['n4']);
+    assertEqual(foundIds(doc), ['n2,n4']);
+});
+
+test('master: a slide number is a pattern by an edge, one per slide: a step badge with the slide\'s number stays', () => {
+    const doc = parseDoc(OWN_FOOTERS_DECK);
+    const s3 = doc.querySelector('[data-slide-id="s3"]');
+    s3.insertAdjacentHTML('beforeend', textBox('step3', [400, 300, 40, 40], '3') + textBox('badge3', [600, 690, 30, 24], '3'));
+    assertEqual(foundIds(doc), ['n2,n3,n4'], 'not the badge mid-slide, nor the one by the edge away from the others');
+    // One number on one slide is no pattern.
+    const lone = parseDoc('<html><head></head><body>' +
+        '<section class="slide" data-slide-id="a"><p>cover</p></section>' +
+        '<section class="slide" data-slide-id="b">' + textBox('x2', [1150, 684, 80, 24], '2') + '</section>' +
+        '<section class="slide" data-slide-id="c"></section><section class="slide" data-slide-id="d"></section></body></html>');
+    assertEqual(foundIds(lone), []);
+});
+
+test('master: the question names the slides: slide 3, slides 2–6, slides 2, 4–5', () => {
+    assertEqual([App.master.slideList([3]), App.master.slideList([2, 3, 4, 5, 6]), App.master.slideList([2, 4, 5])],
+        ['slide 3', 'slides 2–6', 'slides 2, 4–5']);
+    const own = App.master.findOwn(parseDoc(OWN_FOOTERS_DECK), NUMBERS_ONLY);
+    assertEqual(own[0].slides, [2, 3, 4]);
 });

@@ -12812,18 +12812,60 @@ App.template.newDeckHtml = function newDeckHtml() {
     // not locked), on the slides the master shows on, for what the master is
     // going to show:
     //   number: its text is the slide's number ("3", "3 / 15", "Página 3 de 15"),
-    //           counting all slides or only the shown ones;
+    //           counting all slides or only the shown ones; by the top or bottom
+    //           edge; a pattern: about the same place on at least two slides and
+    //           half of them, one per slide (a step badge "3" on slide 3 stays);
     //   footer: in the bottom strip, the same text on at least two slides and
     //           at least half of them;
     //   label:  the label's text, in any case ("CONFIDENCIAL").
 
     const OWN_MAX_HEIGHT = 60;    // px: a footer line, not a text block
-    const BOTTOM_STRIP = 620;     // px from the top: where footers sit
+    const BOTTOM_STRIP = 620;     // px from the top: where footers sit (and page numbers)
+    const TOP_STRIP = 100;        // px: a page number may also sit above this line
+    const SAME_PLACE = 100;       // px: page numbers of one pattern sit this close to its middle
     const NUMBER_RE = /^(?:(?:p[áa]g(?:ina)?|page|slide)\.?\s*)?(\d+)(?:\s*(?:\/|de|of)\s*\d+)?$/i;
 
     const plainText = (element) => element.textContent.replace(/\s+/g, ' ').trim();
 
-    /* [{ kind: 'number' | 'footer' | 'label', text, elements }] in that order; [] when there is nothing. */
+    const middle = (values) => {
+        const sorted = values.slice().sort((a, b) => a - b);
+        const half = Math.floor(sorted.length / 2);
+        return sorted.length % 2 ? sorted[half] : (sorted[half - 1] + sorted[half]) / 2;
+    };
+
+    /* Of the boxes showing their slide's number, the pattern: one per slide, near the middle of where they all sit. */
+    function numberPattern(candidates, isPattern) {
+        const centre = (box) => ({ x: box.rect.left + box.rect.width / 2, y: box.rect.top + box.rect.height / 2 });
+        const place = candidates.length
+            ? { x: middle(candidates.map((box) => centre(box).x)), y: middle(candidates.map((box) => centre(box).y)) } : null;
+        const distance = (box) => Math.hypot(centre(box).x - place.x, centre(box).y - place.y);
+        const bySlide = new Map();
+        candidates.filter((box) => distance(box) <= SAME_PLACE).forEach((box) => {
+            const best = bySlide.get(box.slide);
+            if (!best || distance(box) < distance(best)) {
+                bySlide.set(box.slide, box);
+            }
+        });
+        const chosen = Array.from(bySlide.values());
+        return isPattern(chosen.length) ? chosen : [];
+    }
+
+    /* "slide 3", "slides 2–6", "slides 2, 4–5" (numbers from 1, in order). */
+    App.master.slideList = function slideList(numbers) {
+        const runs = [];
+        numbers.forEach((n) => {
+            const last = runs[runs.length - 1];
+            if (last && n === last[1] + 1) {
+                last[1] = n;
+            } else {
+                runs.push([n, n]);
+            }
+        });
+        return (numbers.length === 1 ? 'slide ' : 'slides ') +
+            runs.map((run) => (run[0] === run[1] ? String(run[0]) : run[0] + '–' + run[1])).join(', ');
+    };
+
+    /* [{ kind: 'number' | 'footer' | 'label', text, elements, slides }] in that order; [] when there is nothing. */
     App.master.findOwn = function findOwn(doc, settings) {
         const slides = Array.from(doc.querySelectorAll('section.slide'));
         let shownIndex = 0;
@@ -12847,7 +12889,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 const rect = App.transform.readRect(element);
                 const text = plainText(element);
                 if (text && rect.height <= OWN_MAX_HEIGHT) {
-                    boxes.push({ element: element, text: text, rect: rect, numbers: numbers });
+                    boxes.push({ element: element, text: text, rect: rect, numbers: numbers, slide: index + 1 });
                 }
             });
         });
@@ -12856,14 +12898,17 @@ App.template.newDeckHtml = function newDeckHtml() {
         const take = (kind, text, list) => {
             if (list.length) {
                 list.forEach((box) => taken.add(box.element));
-                found.push({ kind: kind, text: text, elements: list.map((box) => box.element) });
+                found.push({ kind: kind, text: text, elements: list.map((box) => box.element),
+                    slides: list.map((box) => box.slide).filter((n, i, all) => all.indexOf(n) === i) });
             }
         };
+        const isPattern = (count) => count >= 2 && count >= considered / 2;
         if (settings.numbers === 'n' || settings.numbers === 'n/total') {
-            take('number', '', boxes.filter((box) => {
+            take('number', '', numberPattern(boxes.filter((box) => {
                 const match = NUMBER_RE.exec(box.text);
-                return match && box.numbers.indexOf(parseInt(match[1], 10)) !== -1;
-            }));
+                const byEdge = box.rect.top >= BOTTOM_STRIP || box.rect.top + box.rect.height <= TOP_STRIP;
+                return byEdge && match && box.numbers.indexOf(parseInt(match[1], 10)) !== -1;
+            }), isPattern));
         }
         if (settings.footer) {
             const byText = new Map();
@@ -12871,7 +12916,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 byText.set(box.text, (byText.get(box.text) || []).concat([box]));
             });
             byText.forEach((list, text) => {
-                if (list.length >= 2 && list.length >= considered / 2) {
+                if (isPattern(list.length)) {
                     take('footer', text, list);
                 }
             });
@@ -13007,15 +13052,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     };
 
-    /* What findOwn found, for the question: "Slide numbers on 14 slides", "“Projeto Atlas” on 14 slides". */
+    /* What findOwn found, for the question: "Slide numbers on slides 2–15", "“Projeto Atlas” on slides 2–15". */
     function ownList(own) {
         const el = App.util.el;
-        const slidesOf = (group) => new Set(group.elements.map((element) => element.closest('section.slide'))).size;
-        const plural = (n) => n + (n === 1 ? ' slide' : ' slides');
         return el('div', { class: 'master-own' }, [
             el('p', {}, ['This deck has its own text boxes for these. With the slide master they would show twice:']),
             el('ul', {}, own.map((group) => el('li', {}, [
-                (group.kind === 'number' ? 'Slide numbers' : '“' + group.text + '”') + ' on ' + plural(slidesOf(group))]))),
+                (group.kind === 'number' ? 'Slide numbers' : '“' + group.text + '”') + ' on ' + App.master.slideList(group.slides)]))),
             el('p', { class: 'panel-hint' }, ['Remove them: the slide master takes their place (one Ctrl+Z undoes both).']),
         ]);
     }

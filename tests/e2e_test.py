@@ -4323,6 +4323,142 @@ def test_theme_editor(browser):
     check(again.read_text(encoding="utf-8") == first, "saved again: the same file")
 
 
+def fifteen_slide_deck(name):
+    """A 15-slide deck as Copilot writes it (fake content): the contract deck's theme, a title slide, then sections
+    with a title and points, its own footer and page number typed on every slide; slide 6 has three cards out of line."""
+    text = CONTRACT.read_text(encoding="utf-8")
+    head = text[:text.index("<body>") + len("<body>")]
+    box = lambda id_, rect, inner, look="": (  # noqa: E731
+        f'<div class="el" data-type="text" data-id="{id_}" style="left: {rect[0]}px; top: {rect[1]}px; width: {rect[2]}px; '
+        f'height: {rect[3]}px; z-index: {rect[4]};{look}"><p data-list="none" data-level="1">{inner}</p></div>')
+    heading = " font-family: var(--font-heading); color: var(--color-accent); font-size: 25.5pt; font-weight: bold;"
+    slides = []
+    for k in range(1, 16):
+        own = box(f"own-f{k}", (48, 684, 400, 24, 20), "Projeto Atlas · Confidencial")
+        if k == 1:
+            body = box("t1", (64, 230, 1100, 120, 1), "Projeto Atlas", heading.replace("25.5pt", "39pt")) + own
+            slides.append(f'<section class="slide" data-slide-id="s1" data-layout="title">{body}</section>')
+            continue
+        own += box(f"own-n{k}", (1150, 684, 80, 24, 21), str(k))
+        if k == 6:
+            content = (box("card-a", (64, 200, 300, 200, 2), "Mercado") + box("card-b", (470, 214, 300, 200, 3), "Tese") +
+                       box("card-c", (900, 190, 316, 200, 4), "Riscos"))
+        else:
+            content = box(f"b{k}", (64, 150, 1152, 300, 2), f"Ponto principal da seção {k}")
+        slides.append(f'<section class="slide" data-slide-id="s{k}" data-layout="title-content">'
+                      f'{box(f"t{k}", (64, 48, 1152, 60, 1), f"Seção {k}", heading)}{content}{own}'
+                      f'<aside class="notes">Notas {k}</aside></section>')
+    path = OUTPUT / name
+    path.write_text(head + "\n" + "\n".join(slides) + "\n</body>\n</html>\n", encoding="utf-8")
+    return path
+
+
+def test_phase7_done_when(browser):
+    """
+    Phase 7 "done when", automated: a 15-slide deck (as Copilot writes it, with its own footer and page numbers on every
+    slide) is restructured (a slide moved, one deleted, one duplicated, one hidden, one added), a row of cards aligned,
+    spread and grouped, and rebranded from another deck (colours, fonts, slide master with logo, footer and numbers; the
+    deck's own footers and stale numbers removed), in well under a minute; saved, reopened, presented and printed.
+    """
+    editor = Editor(browser)
+    editor.open(fifteen_slide_deck("fifteen-slides.html"))
+    editor.close_dialog_if_open()
+    page = editor.page
+    started = time.time()
+    ids = lambda: page.evaluate("App.deck.getSlides().map((s) => s.getAttribute('data-slide-id'))")  # noqa: E731
+    root = lambda n: page.evaluate("n => getComputedStyle(App.deck.getDocument().documentElement).getPropertyValue(n).trim()", n)  # noqa: E731
+    check(len(ids()) == 15, f"15 slides: {ids()}")
+
+    # Restructure: the last slide moves up to second place, slide 7 goes, slide 2 is duplicated, slide 14 hidden, one added.
+    page.focus("#thumbnail-rail .thumb[data-index='14']")
+    for _ in range(13):
+        page.keyboard.press("Control+ArrowUp")
+    check(ids()[:3] == ["s1", "s15", "s2"], f"moved up: {ids()[:3]}")
+    page.focus(f"#thumbnail-rail .thumb[data-index='{ids().index('s7')}']")
+    page.keyboard.press("Delete")
+    page.focus(f"#thumbnail-rail .thumb[data-index='{ids().index('s2')}']")
+    page.keyboard.press("Control+d")
+    page.evaluate(f"App.deck.goTo({ids().index('s14')})")
+    page.click(".ribbon-tab[data-tab='slideshow']")
+    page.click("button[data-command='hideSlide']")
+    page.evaluate(f"App.deck.goTo({len(ids()) - 1})")
+    page.keyboard.press("Control+m")
+    order = ids()
+    titles = page.evaluate("""() => App.deck.getSlides().map((s) => { const t = s.querySelector(':scope > .el[data-type="text"]');
+        return t ? t.textContent : null; })""")
+    check(len(order) == 16 and "Seção 7" not in titles and titles[:4] == ["Projeto Atlas", "Seção 15", "Seção 2", "Seção 2"],
+          f"restructured: {titles}")
+
+    # Align: the three cards of slide 6, caught with a rubber band, lined up at the top, spread evenly, grouped.
+    page.evaluate(f"App.deck.goTo({order.index('s6')})")
+    drag(page, slide_to_screen(page, 30, 170), slide_to_screen(page, 1250, 430), steps=8)
+    check(sorted(page.evaluate("App.selection.selectedIds()")) == ["card-a", "card-b", "card-c"], "the three cards")
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.click("button[data-command='alignObjectsTop']")
+    page.click("button[data-command='distributeHorizontally']")
+    cards = [element_rect(page, name) for name in ["card-a", "card-b", "card-c"]]
+    gaps = [cards[1]["left"] - cards[0]["left"] - cards[0]["width"], cards[2]["left"] - cards[1]["left"] - cards[1]["width"]]
+    check(len({card["top"] for card in cards}) == 1 and abs(gaps[0] - gaps[1]) < 0.02, f"lined up and spread: {cards} {gaps}")
+    page.keyboard.press("Control+g")
+    check(page.evaluate("App.selection.count()") == 1, "grouped")
+
+    # Rebrand from the company's own deck: colours, fonts and its slide master; the deck's own footers and numbers go.
+    logo = base64.b64decode(page.evaluate(DRAW_PICTURE, ["logo", 240, 80])).hex()
+    brand = OUTPUT / "brand-deck.html"
+    brand.write_text(
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><style>:root { --color-primary: #00843D; --color-accent: #0B3D2E; '
+        '--font-heading: "Segoe UI", Arial, sans-serif; --font-body: "Segoe UI", Arial, sans-serif; }</style>'
+        '<style data-deck-master>.master-item[data-master="logo"] { background-image: url("data:image/png;base64,'
+        + base64.b64encode(bytes.fromhex(logo)).decode() + '"); }</style></head><body><section class="slide"></section>'
+        '<div class="master" data-numbers="n/total" data-skip-title="true">'
+        '<div class="master-item" data-master="logo" data-corner="top-right" style="left: 1112px; top: 24px; width: 120px; height: 40px;"></div>'
+        '<div class="master-item" data-master="footer" style="left: 48px; top: 684px; width: 560px; height: 20px;">Empresa Exemplo · Uso interno</div>'
+        '<div class="master-item" data-master="number" style="left: 1132px; top: 684px; width: 100px; height: 20px;"></div>'
+        '</div></body></html>', encoding="utf-8")
+    page.click(".ribbon-tab[data-tab='design']")
+    with page.expect_file_chooser() as chooser:
+        page.click("button[data-command='copyTheme']")
+    chooser.value.set_files([str(brand)])
+    wait_until(page, "document.querySelector('.theme-copy-note') && document.querySelector('.theme-copy-note').textContent !== ''")
+    page.click("dialog[open] button:has-text('Apply')")
+    wait_until(page, "document.querySelector('dialog[open] .master-own')")
+    listed = page.inner_text("dialog[open] .master-own")
+    check("Slide numbers on slides 2–15" in listed and "“Projeto Atlas · Confidencial” on slides 2–15" in listed, f"listed: {listed}")
+    editor.click_dialog_button("Remove them")
+    elapsed = time.time() - started
+
+    own_left = page.evaluate("""() => Array.from(App.deck.getDocument().querySelectorAll('section.slide > .el[data-type="text"]'))
+        .filter((e) => /^(Projeto Atlas · Confidencial|\\d+)$/.test(e.textContent.trim())).length""")
+    check(own_left == 1, f"only the title slide keeps its own footer (the master skips it): {own_left}")
+    check(root("--color-accent") == "#0B3D2E" and root("--font-heading") == '"Segoe UI", Arial, sans-serif', "the company's theme")
+    shown = page.evaluate(MASTER_ON, ids()[1])
+    check(shown == {"logo": "", "footer": "Empresa Exemplo · Uso interno", "number": "2 / 16"}, f"the company's master: {shown}")
+    check(page.evaluate(MASTER_ON, "s1") is None, "not on the title slide")
+    check(elapsed < 60, f"restructured, aligned and rebranded in {elapsed:.1f} s")
+    page.evaluate("App.deck.goTo(1)")
+    page.screenshot(path=str(OUTPUT / "92-phase7-done-when.png"))
+
+    # Saved and reopened: as it was. Presented: the hidden slide skipped. Printed: one page per shown slide.
+    saved = editor.save_as_download("phase7-done-when.html")
+    final = ids()
+    editor.open(saved)
+    check(page.inner_text("#status-save") == "Saved" and ids() == final and root("--color-accent") == "#0B3D2E", "reopened as it was")
+    player, errors = play_saved_deck(browser, saved)
+    check(player.evaluate("document.querySelectorAll('section.slide:not([data-hidden=\"true\"])').length") == 15, "15 slides shown")
+    player.keyboard.press("ArrowRight")
+    footer = player.evaluate("""() => { const f = document.querySelector('.deck-player-current .master-layer [data-master="footer"]');
+        return f && f.textContent; }""")
+    check(footer == "Empresa Exemplo · Uso interno", f"presented with the company's footer: {footer}")
+    player.emulate_media(media="print")
+    pdf = OUTPUT / "phase7-done-when.pdf"
+    player.pdf(path=str(pdf), prefer_css_page_size=True, print_background=True)
+    pages = len(re.findall(rb"/Type\s*/Page[^s]", pdf.read_bytes()))
+    check(pages == 15, f"one page per shown slide: {pages}")
+    check(errors == [] and editor.errors == [], f"no errors: {errors} {editor.errors}")
+    player.context.close()
+    editor.close()
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -5420,6 +5556,7 @@ TESTS = [
     test_slide_master,
     test_slide_master_own_footers,
     test_theme_editor,
+    test_phase7_done_when,
 ]
 
 

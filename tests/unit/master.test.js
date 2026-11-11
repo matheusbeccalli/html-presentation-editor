@@ -167,3 +167,19 @@ test('master: the question names the slides: slide 3, slides 2–6, slides 2, 4�
     const own = App.master.findOwn(parseDoc(OWN_FOOTERS_DECK), NUMBERS_ONLY);
     assertEqual(own[0].slides, [2, 3, 4]);
 });
+
+test('master: after slides were moved, a page number in the pattern\'s place is taken even if it now says another number', () => {
+    const doc = parseDoc(OWN_FOOTERS_DECK);
+    // Slide 4 moved before slide 2: its own box still says "4 / 4", in the same place as the others.
+    doc.body.insertBefore(doc.querySelector('[data-slide-id="s4"]'), doc.querySelector('[data-slide-id="s2"]'));
+    // Now every box shows a stale number (4 on slide 2, 2 on slide 3, 3 on slide 4): still the deck's page numbers.
+    assertEqual(foundIds(doc), ['n4,n2,n3']);
+    // A number elsewhere stays (only the pattern's place counts).
+    doc.querySelector('[data-slide-id="s3"]').insertAdjacentHTML('beforeend', textBox('other', [600, 690, 30, 24], '7'));
+    assertEqual(foundIds(doc), ['n4,n2,n3']);
+});
+
+test('master: the same number in the same place on every slide (a "1" of a step, a year) is not page numbering', () => {
+    const doc = parseDoc(OWN_FOOTERS_DECK.replace(/>(\d)<\/p>|>(Página 3 de 4|4 \/ 4)<\/p>/g, '>1</p>'));
+    assertEqual(foundIds(doc), []);
+});

@@ -12832,10 +12832,12 @@ App.template.newDeckHtml = function newDeckHtml() {
     // remove them. Only small text boxes on the slide itself (not in a group,
     // not locked), on the slides the master shows on, for what the master is
     // going to show:
-    //   number: its text is the slide's number ("3", "3 / 15", "Página 3 de 15"),
-    //           counting all slides or only the shown ones; by the top or bottom
-    //           edge; a pattern: about the same place on at least two slides and
-    //           half of them, one per slide (a step badge "3" on slide 3 stays);
+    //   number: just a number ("3", "3 / 15", "Página 3 de 15") by the top or
+    //           bottom edge, in a pattern: about the same place on at least two
+    //           slides and half of them, one per slide, mostly different numbers
+    //           (a step badge "3" mid-slide or away from the others stays, a
+    //           year repeated on every slide too). The number need not be the
+    //           slide's own: after slides were moved, Copilot's typed ones are stale;
     //   footer: in the bottom strip, the same text on at least two slides and
     //           at least half of them;
     //   label:  the label's text, in any case ("CONFIDENCIAL").
@@ -12867,8 +12869,9 @@ App.template.newDeckHtml = function newDeckHtml() {
                 bySlide.set(box.slide, box);
             }
         });
-        const chosen = Array.from(bySlide.values());
-        return isPattern(chosen.length) ? chosen : [];
+        const chosen = Array.from(bySlide.values()).sort((a, b) => a.slide - b.slide);
+        const distinct = new Set(chosen.map((box) => parseInt(NUMBER_RE.exec(box.text)[1], 10))).size;
+        return isPattern(chosen.length) && distinct > chosen.length / 2 ? chosen : [];
     }
 
     /* "slide 3", "slides 2–6", "slides 2, 4–5" (numbers from 1, in order). */
@@ -12889,15 +12892,9 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* [{ kind: 'number' | 'footer' | 'label', text, elements, slides }] in that order; [] when there is nothing. */
     App.master.findOwn = function findOwn(doc, settings) {
         const slides = Array.from(doc.querySelectorAll('section.slide'));
-        let shownIndex = 0;
-        const boxes = [];   // { element, text, rect, numbers: [the slide's numbers] }
+        const boxes = [];   // { element, text, rect, slide (its position, from 1) }
         let considered = 0;
         slides.forEach((slide, index) => {
-            const hidden = slide.getAttribute('data-hidden') === 'true';
-            const numbers = [index + 1].concat(hidden ? [] : [shownIndex + 1]);
-            if (!hidden) {
-                shownIndex += 1;
-            }
             if (settings.skipTitle && App.master.isTitleSlide(slide, index)) {
                 return;
             }
@@ -12910,7 +12907,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 const rect = App.transform.readRect(element);
                 const text = plainText(element);
                 if (text && rect.height <= OWN_MAX_HEIGHT) {
-                    boxes.push({ element: element, text: text, rect: rect, numbers: numbers, slide: index + 1 });
+                    boxes.push({ element: element, text: text, rect: rect, slide: index + 1 });
                 }
             });
         });
@@ -12928,7 +12925,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             take('number', '', numberPattern(boxes.filter((box) => {
                 const match = NUMBER_RE.exec(box.text);
                 const byEdge = box.rect.top >= BOTTOM_STRIP || box.rect.top + box.rect.height <= TOP_STRIP;
-                return byEdge && match && box.numbers.indexOf(parseInt(match[1], 10)) !== -1;
+                return byEdge && match && parseInt(match[1], 10) <= 2 * slides.length;
             }), isPattern));
         }
         if (settings.footer) {

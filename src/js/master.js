@@ -27,7 +27,10 @@
  * data-id, so selecting, snapping, Ctrl+A, Find and the stacking order never
  * see them; thumbnails, the saved deck and its print do.
  *
- * Tested in tests/unit/master.test.js (no page state) and e2e test_slide_master.
+ * A deck made elsewhere may type its own footer and numbers on each slide:
+ * Apply then lists them (findOwn) and offers to remove them in the same step.
+ *
+ * Tested in tests/unit/master.test.js (no page state) and e2e test_slide_master(_own_footers).
  *
  * Talks to: history.js ('deck' step), deck.js, images.js (the logo file), dialogs.js, events.
  */
@@ -259,6 +262,89 @@
     };
 
     // ---------------------------------------------------------------
+    // The deck's own footers and numbers
+    // ---------------------------------------------------------------
+    //
+    // A deck made elsewhere (Copilot) often types its footer and page number
+    // as ordinary text boxes on each slide; with the master showing them too
+    // they would show twice. findOwn finds them so the dialog can offer to
+    // remove them. Only small text boxes on the slide itself (not in a group,
+    // not locked), on the slides the master shows on, for what the master is
+    // going to show:
+    //   number: its text is the slide's number ("3", "3 / 15", "Página 3 de 15"),
+    //           counting all slides or only the shown ones;
+    //   footer: in the bottom strip, the same text on at least two slides and
+    //           at least half of them;
+    //   label:  the label's text, in any case ("CONFIDENCIAL").
+
+    const OWN_MAX_HEIGHT = 60;    // px: a footer line, not a text block
+    const BOTTOM_STRIP = 620;     // px from the top: where footers sit
+    const NUMBER_RE = /^(?:(?:p[áa]g(?:ina)?|page|slide)\.?\s*)?(\d+)(?:\s*(?:\/|de|of)\s*\d+)?$/i;
+
+    const plainText = (element) => element.textContent.replace(/\s+/g, ' ').trim();
+
+    /* [{ kind: 'number' | 'footer' | 'label', text, elements }] in that order; [] when there is nothing. */
+    App.master.findOwn = function findOwn(doc, settings) {
+        const slides = Array.from(doc.querySelectorAll('section.slide'));
+        let shownIndex = 0;
+        const boxes = [];   // { element, text, rect, numbers: [the slide's numbers] }
+        let considered = 0;
+        slides.forEach((slide, index) => {
+            const hidden = slide.getAttribute('data-hidden') === 'true';
+            const numbers = [index + 1].concat(hidden ? [] : [shownIndex + 1]);
+            if (!hidden) {
+                shownIndex += 1;
+            }
+            if (settings.skipTitle && App.master.isTitleSlide(slide, index)) {
+                return;
+            }
+            considered += 1;
+            Array.from(slide.children).forEach((element) => {
+                if (!element.classList.contains('el') || element.getAttribute('data-type') !== 'text' ||
+                    element.getAttribute('data-locked') === 'true') {
+                    return;
+                }
+                const rect = App.transform.readRect(element);
+                const text = plainText(element);
+                if (text && rect.height <= OWN_MAX_HEIGHT) {
+                    boxes.push({ element: element, text: text, rect: rect, numbers: numbers });
+                }
+            });
+        });
+        const taken = new Set();
+        const found = [];
+        const take = (kind, text, list) => {
+            if (list.length) {
+                list.forEach((box) => taken.add(box.element));
+                found.push({ kind: kind, text: text, elements: list.map((box) => box.element) });
+            }
+        };
+        if (settings.numbers === 'n' || settings.numbers === 'n/total') {
+            take('number', '', boxes.filter((box) => {
+                const match = NUMBER_RE.exec(box.text);
+                return match && box.numbers.indexOf(parseInt(match[1], 10)) !== -1;
+            }));
+        }
+        if (settings.footer) {
+            const byText = new Map();
+            boxes.filter((box) => !taken.has(box.element) && box.rect.top >= BOTTOM_STRIP).forEach((box) => {
+                byText.set(box.text, (byText.get(box.text) || []).concat([box]));
+            });
+            byText.forEach((list, text) => {
+                if (list.length >= 2 && list.length >= considered / 2) {
+                    take('footer', text, list);
+                }
+            });
+        }
+        if (settings.label) {
+            const wanted = settings.label.toLowerCase();
+            const list = boxes.filter((box) => !taken.has(box.element) && box.text.toLowerCase() === wanted);
+            take('label', list.length ? list[0].text : '', list);
+        }
+        return found;
+    };
+
+    // ---------------------------------------------------------------
     // In the editor
     // ---------------------------------------------------------------
 
@@ -360,9 +446,37 @@
         if (same(settings, current) || (same(App.master.layout(settings), []) && same(App.master.layout(current), []))) {
             return;
         }
+        // The deck's own footers and numbers would show twice: offer to remove them, with the master as one step.
+        const own = App.master.findOwn(doc, settings);
+        let removeOwn = false;
+        if (own.length) {
+            const answer = await App.dialogs.show({ title: 'Already on the slides', body: ownList(own), buttons: [
+                { label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' },
+                { label: 'Remove them', value: 'remove', primary: true }] });
+            if (!answer) {
+                return;
+            }
+            removeOwn = answer === 'remove';
+        }
         App.history.change('Slide master', 'deck', () => {
+            if (removeOwn) {
+                own.forEach((group) => group.elements.forEach((element) => element.remove()));
+            }
             App.master.write(doc, settings);
             App.master.sync(doc);
         });
     };
+
+    /* What findOwn found, for the question: "Slide numbers on 14 slides", "“Projeto Atlas” on 14 slides". */
+    function ownList(own) {
+        const el = App.util.el;
+        const slidesOf = (group) => new Set(group.elements.map((element) => element.closest('section.slide'))).size;
+        const plural = (n) => n + (n === 1 ? ' slide' : ' slides');
+        return el('div', { class: 'master-own' }, [
+            el('p', {}, ['This deck has its own text boxes for these. With the slide master they would show twice:']),
+            el('ul', {}, own.map((group) => el('li', {}, [
+                (group.kind === 'number' ? 'Slide numbers' : '“' + group.text + '”') + ' on ' + plural(slidesOf(group))]))),
+            el('p', { class: 'panel-hint' }, ['Remove them: the slide master takes their place (one Ctrl+Z undoes both).']),
+        ]);
+    }
 })();

@@ -4188,6 +4188,64 @@ def test_slide_master(browser):
     player.context.close()
 
 
+def own_footers_deck(name):
+    """The contract deck with its own footer and page number typed as text boxes on every slide, as Copilot does."""
+    text = CONTRACT.read_text(encoding="utf-8")
+    parts = text.split("</section>")
+    for k in range(len(parts) - 1):
+        boxes = (f'<div class="el" data-type="text" data-id="own-f{k + 1}" style="left:48px; top:684px; width:400px; height:24px; '
+                 f'z-index:20"><p data-list="none" data-level="1">Atlas · material confidencial</p></div>'
+                 f'<div class="el" data-type="text" data-id="own-n{k + 1}" style="left:1150px; top:684px; width:80px; height:24px; '
+                 f'z-index:21"><p data-list="none" data-level="1">{k + 1}</p></div>')
+        at = parts[k].rfind('<aside class="notes"')
+        parts[k] = parts[k][:at] + boxes + parts[k][at:] if at != -1 else parts[k] + boxes
+    path = OUTPUT / name
+    path.write_text("</section>".join(parts), encoding="utf-8")
+    return path
+
+
+def test_slide_master_own_footers(browser):
+    """Phase 7: a deck that has its own footer and page numbers as text boxes: Apply in Slide Master lists them and
+    offers to remove them (one undo step with the master), to keep them, or to go back; the title slide's own stay."""
+    editor = Editor(browser)
+    editor.open(own_footers_deck("own-footers.html"))
+    editor.close_dialog_if_open()
+    page = editor.page
+    own = lambda: page.evaluate("App.deck.getDocument().querySelectorAll('[data-id^=\"own-\"]').length")  # noqa: E731
+    masters = lambda: page.evaluate("App.deck.getDocument().querySelectorAll('.master').length")  # noqa: E731
+
+    def fill_master():
+        page.click("button[data-command='slideMaster']")
+        page.fill("#master-footer", "Projeto Atlas")
+        page.select_option("#master-numbers", "n")
+        page.click("dialog[open] button:has-text('Apply')")
+        wait_until(page, "document.querySelector('dialog[open] .master-own')")
+
+    page.click(".ribbon-tab[data-tab='view']")
+    check(own() == 12, f"the deck's own boxes: {own()}")
+    fill_master()
+    listed = page.inner_text("dialog[open] .master-own")
+    check("Slide numbers on 5 slides" in listed and "“Atlas · material confidencial” on 5 slides" in listed, f"listed: {listed}")
+    page.screenshot(path=str(OUTPUT / "90-slide-master-own-footers.png"))
+    editor.click_dialog_button("Remove them")
+    check(own() == 2 and masters() == 1, f"removed (the title slide's stay), the master on: {own()} {masters()}")
+    check(page.evaluate(MASTER_ON, "s2")["number"] == "2", "the master's number instead")
+    check(page.evaluate("App.history.undoLabel()") == "Slide master", "one undo step")
+    page.keyboard.press("Control+z")
+    check(own() == 12 and masters() == 0, f"undo: both back as before: {own()} {masters()}")
+
+    # Keep them: the master goes on, the boxes stay.
+    fill_master()
+    editor.click_dialog_button("Keep them")
+    check(own() == 12 and masters() == 1, f"kept: {own()} {masters()}")
+    page.keyboard.press("Control+z")
+
+    # Cancel: nothing happens.
+    fill_master()
+    editor.click_dialog_button("Cancel")
+    check(own() == 12 and masters() == 0, f"cancelled: {own()} {masters()}")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -5283,6 +5341,7 @@ TESTS = [
     test_rotate,
     test_lock,
     test_slide_master,
+    test_slide_master_own_footers,
 ]
 
 

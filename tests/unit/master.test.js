@@ -102,3 +102,43 @@ test('import: the copies of the master on the slides are dropped (sync puts them
     assertEqual(out.querySelectorAll('style[data-deck-master]').length, 1);
     assertEqual(App.master.read(out), ALL_SET, 'the master itself is kept');
 });
+
+// ---- A deck's own footers and numbers (they would show twice once the master has them) ----
+
+const textBox = (id, rect, text) => '<div class="el" data-type="text" data-id="' + id + '" style="left: ' + rect[0] + 'px; top: ' + rect[1] +
+    'px; width: ' + rect[2] + 'px; height: ' + rect[3] + 'px; z-index: 5;"><p>' + text + '</p></div>';
+const OWN_FOOTERS_DECK = '<html><head></head><body>' +
+    '<section class="slide" data-slide-id="s1" data-layout="title">' + textBox('f1', [48, 684, 400, 24], 'Projeto Atlas') + textBox('n1', [1150, 684, 80, 24], '1') + '</section>' +
+    '<section class="slide" data-slide-id="s2">' + textBox('t2', [48, 40, 800, 60], 'Resumo') + textBox('f2', [48, 684, 400, 24], 'Projeto Atlas') +
+        textBox('n2', [1150, 684, 80, 24], '2') + textBox('src2', [48, 650, 600, 24], 'Fonte: empresa') + '</section>' +
+    '<section class="slide" data-slide-id="s3">' + textBox('f3', [48, 684, 400, 24], 'Projeto  Atlas') + textBox('n3', [1100, 684, 130, 24], 'Página 3 de 4') +
+        textBox('c3', [1000, 20, 200, 24], 'CONFIDENCIAL') + '</section>' +
+    '<section class="slide" data-slide-id="s4">' + textBox('f4', [48, 684, 400, 24], 'Projeto Atlas') + textBox('n4', [1150, 684, 80, 24], '4 / 4') +
+        textBox('kpi4', [300, 600, 200, 100], '2') + '</section>' +
+    '</body></html>';
+
+test('master: the deck\'s own footers, slide numbers and label are found, so they do not show twice', () => {
+    const doc = parseDoc(OWN_FOOTERS_DECK);
+    const ids = (found) => found.map((group) => group.kind + (group.text ? ' "' + group.text + '"' : '') + ': ' +
+        group.elements.map((element) => element.getAttribute('data-id')).join(','));
+    const settings = { logo: null, footer: 'Projeto Atlas · Comitê', label: 'Confidencial', numbers: 'n/total', skipTitle: true };
+    // Not the cover's own (the master skips the title slide), not a one-off source line, not a big "2".
+    assertEqual(ids(App.master.findOwn(doc, settings)),
+        ['number: n2,n3,n4', 'footer "Projeto Atlas": f2,f3,f4', 'label "CONFIDENCIAL": c3']);
+    assertEqual(ids(App.master.findOwn(doc, Object.assign({}, settings, { skipTitle: false, label: '' })))[0], 'number: n1,n2,n3,n4');
+    assertEqual(App.master.findOwn(doc, App.master.EMPTY), [], 'nothing asked for, nothing found');
+    assertEqual(ids(App.master.findOwn(doc, Object.assign({}, App.master.EMPTY, { footer: 'F' }))), ['footer "Projeto Atlas": f2,f3,f4'],
+        'only what the master is going to show');
+});
+
+test('master: locked boxes and parts of a group are left alone', () => {
+    const doc = parseDoc(OWN_FOOTERS_DECK);
+    doc.querySelector('[data-id="n2"]').setAttribute('data-locked', 'true');
+    const group = doc.createElement('div');
+    group.className = 'el';
+    group.setAttribute('data-type', 'group');
+    doc.querySelector('[data-slide-id="s3"]').appendChild(group);
+    group.appendChild(doc.querySelector('[data-id="n3"]'));
+    const found = App.master.findOwn(doc, { logo: null, footer: '', label: '', numbers: 'n', skipTitle: true });
+    assertEqual(found.map((g) => g.elements.map((element) => element.getAttribute('data-id')).join(',')), ['n4']);
+});

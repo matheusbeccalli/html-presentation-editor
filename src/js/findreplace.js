@@ -157,6 +157,7 @@
             note = null;
         }
         nodes.root.hidden = false;
+        markFinding(true);
         nodes.find.focus();
         nodes.find.select();
         scheduleRefresh();
@@ -167,6 +168,7 @@
             return;
         }
         nodes.root.hidden = true;
+        markFinding(false);
         paint([]);
         App.text.refocus();   // back to typing where the last match was selected
     };
@@ -307,6 +309,18 @@
     // ---------------------------------------------------------------
     // Highlights and the count
     // ---------------------------------------------------------------
+
+    /*
+     * While the panel is open the deck's html carries data-editor-finding, so its text selection (the match
+     * just found) is painted in the same orange as the current match (deck.js VIEW_CSS): with the keyboard
+     * in the panel the browser would otherwise grey it over the orange. Stripped on save like every data-editor-*.
+     */
+    function markFinding(on) {
+        const doc = App.deck.getDocument();
+        if (doc) {
+            doc.documentElement.toggleAttribute('data-editor-finding', on);
+        }
+    }
 
     /* Paint `matches` in the deck (the selected one in another colour); [] clears them. */
     function paint(matches) {

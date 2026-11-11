@@ -11400,6 +11400,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Find & replace paints its matches with the CSS Highlight API (findreplace.js), as the browser's own find does.
         '::highlight(editor-find) { background-color: #ffe14d; }',
         '::highlight(editor-find-current) { background-color: #ff9632; }',
+        // The selected match is also the text selection, which the browser greys over the orange while the keyboard
+        // is in the Find panel; while the panel is open the selection takes the same orange.
+        'html[data-editor-finding] ::selection { background-color: #ff9632; }',
     ].join('\n');
 
     App.deck.init = function init() {
@@ -22365,6 +22368,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             note = null;
         }
         nodes.root.hidden = false;
+        markFinding(true);
         nodes.find.focus();
         nodes.find.select();
         scheduleRefresh();
@@ -22375,6 +22379,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         nodes.root.hidden = true;
+        markFinding(false);
         paint([]);
         App.text.refocus();   // back to typing where the last match was selected
     };
@@ -22515,6 +22520,18 @@ App.template.newDeckHtml = function newDeckHtml() {
     // ---------------------------------------------------------------
     // Highlights and the count
     // ---------------------------------------------------------------
+
+    /*
+     * While the panel is open the deck's html carries data-editor-finding, so its text selection (the match
+     * just found) is painted in the same orange as the current match (deck.js VIEW_CSS): with the keyboard
+     * in the panel the browser would otherwise grey it over the orange. Stripped on save like every data-editor-*.
+     */
+    function markFinding(on) {
+        const doc = App.deck.getDocument();
+        if (doc) {
+            doc.documentElement.toggleAttribute('data-editor-finding', on);
+        }
+    }
 
     /* Paint `matches` in the deck (the selected one in another colour); [] clears them. */
     function paint(matches) {

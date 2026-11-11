@@ -45,6 +45,9 @@
         // Find & replace paints its matches with the CSS Highlight API (findreplace.js), as the browser's own find does.
         '::highlight(editor-find) { background-color: #ffe14d; }',
         '::highlight(editor-find-current) { background-color: #ff9632; }',
+        // The selected match is also the text selection, which the browser greys over the orange while the keyboard
+        // is in the Find panel; while the panel is open the selection takes the same orange.
+        'html[data-editor-finding] ::selection { background-color: #ff9632; }',
     ].join('\n');
 
     App.deck.init = function init() {

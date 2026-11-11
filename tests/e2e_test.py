@@ -1184,6 +1184,41 @@ COUNT_IN_DECK = """(word) => Array.from(App.deck.getDocument().querySelectorAll(
     .reduce((sum, el) => sum + (el.textContent.match(new RegExp(word, 'gi')) || []).length, 0)"""
 
 
+def common_colour(page, rect):
+    """The commonest colour [r, g, b] in that part of the window (screen px), counted from a real screenshot."""
+    clip = {"x": rect["left"], "y": rect["top"], "width": max(1, rect["right"] - rect["left"]),
+            "height": max(1, rect["bottom"] - rect["top"])}
+    png = base64.b64encode(page.screenshot(clip=clip)).decode()
+    return page.evaluate("""(png) => new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = image.width; canvas.height = image.height;
+            const context = canvas.getContext('2d');
+            context.drawImage(image, 0, 0);
+            const data = context.getImageData(0, 0, image.width, image.height).data;
+            const counts = {};
+            for (let i = 0; i < data.length; i += 4) {
+                const key = data[i] + ',' + data[i + 1] + ',' + data[i + 2];
+                counts[key] = (counts[key] || 0) + 1;
+            }
+            resolve(Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0].split(',').map(Number));
+        };
+        image.src = 'data:image/png;base64,' + png;
+    })""", png)
+
+
+# Where the deck's selected text shows on screen (window px): { left, top, right, bottom }.
+SELECTION_ON_SCREEN = """() => {
+    const frame = document.getElementById('deck-frame');
+    const box = frame.getBoundingClientRect();
+    const zoom = box.width / frame.offsetWidth;
+    const r = App.deck.getDocument().getSelection().getRangeAt(0).getBoundingClientRect();
+    return { left: box.left + r.left * zoom + 1, top: box.top + r.top * zoom + 1,
+             right: box.left + r.right * zoom - 1, bottom: box.top + r.bottom * zoom - 1 };
+}"""
+
+
 def test_find_and_replace(browser):
     """Home > Editing: Find (Ctrl+F) and Replace (Ctrl+H) across all slides, every match highlighted."""
     editor = Editor(browser)
@@ -1208,6 +1243,11 @@ def test_find_and_replace(browser):
     check(found["slide"] == 1 and found["editing"] == "e7" and found["selected"] == "margem" and found["current"] == 1,
           f"Enter goes to the first match (slide 2), selected in its box: {found}")
     check(found["status"] == f"1 of {total}" and found["focus"] == "find-text", f"the panel keeps the keyboard: {found}")
+    # The selected match shows orange (#ff9632), not covered by the browser's grey for a selection it is not typing in.
+    shown = common_colour(page, page.evaluate(SELECTION_ON_SCREEN))
+    check(abs(shown[0] - 255) <= 12 and abs(shown[1] - 150) <= 12 and abs(shown[2] - 50) <= 12,
+          f"the selected match shows orange on screen: {shown}")
+    page.screenshot(path=str(OUTPUT / "find-current-orange.png"))
     page.keyboard.press("Enter")
     check(state()["status"] == f"2 of {total}", f"Enter again: the next match: {state()}")
     page.keyboard.press("Shift+Enter")

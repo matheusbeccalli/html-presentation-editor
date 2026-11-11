@@ -384,6 +384,9 @@
         // Arrange > Group (groups.js).
         App.commands.define('group', { label: 'Group', isEnabled: () => App.groups.canGroup(), run: () => App.groups.group() });
         App.commands.define('ungroup', { label: 'Ungroup', isEnabled: () => App.groups.canUngroup(), run: () => App.groups.ungroup() });
+        App.commands.define('editTheme', { label: 'Edit Theme', isEnabled: () => App.theme.canEdit(), run: () => App.theme.open() });
+        App.commands.define('copyTheme', { label: 'Copy Theme from Deck…', isEnabled: () => App.theme.canEdit(),
+            run: () => App.theme.open({ copy: true }) });
         App.commands.define('slideMaster', { label: 'Slide Master', isEnabled: () => App.master.canEdit(), run: () => App.master.open() });
         App.commands.define('headerFooter', { label: 'Header & Footer', isEnabled: () => App.master.canEdit(), run: () => App.master.open() });
         App.commands.define('lock', { label: 'Lock', isEnabled: () => App.elements.canLock(),

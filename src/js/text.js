@@ -993,6 +993,11 @@
         return names;
     }
 
+    /* Forget what themeValues remembered of `doc` (theme.js: after a theme change or its undo). */
+    App.text.forgetTheme = function forgetTheme(doc) {
+        themeCache.delete(doc);
+    };
+
     /* The deck's theme colours, e.g. ['--color-primary', '--color-accent', …] (the colour pickers' first row). */
     App.text.themeColorNames = function themeColorNames(doc) {
         return rootVariables(doc, /^--color-[a-z0-9-]+$/);

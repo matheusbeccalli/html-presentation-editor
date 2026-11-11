@@ -43,6 +43,7 @@ App.start = function start() {
 
     App.commands.init();   // first: the ribbon and menus read command labels
     App.master.init();     // early: the slide master's copies are right before thumbnails / autosave read the deck
+    App.theme.init();
     App.ui.init();
     App.ribbon.init();
     App.textControls.init();

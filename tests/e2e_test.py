@@ -4246,6 +4246,83 @@ def test_slide_master_own_footers(browser):
     check(own() == 12 and masters() == 0, f"cancelled: {own()} {masters()}")
 
 
+def test_theme_editor(browser):
+    """Phase 7: Design > Edit Theme: the deck's colours and fonts beside the slide, shown at once (never saved while
+    previewing); Cancel leaves it as it was; Apply is one undo step; Copy Theme from Deck… takes another deck's colours,
+    fonts and slide master (only safe values); saved and reopened as it was, the file unchanged."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    root = lambda name: page.evaluate("n => getComputedStyle(App.deck.getDocument().documentElement).getPropertyValue(n).trim()", name)  # noqa: E731
+    title = lambda prop: page.evaluate("p => getComputedStyle(App.deck.getDocument().querySelector('[data-id=\"e2\"]'))[p]", prop)  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    saved_text = lambda: page.evaluate("App.serialize.toHtml(App.deck.getDocument(), { playerJs: '', playerCss: '' })")  # noqa: E731
+    # Slide 1: the title e2 is in the accent colour (#1F2A44) and the heading font.
+
+    page.click(".ribbon-tab[data-tab='design']")
+    page.click("button[data-command='editTheme']")
+    check(page.is_visible("dialog.dialog-side #theme-color-accent-hex"), "the theme panel beside the slide")
+    check(page.input_value("#theme-color-accent-hex") == "#1F2A44" and page.input_value("#theme-font-heading") == "Calibri, Arial, sans-serif",
+          f"the deck's values: {page.input_value('#theme-color-accent-hex')} {page.input_value('#theme-font-heading')}")
+    page.fill("#theme-color-accent-hex", "#0070C0")
+    page.press("#theme-color-accent-hex", "Enter")
+    page.select_option("#theme-font-heading", label="Georgia")
+    check(title("color") == "rgb(0, 112, 192)" and "Georgia" in title("fontFamily"), f"shown at once: {title('color')} {title('fontFamily')}")
+    check("#0070C0" not in saved_text() and "Georgia" not in saved_text(), "the preview is never saved")
+    page.screenshot(path=str(OUTPUT / "91-theme-editor.png"))
+    editor.click_dialog_button("Cancel")
+    check(title("color") == "rgb(31, 42, 68)" and "Georgia" not in title("fontFamily") and label() is None, "Cancel: as it was, no step")
+
+    # Apply: one undo step; Ctrl+Z / Ctrl+Y.
+    page.click("button[data-command='editTheme']")
+    page.fill("#theme-color-accent-hex", "#0070C0")
+    page.press("#theme-color-accent-hex", "Enter")
+    page.select_option("#theme-font-heading", label="Georgia")
+    editor.click_dialog_button("Apply")
+    check(label() == "Theme" and root("--color-accent") == "#0070C0" and root("--font-heading") == "Georgia, serif",
+          f"applied: {label()} {root('--color-accent')} {root('--font-heading')}")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('style[data-deck-theme]').length") == 1, "one theme stylesheet")
+    page.keyboard.press("Control+z")
+    check(root("--color-accent") == "#1F2A44" and title("color") == "rgb(31, 42, 68)", "undo: the old theme")
+    page.keyboard.press("Control+y")
+    check(title("color") == "rgb(0, 112, 192)", "redo")
+    state = page.evaluate("App.history.stateId()")
+    page.click("button[data-command='editTheme']")
+    editor.click_dialog_button("Apply")
+    check(page.evaluate("App.history.stateId()") == state, "Apply with no change: no new step")
+
+    # Copy Theme from Deck…: another deck's colours, fonts and slide master; its unsafe values are left out.
+    other = OUTPUT / "other-theme.html"
+    other.write_text('<!DOCTYPE html><html><head><meta charset="utf-8"><style>:root { --color-primary: #00843D; '
+                     '--color-accent: #123456; --font-heading: Georgia, serif; --font-body: "Segoe UI", Arial, sans-serif; '
+                     '--color-text: red; } body { --color-bg: url(http://evil/x.png); }</style></head><body>'
+                     '<section class="slide"></section><div class="master" data-numbers="n" data-skip-title="true">'
+                     '<div class="master-item" data-master="footer" style="left: 48px; top: 684px; width: 560px; height: 20px;">'
+                     'Empresa · Uso interno</div><div class="master-item" data-master="number" style="left: 1132px; top: 684px; '
+                     'width: 100px; height: 20px;"></div></div></body></html>', encoding="utf-8")
+    page.click("button[data-command='editTheme']")
+    page.set_input_files("#theme-copy-file", str(other))
+    wait_until(page, "document.querySelector('.theme-copy-note') && document.querySelector('.theme-copy-note').textContent !== ''")
+    check("slide master" in page.inner_text(".theme-copy-note"), page.inner_text(".theme-copy-note"))
+    check(page.input_value("#theme-color-accent-hex") == "#123456", "the other deck's accent")
+    editor.click_dialog_button("Apply")
+    check(root("--color-accent") == "#123456" and root("--font-body") == '"Segoe UI", Arial, sans-serif' and root("--color-text") == "red",
+          f"copied: {root('--color-accent')} {root('--font-body')}")
+    check(page.evaluate(MASTER_ON, "s2") == {"footer": "Empresa · Uso interno", "number": "2"}, f"its master too: {page.evaluate(MASTER_ON, 's2')}")
+    check("evil" not in saved_text(), "nothing unsafe came along")
+    page.keyboard.press("Control+z")
+    check(root("--color-accent") == "#0070C0" and page.evaluate(MASTER_ON, "s2") is None, "one undo step takes both back")
+    page.keyboard.press("Control+y")
+
+    # Saved, reopened: the same theme; saved again: the same file.
+    saved = editor.save_as_download("themed.html")
+    first = saved.read_text(encoding="utf-8")
+    editor.open(saved)
+    check(page.inner_text("#status-save") == "Saved" and root("--color-accent") == "#123456", "reopened as it was")
+    again = editor.save_as_download("themed-again.html")
+    check(again.read_text(encoding="utf-8") == first, "saved again: the same file")
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -5342,6 +5419,7 @@ TESTS = [
     test_lock,
     test_slide_master,
     test_slide_master_own_footers,
+    test_theme_editor,
 ]
 
 

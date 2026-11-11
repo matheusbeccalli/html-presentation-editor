@@ -492,24 +492,36 @@
             return;
         }
         // The deck's own footers and numbers would show twice: offer to remove them, with the master as one step.
-        const own = App.master.findOwn(doc, settings);
-        let removeOwn = false;
-        if (own.length) {
-            const answer = await App.dialogs.show({ title: 'Already on the slides', body: ownList(own), buttons: [
-                { label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' },
-                { label: 'Remove them', value: 'remove', primary: true }] });
-            if (!answer) {
-                return;
-            }
-            removeOwn = answer === 'remove';
+        const own = await App.master.askOwn(doc, settings);
+        if (!own) {
+            return;
         }
-        App.history.change('Slide master', 'deck', () => {
-            if (removeOwn) {
-                own.forEach((group) => group.elements.forEach((element) => element.remove()));
-            }
-            App.master.write(doc, settings);
-            App.master.sync(doc);
-        });
+        App.history.change('Slide master', 'deck', () => App.master.applyInStep(doc, settings, own));
+    };
+
+    /*
+     * Before `settings` goes on the slides: the deck's own footers / numbers it
+     * would double (findOwn), and the user's answer. Resolves { groups, remove }
+     * ({ groups: [] } when there are none), or null for Cancel.
+     */
+    App.master.askOwn = async function askOwn(doc, settings) {
+        const groups = App.master.findOwn(doc, settings);
+        if (!groups.length) {
+            return { groups: groups, remove: false };
+        }
+        const answer = await App.dialogs.show({ title: 'Already on the slides', body: ownList(groups), buttons: [
+            { label: 'Cancel', value: null }, { label: 'Keep them', value: 'keep' },
+            { label: 'Remove them', value: 'remove', primary: true }] });
+        return answer ? { groups: groups, remove: answer === 'remove' } : null;
+    };
+
+    /* Inside a history step: the deck's own boxes removed if so answered (askOwn), the master written and synced. */
+    App.master.applyInStep = function applyInStep(doc, settings, own) {
+        if (own && own.remove) {
+            own.groups.forEach((group) => group.elements.forEach((element) => element.remove()));
+        }
+        App.master.write(doc, settings);
+        App.master.sync(doc);
     };
 
     /* What findOwn found, for the question: "Slide numbers on slides 2–15", "“Projeto Atlas” on slides 2–15". */

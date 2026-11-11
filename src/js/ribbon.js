@@ -63,6 +63,12 @@
                 'the slide (or drag to set its width). Chart: pick a type; it comes with made-up numbers to type over.',
         },
         {
+            id: 'design', label: 'Design',
+            groups: [{ label: 'Theme', commands: [['editTheme', 'theme'], ['copyTheme', 'copyTheme']] }],
+            note: 'Theme: the deck\'s colours and fonts, in one place; the slide shows each change at once. Copy Theme from Deck… ' +
+                'takes another deck\'s colours, fonts and slide master. Only what uses the theme follows.',
+        },
+        {
             // Shown only while a table is selected (PowerPoint's Table Design tab).
             id: 'table-design', label: 'Table Design', contextual: () => App.tableControls.isTableSelected(),
             groups: [

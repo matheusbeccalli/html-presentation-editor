@@ -67,3 +67,15 @@
 .master-logo-preview { height: 32px; max-width: 120px; object-fit: contain; border: 1px solid var(--border); background: #fff; }
 .master-logo-preview[hidden] { display: none; }
 .master-row .btn { white-space: nowrap; }
+
+/* Beside the slide, which stays bright: the theme panel's live preview (theme.js). */
+.dialog.dialog-side { margin: 96px 16px auto auto; }
+.dialog.dialog-side::backdrop { background: transparent; }
+.theme-form { display: flex; flex-direction: column; gap: 8px; min-width: 340px; }
+.theme-row { display: flex; align-items: center; gap: 8px; }
+.theme-row > label:first-child { width: 90px; flex: none; }
+.theme-row select { flex: 1; padding: 3px 4px; font: inherit; }
+.theme-row input[type="color"] { width: 36px; height: 26px; padding: 0 2px; border: 1px solid var(--border); background: var(--surface); }
+.theme-row input[type="text"] { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px;
+    font: inherit; background: var(--surface); color: var(--text); }
+.theme-copy-note:empty { display: none; }

@@ -4094,6 +4094,100 @@ def test_lock(browser):
           "locked after reopening")
 
 
+MASTER_ON = """id => {   // what the slide master shows on slide `id`: { role: text } ('' for the logo), or null
+    const layer = App.deck.getDocument().querySelector('[data-slide-id="' + id + '"] > .master-layer');
+    if (!layer) { return null; }
+    const out = {};
+    layer.querySelectorAll('[data-master]').forEach((item) => { out[item.getAttribute('data-master')] = item.textContent; });
+    return out; }"""
+
+
+def test_slide_master(browser):
+    """Phase 7: View > Slide Master: a fill-in dialog for a logo (picture and corner), a footer text, the Confidencial
+    label and slide numbers (3 / 15), not on the title slide; on every slide, renumbered as slides come, go and move;
+    nothing to select on the slide; one undo step; saved, reopened and presented as it was, the file unchanged."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    on = lambda name: page.evaluate(MASTER_ON, name)  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    logo = picture_file(page, "master-logo.png", "logo", 300, 100)
+    # Slides s1 (title) … s6; s5 is hidden.
+
+    page.click(".ribbon-tab[data-tab='view']")
+    page.click("button[data-command='slideMaster']")
+    check(page.is_visible("dialog[open] #master-footer"), "the Slide Master dialog")
+    check(page.is_checked("#master-skip-title") and page.input_value("#master-numbers") == "none", "defaults")
+    page.fill("#master-footer", "Projeto Atlas · Comitê de Investimentos")
+    page.check("#master-label-on")
+    check(page.input_value("#master-label") == "Confidencial", "the label's text")
+    page.select_option("#master-numbers", "n/total")
+    page.set_input_files("#master-logo-file", str(logo))
+    wait_until(page, "document.querySelector('#master-logo-preview') && !document.querySelector('#master-logo-preview').hidden")
+    page.select_option("#master-logo-corner", "top-right")
+    page.screenshot(path=str(OUTPUT / "88-slide-master-dialog.png"))
+    editor.click_dialog_button("Apply")
+    check(label() == "Slide master", f"one undo step: {label()}")
+
+    check(on("s1") is None, "not on the title slide")
+    check(on("s2") == {"logo": "", "footer": "Projeto Atlas · Comitê de Investimentos", "label": "Confidencial", "number": "2 / 6"},
+          f"on slide 2: {on('s2')}")
+    check(on("s5")["number"] == "5 / 6", "the hidden slide counts")
+    src_count = page.evaluate("""() => { const doc = App.deck.getDocument();
+        return doc.documentElement.outerHTML.split(App.master.read(doc).logo.src).length - 1; }""")
+    check(src_count == 1, f"the logo picture is in the deck once: {src_count}")
+    page.evaluate("App.deck.goTo(1)")
+    page.screenshot(path=str(OUTPUT / "89-slide-master-on-slide.png"))
+
+    # Nothing of it to select: a click on the footer selects nothing, Ctrl+A only the slide's own elements.
+    page.mouse.click(*slide_to_screen(page, 300, 694))
+    check(page.evaluate("App.selection.selectedIds()") == [], "a click on the footer selects nothing")
+    page.keyboard.press("Control+a")
+    check(sorted(page.evaluate("App.selection.selectedIds()")) == ["e5", "e6", "e7"], f"Ctrl+A: the slide's own elements: {page.evaluate('App.selection.selectedIds()')}")
+    page.keyboard.press("Escape")
+
+    # Numbers follow the slides: a new slide after slide 2 is 3 / 7, the old slide 3 now 4 / 7 (its thumbnail too).
+    page.keyboard.press("Control+m")
+    new_id = page.evaluate("App.deck.getCurrentSlide().getAttribute('data-slide-id')")
+    check(on(new_id)["number"] == "3 / 7" and on("s3")["number"] == "4 / 7", f"renumbered: {on(new_id)} {on('s3')}")
+    wait_until(page, """Array.from(document.querySelectorAll('.thumb-frame'))[3] &&
+        Array.from(document.querySelectorAll('.thumb-frame'))[3].contentDocument.body.textContent.includes('4 / 7')""")
+    page.keyboard.press("Control+z")
+    check(on("s3")["number"] == "3 / 6", f"undo: back to 3 / 6: {on('s3')}")
+
+    # Undo of the dialog: gone from every slide; redo: back.
+    check(label() == "Slide master", label())
+    page.keyboard.press("Control+z")
+    check(page.evaluate("App.deck.getDocument().querySelectorAll('.master, .master-layer').length") == 0, "undo: no master at all")
+    page.keyboard.press("Control+y")
+    check(on("s2")["number"] == "2 / 6", "redo: back")
+
+    # The dialog shows what is set.
+    page.click("button[data-command='slideMaster']")
+    check(page.input_value("#master-footer") == "Projeto Atlas · Comitê de Investimentos" and
+          page.input_value("#master-numbers") == "n/total" and page.input_value("#master-logo-corner") == "top-right", "shown again")
+    editor.click_dialog_button("Cancel")
+
+    # Saved, reopened: no import report, nothing to save; saved again: the same file.
+    saved = editor.save_as_download("master.html")
+    first = saved.read_text(encoding="utf-8")
+    editor.open(saved)
+    check(not page.query_selector("dialog[open]"), "no import report")
+    check(page.inner_text("#status-save") == "Saved", f"nothing changed by opening: {page.inner_text('#status-save')}")
+    check(on("s2")["footer"].startswith("Projeto Atlas"), "on the slides again")
+    again = editor.save_as_download("master-again.html")
+    check(again.read_text(encoding="utf-8") == first, "saved again: the same file")
+
+    # Presented on its own: slide 2 shows the footer and its number; the master itself never shows.
+    player, errors = play_saved_deck(browser, saved)
+    player.keyboard.press("ArrowRight")
+    shown = player.evaluate("""() => { const item = document.querySelector('.deck-player-current .master-layer [data-master="number"]');
+        return [item && item.textContent, item && item.getBoundingClientRect().width > 0,
+                getComputedStyle(document.querySelector('.master')).display]; }""")
+    check(shown == ["2 / 6", True, "none"] and not errors, f"presented: {shown} {errors}")
+    player.context.close()
+
+
 def App_round(value):
     """Round as the editor writes numbers: at most two decimals, no trailing zeros."""
     rounded = round(value, 2)
@@ -5188,6 +5282,7 @@ TESTS = [
     test_group_and_ungroup,
     test_rotate,
     test_lock,
+    test_slide_master,
 ]
 
 

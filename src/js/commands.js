@@ -384,6 +384,8 @@
         // Arrange > Group (groups.js).
         App.commands.define('group', { label: 'Group', isEnabled: () => App.groups.canGroup(), run: () => App.groups.group() });
         App.commands.define('ungroup', { label: 'Ungroup', isEnabled: () => App.groups.canUngroup(), run: () => App.groups.ungroup() });
+        App.commands.define('slideMaster', { label: 'Slide Master', isEnabled: () => App.master.canEdit(), run: () => App.master.open() });
+        App.commands.define('headerFooter', { label: 'Header & Footer', isEnabled: () => App.master.canEdit(), run: () => App.master.open() });
         App.commands.define('lock', { label: 'Lock', isEnabled: () => App.elements.canLock(),
             isChecked: () => App.elements.allLocked(), run: () => App.elements.toggleLock() });
         App.commands.define('rotateRight90', { label: 'Rotate Right 90°', isEnabled: () => App.elements.canRotate(),

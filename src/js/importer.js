@@ -440,6 +440,7 @@
     App.importer.importDeck = async function importDeck(text) {
         const report = newReport();
         const doc = App.importer.parseHtml(text);
+        App.master.removeCopies(doc);   // the slide master's copies on the slides: put back by master.sync when shown
 
         const sanitized = App.importer.sanitize(doc);
         report.scriptsRemoved = sanitized.scripts;
@@ -456,6 +457,7 @@
         report.chartsRendered = App.charts.renderMissing(deckDoc);
         finishTables(deckDoc);
         finishGroups(deckDoc);   // before the text model: the bullet stylesheet stays last
+        App.master.refreshStyle(deckDoc);   // the slide master's stylesheet, current, its logo kept
         finishTextModel(deckDoc);
         ensureDeckFormatMeta(deckDoc);
 

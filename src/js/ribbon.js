@@ -56,7 +56,7 @@
                 { label: 'Tables', commands: [{ control: 'insertTable' }] },
                 { label: 'Images', commands: [['insertPicture', 'picture']] },
                 { label: 'Illustrations', commands: [{ control: 'insertShape' }, { control: 'insertChart' }] },
-                { label: 'Text', commands: [['insertTextBox', 'textBox']] },
+                { label: 'Text', commands: [['insertTextBox', 'textBox'], ['headerFooter', 'headerFooter']] },
             ],
             note: 'Table: move over the grid to pick a size, click to insert. Pictures: from a file, made smaller on the way ' +
                 'in. Shapes: pick one, then drag on the slide (Shift keeps its proportions) or click. Text box: click it, then click on ' +
@@ -160,9 +160,13 @@
         },
         {
             id: 'view', label: 'View',
-            groups: [{ label: 'Show', rows: [[{ command: 'toggleRulers', icon: 'ruler' }], [{ command: 'toggleGridlines', icon: 'grid' }]] }],
+            groups: [
+                { label: 'Master Views', commands: [['slideMaster', 'slideMaster']] },
+                { label: 'Show', rows: [[{ command: 'toggleRulers', icon: 'ruler' }], [{ command: 'toggleGridlines', icon: 'grid' }]] },
+            ],
             note: 'Smart guides show by themselves while you drag: an element snaps to the slide\'s edges and centre and to the ' +
-                'other elements within 5 px. Hold Alt while dragging to place it freely. Gridlines are every 40 px; nothing snaps to them.',
+                'other elements within 5 px. Hold Alt while dragging to place it freely. Gridlines are every 40 px; nothing snaps to them. ' +
+                'Slide Master: a logo, footer, label and slide numbers on every slide, set in one dialog (also Insert > Header & Footer).',
         },
         { id: 'export', label: 'Export', note: 'PDF, PNG and PowerPoint export arrive in Phase 8.' },
     ];

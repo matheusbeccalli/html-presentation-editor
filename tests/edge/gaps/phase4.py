@@ -492,6 +492,13 @@ def test_gap_p4_numbers(browser):
     check(grid()[1].split("|")[1] == "2.450,0" and key() == "e9/1/1", f"2.450,0, typing goes on: {grid()[1]} {key()}")
     page.keyboard.press("Control+z")
     check(grid()[1].split("|")[1] == "2.450", f"Ctrl+Z: 2.450 again: {grid()[1]}")
+    # "Typing goes on", proven by typing: Increase Decimal again, then a key lands in the same cell, at the end.
+    page.click(button("increaseDecimals"))
+    page.keyboard.type("7")
+    check(grid()[1].split("|")[1] == "2.450,07" and key() == "e9/1/1", f"typing goes on after Increase Decimal: {grid()[1]} {key()}")
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(grid()[1].split("|")[1] == "2.450", f"Ctrl+Z, Ctrl+Z: 2.450 again: {grid()[1]}")
 
     # Drag from 19,5% down to -3,5%: Negatives in Parentheses, Percent Style, Ctrl+Z.
     _cell_drag(page, _cell(page, "e9", 1, 3), _cell(page, "e9", 4, 3))
@@ -694,4 +701,163 @@ def test_gap_p4_typing_new_row_undo(browser):
     editor.close()
 
 
-TESTS = [test_gap_p4_typing_new_row_undo, test_gap_p4_format1_table, test_gap_p4_column_borders, test_gap_p4_table_design, test_gap_p4_numbers, test_gap_p4_insert_table]
+# ----------------------------------------------------------------------
+# Layout tab
+# ----------------------------------------------------------------------
+
+# Where a cell's text is: [row, column] of the first cell reading `text`.
+FIND_CELL = """([id, text]) => { const table = App.deck.getDocument().querySelector('[data-id="' + id + '"] > table');
+    for (const row of table.rows) { for (const cell of row.cells) {
+        if (cell.textContent.trim() === text) { return [row.rowIndex, cell.cellIndex]; } } }
+    return null; }"""
+
+# The block two cells span, in slide px, as this browser lays them out.
+SPAN = """([id, a, b]) => { const table = App.deck.getDocument().querySelector('[data-id="' + id + '"] > table');
+    const s = App.deck.getCurrentSlide().getBoundingClientRect();
+    const p = table.rows[a[0]].cells[a[1]].getBoundingClientRect(), q = table.rows[b[0]].cells[b[1]].getBoundingClientRect();
+    return { left: p.left - s.left, top: p.top - s.top, width: q.right - p.left, height: q.bottom - p.top }; }"""
+
+BLOCK = """() => { const b = document.querySelector('.cell-block'); const r = App.transform.readRect(b);
+    r.fill = getComputedStyle(b).backgroundColor; return r; }"""
+
+
+def test_gap_p4_layout_tab(browser):
+    """Layout tab: click "Beta Foods": the Layout tab appears (it goes when nothing is selected). Insert rows below,
+    Insert rows above, Insert columns right: an empty row / column each, typing goes on in Beta Foods; Delete rows;
+    Ctrl+Z each. Drag from "2.450" to "8,9x": four cells shaded; Merge cells (one cell with the four numbers), Split
+    cells; Ctrl+Z. Click "Delta Snacks", Shift+click "530": four cells; Delete empties them, Ctrl+Z, Esc. Drag the
+    table by its left edge: it moves. Delete table, Ctrl+Z"""
+    editor = Editor(browser)
+    editor.open(e2e.CONTRACT)
+    page = editor.page
+    grid = lambda: page.evaluate(GRID, "e9")  # noqa: E731
+    key = lambda: page.evaluate(EDITING_KEY)  # noqa: E731
+    run = lambda command: page.click(f".ribbon-button[data-command='{command}']")  # noqa: E731
+    at = lambda text: page.evaluate(FIND_CELL, ["e9", text])  # noqa: E731
+    _go_to_slide(page, 2)
+    start = grid()
+    check(page.is_hidden(LAYOUT_TAB), "no Layout tab before a table is clicked")
+
+    # Click "Beta Foods": the Layout tab appears; it goes when nothing is selected.
+    beta = at("Beta Foods")
+    page.mouse.click(*_cell(page, "e9", *beta))
+    check(page.is_visible(LAYOUT_TAB) and key() == "e9/%d/%d" % tuple(beta), f"the Layout tab appears, typing in Beta Foods: {key()}")
+    page.mouse.click(*slide_to_screen(page, 1250, 700))
+    check(page.evaluate("App.selection.selectedIds()") == [] and page.is_hidden(LAYOUT_TAB), "nothing selected: the Layout tab goes")
+    page.mouse.click(*_cell(page, "e9", *beta))
+    page.click(LAYOUT_TAB)
+    check(key() == "e9/%d/%d" % tuple(beta), f"the tab keeps the typing: {key()}")
+
+    def typing_goes_on(where):
+        """A key typed now lands in Beta Foods (wherever it is now); Ctrl+Z takes it back."""
+        r, c = at("Beta Foods")
+        page.keyboard.type("7")
+        typed = grid()[r].split("|")[c]
+        check(key() == f"e9/{r}/{c}" and "7" in typed and typed.replace("7", "") == "Beta Foods",
+              f"{where}: typing goes on in Beta Foods: {typed!r} {key()}")
+        page.keyboard.press("Control+z")
+        check(at("Beta Foods") == [r, c] and key() == f"e9/{r}/{c}", f"{where}: Ctrl+Z takes the key back: {grid()} {key()}")
+
+    # Insert rows below, Insert rows above, Insert columns right, one after the other: an empty row / column each,
+    # typing goes on in Beta Foods (a key typed, then taken back, so the undo steps stay the line's); Delete rows;
+    # then Ctrl+Z each, one step per press, newest first.
+    rows, cols = len(start), len(start[0].split("|"))
+    after = [start]
+    for command, where in [("insertRowBelow", "below"), ("insertRowAbove", "above"), ("insertColumnRight", "right")]:
+        before = grid()
+        run(command)
+        now = grid()
+        r, c = at("Beta Foods")
+        if where == "right":
+            check(len(now) == len(before) and all(len(row.split("|")) == cols + 1 and row.split("|")[c + 1] == "" for row in now),
+                  f"Insert columns right: an empty column right of it: {now}")
+        else:
+            empty = r + 1 if where == "below" else r - 1
+            check(len(now) == len(before) + 1 and now[empty] == "|" * (cols - 1), f"Insert rows {where}: an empty row {where}: {now}")
+        typing_goes_on(f"Insert {where}")
+        check(grid() == now, f"Insert {where}: that Ctrl+Z took only the key; the insert is still there: {grid()}")
+        after.append(now)
+    run("deleteRows")
+    deleted = grid()
+    check(len(deleted) == len(after[-1]) - 1 and at("Beta Foods") is None, f"Delete rows: Beta's row gone: {deleted}")
+    for n, (undone, expected) in enumerate(zip(["Delete rows", "Insert columns right", "Insert rows above", "Insert rows below"],
+                                               reversed(after)), start=1):
+        page.keyboard.press("Control+z")
+        check(grid() == expected, f"Ctrl+Z {n}: {undone} undone, nothing more: {grid()}")
+    check(grid() == start and key() == "e9/%d/%d" % tuple(beta), f"all four undone, typing back in Beta Foods: {key()}")
+
+    # Drag from 2.450 to 8,9x (still typing in Beta Foods, as the line goes): four cells shaded (the block over exactly them).
+    check(key() == "e9/%d/%d" % tuple(beta), f"still typing in Beta Foods before the drag: {key()}")
+    a, b = at("2.450"), at("8,9x")
+    check(a is not None and b is not None and b[0] == a[0] + 1 and b[1] == a[1] + 1, f"2.450 and 8,9x two by two apart: {a} {b}")
+    _cell_drag(page, _cell(page, "e9", *a), _cell(page, "e9", *b))
+    block, span = page.evaluate(BLOCK), page.evaluate(SPAN, ["e9", a, b])
+    check(page.is_visible(".cell-block") and key() is None and _rgb(block["fill"]) != [0, 0, 0] and not block["fill"].endswith(", 0)")
+          and all(abs(block[k] - span[k]) < 1.5 for k in ("left", "top", "width", "height")),
+          f"four cells shaded: {block} / {span}")
+    four = [grid()[a[0]].split("|")[a[1]], grid()[a[0]].split("|")[b[1]], grid()[b[0]].split("|")[a[1]], grid()[b[0]].split("|")[b[1]]]
+
+    # Merge cells: one cell with the four numbers; Split cells; Ctrl+Z.
+    page.click(LAYOUT_TAB)
+    run("mergeCells")
+    merged = page.evaluate("""([r, c]) => { const cell = App.deck.getDocument().querySelector('[data-id="e9"] > table').rows[r].cells[c];
+        return [cell.rowSpan, cell.colSpan, App.text.getModel(cell).map((line) => line.text)]; }""", a)
+    check(merged == [2, 2, four], f"Merge cells: one cell (2 x 2) with the four numbers {four}: {merged}")
+    place = page.evaluate(SPAN, ["e9", a, a])
+    check(all(abs(place[k] - span[k]) < 1.5 for k in ("left", "top", "width")) and place["height"] >= span["height"] - 1.5,
+          f"the merged cell takes the four cells' place (taller: four lines in it): {place} / {span}")
+    run("splitCells")
+    split = page.evaluate("""([r, c]) => { const t = App.deck.getDocument().querySelector('[data-id="e9"] > table');
+        return [t.rows[r].cells.length, t.rows[r + 1].cells.length, t.rows[r].cells[c].rowSpan, t.rows[r].cells[c].colSpan]; }""", a)
+    check(split == [cols, cols, 1, 1], f"Split cells: four cells again: {split}")
+    page.keyboard.press("Control+z")
+    check(page.evaluate("""([r, c]) => { const cell = App.deck.getDocument().querySelector('[data-id="e9"] > table').rows[r].cells[c];
+        return [cell.rowSpan, cell.colSpan]; }""", a) == [2, 2], "Ctrl+Z: merged again")
+    page.keyboard.press("Control+z")
+    check(grid() == start, f"Ctrl+Z: the four cells as they were: {grid()}")
+
+    # Click Delta Snacks, Shift+click 530: four cells; Delete empties them, Ctrl+Z, Esc.
+    # (still typing in the 2.450 cell after that Ctrl+Z, as the line goes)
+    d, n = at("Delta Snacks"), at("530")
+    check(d is not None and n is not None and n[0] == d[0] + 1 and n[1] == d[1] + 1, f"Delta Snacks and 530 two by two apart: {d} {n}")
+    page.mouse.click(*_cell(page, "e9", *d))
+    check(key() == "e9/%d/%d" % tuple(d), f"click Delta Snacks: typing in it: {key()}")
+    page.keyboard.down("Shift")
+    page.mouse.click(*_cell(page, "e9", *n))
+    page.keyboard.up("Shift")
+    block, span = page.evaluate(BLOCK), page.evaluate(SPAN, ["e9", d, n])
+    check(page.is_visible(".cell-block") and key() is None and all(abs(block[k] - span[k]) < 1.5 for k in ("left", "top", "width", "height"))
+          and _rgb(block["fill"]) != [0, 0, 0] and not block["fill"].endswith(", 0)"),
+          f"Shift+click: the four cells shaded: {block} / {span}")
+    page.keyboard.press("Delete")
+    after = grid()
+    check(all(after[r].split("|")[c] == "" for r in (d[0], n[0]) for c in (d[1], n[1]))
+          and sum(row.count("|") for row in after) == sum(row.count("|") for row in start)
+          and [after[r] for r in range(len(after)) if r not in (d[0], n[0])] == [start[r] for r in range(len(start)) if r not in (d[0], n[0])],
+          f"Delete empties the four cells, nothing else: {after}")
+    page.keyboard.press("Control+z")
+    check(grid() == start, f"Ctrl+Z: their text back: {grid()}")
+    page.keyboard.press("Escape")
+    check(page.is_hidden(".cell-block") and page.evaluate("App.selection.selectedId()") == "e9", "Esc: the cells let go, the table selected")
+
+    # Drag the table by its left edge: it moves.
+    box = e2e.element_rect(page, "e9")
+    drag(page, slide_to_screen(page, box["left"] + 2, box["top"] + 110), slide_to_screen(page, box["left"] + 52, box["top"] + 110))
+    moved = e2e.element_rect(page, "e9")
+    check(abs(moved["left"] - (box["left"] + 50)) <= 1 and abs(moved["top"] - box["top"]) <= 1 and grid() == start,
+          f"dragged by its left edge: it moves: {box} -> {moved}")
+
+    # Delete table, Ctrl+Z (the table is selected after the drag; its Layout tab is there).
+    check(page.evaluate("App.selection.selectedId()") == "e9" and page.is_visible(LAYOUT_TAB), "the table selected, the Layout tab shown")
+    page.click(LAYOUT_TAB)
+    run("deleteTable")
+    check(page.evaluate("!App.deck.getDocument().querySelector('[data-id=\"e9\"]')") and page.is_hidden(LAYOUT_TAB),
+          "Delete table: gone, and the Layout tab with it")
+    page.keyboard.press("Control+z")
+    check(grid() == start and e2e.element_rect(page, "e9") == moved, f"Ctrl+Z: the table back where it was: {grid()}")
+    page.screenshot(path=str(e2e.OUTPUT / "gap-p4-layout-tab.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+TESTS = [test_gap_p4_layout_tab, test_gap_p4_typing_new_row_undo, test_gap_p4_format1_table, test_gap_p4_column_borders, test_gap_p4_table_design, test_gap_p4_numbers, test_gap_p4_insert_table]

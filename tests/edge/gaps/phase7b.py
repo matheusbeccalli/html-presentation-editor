@@ -172,6 +172,40 @@ def test_gap_p7b_new_slide(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
 
+    # "Its title where your titles are" on a deck whose titles are NOT where File > New puts them: a copy of the
+    # contract deck with every slide title moved, resized and in 30 pt. Title and Content, Two Content and Ctrl+M
+    # put the new title there, in that look.
+    moved = {"left": 100, "top": 80, "width": 1000, "height": 72}
+    html = e2e.CONTRACT.read_text(encoding="utf-8")
+    old_title = "left: 64px; top: 48px; width: 1152px; height: 60px; z-index: 1; font-family: var(--font-heading); font-size: 25.5pt;"
+    count = html.count(old_title)
+    check(count >= 5, f"the copy moves every slide title: {count}")
+    deck = e2e.OUTPUT / "gap-p7b-moved-titles.html"
+    deck.write_text(html.replace(old_title, "left: 100px; top: 80px; width: 1000px; height: 72px; z-index: 1; "
+                                            "font-family: var(--font-heading); font-size: 30pt;"), encoding="utf-8")
+    editor = Editor(browser)
+    editor.open(deck)
+    page = editor.page
+    now = lambda: page.evaluate(SLIDE_STATE)  # noqa: E731
+    moved_look = page.evaluate(LOOK_OF, "e5")
+    check(page.evaluate("App.transform.readRect(App.deck.getDocument().querySelector('[data-id=\"e5\"]'))") == moved
+          and moved_look[0] == "40px", f"the deck's titles moved and 30 pt: {moved_look}")
+    page.click(".ribbon-tab[data-tab='home']")
+    _go_to_slide(page, 1)
+    for label in ["Title and Content", "Two Content"]:
+        page.click(".ribbon-button.new-slide-button")
+        page.click(f".slide-layout-gallery .slide-layout-item:has-text('{label}')")
+        after = now()
+        check(after["title"] == moved and after["titleLook"] == moved_look,
+              f"{label}: its title where (and as) this deck's titles: {after['title']} {after['titleLook']}")
+    page.mouse.click(*slide_to_screen(page, 1250, 700))
+    page.keyboard.press("Control+m")
+    after = now()
+    check(after["title"] == moved and after["titleLook"] == moved_look, f"Ctrl+M: its title where this deck's are: {after['title']}")
+    page.screenshot(path=str(e2e.OUTPUT / "gap-p7b-new-slide-moved-titles.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
 
 # ----------------------------------------------------------------------
 # 2. Multi-select
@@ -802,5 +836,125 @@ def test_gap_p7b_master_own_footers(browser):
     editor.close()
 
 
-TESTS = [test_gap_p7b_new_slide, test_gap_p7b_multi_select, test_gap_p7b_align, test_gap_p7b_smart_guides,
+# ----------------------------------------------------------------------
+# Reorder and hide
+# ----------------------------------------------------------------------
+
+EYE_INK = """(png) => new Promise((resolve) => { const image = new Image();
+    image.onload = () => { const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+        const c = canvas.getContext('2d'); c.drawImage(image, 0, 0); const d = c.getImageData(0, 0, image.width, image.height).data;
+        let n = 0; for (let i = 0; i < d.length; i += 4) {   // grey ink like the muted text colour #605e5c
+            if (d[i] < 170 && Math.abs(d[i] - d[i + 1]) < 20 && Math.abs(d[i + 1] - d[i + 2]) < 20) { n += 1; } }
+        resolve(n); };
+    image.src = 'data:image/png;base64,' + png; })"""
+
+
+def _eye_ink(page, area):
+    """How many grey 'ink' pixels a screen area shows (the struck-out eye's strokes)."""
+    import base64
+    png = base64.b64encode(page.screenshot(clip={"x": area["left"], "y": area["top"], "width": area["right"] - area["left"],
+                                                 "height": area["bottom"] - area["top"]})).decode()
+    return page.evaluate(EYE_INK, png)
+
+
+HIDDEN_EYE = ['M2.5 10s3-5 7.5-5 7.5 5 7.5 5-3 5-7.5 5-7.5-5-7.5-5z', 'M3.5 16.5l13-13']   # icons.js 'hidden': an eye, struck out
+
+
+def test_gap_p7b_reorder_hide(browser):
+    """Reorder and hide: drag slide 1's thumbnail down between two others (a red line shows where): it moves there;
+    Ctrl+Z puts it back. Click a thumbnail, Ctrl+Down: one place down. Right-click a thumbnail > Hide Slide: dimmed,
+    crossed-out eye; Slide Show tab > Hide Slide is lit and turns it off. Save, open the saved file in Edge and
+    present with the arrow keys: the hidden slide is skipped"""
+    editor = Editor(browser)
+    editor.open(e2e.CONTRACT)
+    page = editor.page
+    order = lambda: page.evaluate("App.deck.getSlides().map((s) => s.getAttribute('data-slide-id')).join(',')")  # noqa: E731
+    shown = lambda: page.evaluate("App.deck.getCurrentSlide().getAttribute('data-slide-id')")  # noqa: E731
+    box = lambda i: page.locator(f"#thumbnail-rail .thumb[data-index='{i}'] .thumb-box").bounding_box()  # noqa: E731
+    check(order() == "s1,s2,s3,s4,s5,s6", order())
+
+    # Drag slide 1's thumbnail down between slides 3 and 4: a red line shows where; it moves there; Ctrl+Z puts it back.
+    start = box(0)
+    gap_y = (box(2)["y"] + box(2)["height"] + box(3)["y"]) / 2
+    page.mouse.move(start["x"] + 80, start["y"] + 40)
+    page.mouse.down()
+    page.mouse.move(start["x"] + 80, gap_y, steps=10)
+    line = page.locator(".thumb-drop-line").bounding_box() if page.is_visible(".thumb-drop-line") else None
+    check(line is not None and box(2)["y"] + box(2)["height"] - 2 <= line["y"] + line["height"] / 2 <= box(3)["y"] + 2
+          and line["width"] > 100, f"a line between slides 3 and 4: {line} ({box(2)} / {box(3)})")
+    colour = e2e.common_colour(page, {"left": line["x"] + 10, "top": line["y"], "right": line["x"] + line["width"] - 10,
+                                      "bottom": line["y"] + line["height"]})
+    check(colour[0] >= 150 and colour[1] <= 110 and colour[2] <= 90 and colour[0] - colour[1] > 80, f"the line is red on screen: {colour}")
+    page.screenshot(path=str(e2e.OUTPUT / "gap-p7b-drop-line.png"))
+    page.mouse.up()
+    check(order() == "s2,s3,s1,s4,s5,s6" and shown() == "s1", f"it moves there: {order()} {shown()}")
+    page.keyboard.press("Control+z")
+    check(order() == "s1,s2,s3,s4,s5,s6", f"Ctrl+Z puts it back: {order()}")
+
+    # Click a thumbnail, Ctrl+Down: one place down.
+    page.click("#thumbnail-rail .thumb[data-index='1']")
+    check(shown() == "s2", "the click shows slide 2")
+    page.keyboard.press("Control+ArrowDown")
+    check(order() == "s1,s3,s2,s4,s5,s6" and shown() == "s2", f"Ctrl+Down: one place down: {order()}")
+
+    # Right-click a thumbnail > Hide Slide: dimmed, crossed-out eye.
+    look = lambda i: page.evaluate("""i => { const t = document.querySelector('#thumbnail-rail .thumb[data-index="' + i + '"]');
+        const badge = t.querySelector('.thumb-hidden-badge');
+        return { opacity: getComputedStyle(t.querySelector('.thumb-box')).opacity,
+                 eye: badge ? Array.from(badge.querySelectorAll('path'), (p) => p.getAttribute('d')) : [],
+                 hidden: App.deck.getSlides()[i].getAttribute('data-hidden') }; }""", i)  # noqa: E731
+    check(look(0)["opacity"] == "1" and look(0)["eye"] == [], f"slide 1 shown normally: {look(0)}")
+    page.click("#thumbnail-rail .thumb[data-index='0']", button="right")
+    page.click(".context-menu .menu-label:text-is('Hide Slide')")
+    hidden = look(0)
+    badge = page.locator("#thumbnail-rail .thumb[data-index='0'] .thumb-hidden-badge")
+    thumb = page.locator("#thumbnail-rail .thumb[data-index='0']").bounding_box()
+    mark = badge.bounding_box() if badge.count() else None
+    check(hidden["hidden"] == "true" and float(hidden["opacity"]) < 0.6, f"Hide Slide: dimmed: {hidden}")
+    check(hidden["eye"] == HIDDEN_EYE and badge.is_visible() and mark and mark["width"] >= 12
+          and thumb["x"] <= mark["x"] and mark["x"] + mark["width"] <= thumb["x"] + thumb["width"]
+          and thumb["y"] <= mark["y"] and mark["y"] + mark["height"] <= thumb["y"] + thumb["height"],
+          f"the crossed-out eye on its thumbnail: {hidden['eye']} {mark} in {thumb}")
+    eye_area = {"left": mark["x"], "top": mark["y"], "right": mark["x"] + mark["width"], "bottom": mark["y"] + mark["height"]}
+    eye_ink = _eye_ink(page, eye_area)
+    page.screenshot(path=str(e2e.OUTPUT / "gap-p7b-hidden-thumb.png"))
+
+    # Slide Show tab > Hide Slide is lit and turns it off.
+    page.click(".ribbon-tab[data-tab='slideshow']")
+    button = ".ribbon-button[data-command='hideSlide']"
+    check(page.get_attribute(button, "aria-pressed") == "true", "Slide Show > Hide Slide is lit")
+    page.click(button)
+    check(look(0) == {"opacity": "1", "eye": [], "hidden": None} and page.get_attribute(button, "aria-pressed") == "false",
+          f"clicking it turns it off: {look(0)}")
+    # The eye was painted: its area had grey ink strokes (the muted text colour) that are gone once the slide is shown.
+    after_ink = _eye_ink(page, eye_area)
+    check(eye_ink >= 15 and after_ink < eye_ink / 3, f"the crossed-out eye was drawn on screen: {eye_ink} grey pixels, {after_ink} after")
+
+    # Save, open the saved file and present with the arrow keys: the hidden slide is skipped. A slide in the middle
+    # is hidden for this (the third, s2 after the moves; the deck's own s5 is hidden as well).
+    page.click("#thumbnail-rail .thumb[data-index='2']", button="right")
+    page.click(".context-menu .menu-label:text-is('Hide Slide')")
+    check(look(2)["hidden"] == "true", "the third slide hidden")
+    saved_order = order().split(",")
+    hidden_ids = page.evaluate("App.deck.getSlides().filter((s) => s.getAttribute('data-hidden') === 'true').map((s) => s.getAttribute('data-slide-id'))")
+    check(saved_order == ["s1", "s3", "s2", "s4", "s5", "s6"] and hidden_ids == ["s2", "s5"], f"hidden: {hidden_ids} in {saved_order}")
+    saved = editor.save_as_download("gap-p7b-reorder-hide.html")
+    editor.close()
+    player, errors = e2e.play_saved_deck(browser, saved)
+    seen = [e2e.visible_slide_ids(player)]
+    for _ in range(len(saved_order)):
+        player.keyboard.press("ArrowRight")
+        seen.append(e2e.visible_slide_ids(player))
+    path = [ids[0] for ids in seen if len(ids) == 1]
+    steps = [path[0]] + [b for a, b in zip(path, path[1:]) if b != a]
+    expected = [sid for sid in saved_order if sid not in hidden_ids]
+    check(all(len(ids) == 1 for ids in seen) and steps == expected, f"presented with ArrowRight: {steps}, expected {expected}")
+    player.keyboard.press("ArrowLeft")
+    check(e2e.visible_slide_ids(player) == [expected[-2]], f"ArrowLeft goes back, skipping hidden ones: {e2e.visible_slide_ids(player)}")
+    player.screenshot(path=str(e2e.OUTPUT / "gap-p7b-presented.png"))
+    check(errors == [], f"no errors in the presented deck: {errors}")
+    player.context.close()
+
+
+TESTS = [test_gap_p7b_reorder_hide, test_gap_p7b_new_slide, test_gap_p7b_multi_select, test_gap_p7b_align, test_gap_p7b_smart_guides,
          test_gap_p7b_group, test_gap_p7b_slide_master, test_gap_p7b_master_own_footers]

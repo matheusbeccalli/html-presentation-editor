@@ -24,7 +24,7 @@ NODES = """([id, selector]) => {
         const box = node.getBoundingClientRect();
         return { attrs: attrs, text: node.textContent, tspans: Array.from(node.querySelectorAll('tspan'), (t) => t.textContent),
                  tspanYs: Array.from(node.querySelectorAll('tspan'), (t) => t.getBoundingClientRect().top),
-                 fill: style.fill, fillOpacity: style.fillOpacity, stroke: style.stroke, strokeWidth: style.strokeWidth,
+                 fill: style.fill, fillOpacity: style.fillOpacity, stroke: style.stroke, strokeWidth: style.strokeWidth, strokeOpacity: style.strokeOpacity,
                  dash: style.strokeDasharray, box: { x: box.left, y: box.top, width: box.width, height: box.height } };
     });
 }"""
@@ -44,6 +44,70 @@ FIGURE_OF_TYPE = """type => { const figure = Array.from(App.deck.getCurrentSlide
 
 def nodes(page, id_, selector):
     return page.evaluate(NODES, [id_, selector])
+
+
+BAR_ON_SLIDE = """([id, series, index]) => {
+    const slide = App.deck.getCurrentSlide().getBoundingClientRect();
+    const bar = App.deck.getDocument().querySelectorAll('[data-id="' + id + '"] > svg g.chart-series[data-series="' + series
+        + '"] rect.chart-bar')[index].getBoundingClientRect();
+    return [bar.left - slide.left, bar.top - slide.top, bar.width, bar.height]; }"""
+
+
+def _screen_box(page, id_, series, index):
+    """The middle half of a column, in screen px (inside its dashed outline), for a pixel count."""
+    x, y, w, h = page.evaluate(BAR_ON_SLIDE, [id_, series, index])
+    left, top = slide_to_screen(page, x + w / 4, y + h / 4)
+    right_, bottom_ = slide_to_screen(page, x + 3 * w / 4, y + 3 * h / 4)
+    return {"left": left, "top": top, "right": right_, "bottom": bottom_}
+
+
+SLIDE_ORIGIN = "(() => { const r = App.deck.getCurrentSlide().getBoundingClientRect(); return [r.left, r.top]; })()"
+
+INK = """([png, colour, tolerance]) => new Promise((resolve) => { const image = new Image();
+    image.onload = () => { const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+        const c = canvas.getContext('2d'); c.drawImage(image, 0, 0); const d = c.getImageData(0, 0, image.width, image.height).data;
+        let n = 0; for (let i = 0; i < d.length; i += 4) {
+            if (Math.abs(d[i] - colour[0]) <= tolerance && Math.abs(d[i + 1] - colour[1]) <= tolerance
+                && Math.abs(d[i + 2] - colour[2]) <= tolerance) { n += 1; } }
+        resolve([n, d.length / 4]); };
+    image.src = 'data:image/png;base64,' + png; })"""
+
+
+def _node_on_screen(page, node, inset=0.0):
+    """A drawn node's box (frame px, from NODES) as a screen box, shrunk by `inset` (a share of each side)."""
+    ox, oy = page.evaluate(SLIDE_ORIGIN)
+    b = node["box"]
+    x0, y0 = b["x"] - ox + b["width"] * inset, b["y"] - oy + b["height"] * inset
+    x1, y1 = b["x"] - ox + b["width"] * (1 - inset), b["y"] - oy + b["height"] * (1 - inset)
+    left, top = slide_to_screen(page, x0, y0)
+    right_, bottom_ = slide_to_screen(page, x1, y1)
+    return {"left": left, "top": top, "right": right_, "bottom": bottom_}
+
+
+EDGE_ROWS = """([png, limit]) => new Promise((resolve) => { const image = new Image();
+    image.onload = () => { const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+        const c = canvas.getContext('2d'); c.drawImage(image, 0, 0); const d = c.getImageData(0, 0, image.width, image.height).data;
+        const rows = []; for (let y = 0; y < image.height; y++) { let darkest = 765;
+            for (let x = 0; x < image.width; x++) { const i = (y * image.width + x) * 4; darkest = Math.min(darkest, d[i] + d[i + 1] + d[i + 2]); }
+            rows.push(darkest < limit); }
+        resolve(rows); };
+    image.src = 'data:image/png;base64,' + png; })"""
+
+
+def _edge_rows(page, area, limit):
+    """For each screen row of `area`: is its darkest pixel darker than `limit` (r + g + b)?"""
+    import base64
+    png = base64.b64encode(page.screenshot(clip={"x": area["left"], "y": area["top"], "width": area["right"] - area["left"],
+                                                 "height": area["bottom"] - area["top"]})).decode()
+    return page.evaluate(EDGE_ROWS, [png, limit])
+
+
+def _ink(page, area, colour, tolerance=40):
+    """[pixels near `colour`, all pixels] in a screen area, from a real screenshot."""
+    import base64
+    png = base64.b64encode(page.screenshot(clip={"x": area["left"], "y": area["top"], "width": max(1, area["right"] - area["left"]),
+                                                 "height": max(1, area["bottom"] - area["top"])})).decode()
+    return page.evaluate(INK, [png, list(colour), tolerance])
 
 
 def num(node, name):
@@ -156,16 +220,47 @@ def test_gap_p6_charts_drawn(browser):
             if i == 3:
                 check(rect["fillOpacity"] == "0.5" and rect["dash"] not in ("none", "") and rgb(rect["stroke"]) == rgb(rect["fill"]),
                       f"series {s} 2025E: lighter and dashed: {rect['fillOpacity']} {rect['dash']}")
+                check(float(rect["strokeWidth"].replace("px", "")) >= 1 and float(rect["strokeOpacity"]) == 1,
+                      f"series {s} 2025E: the dashed outline is drawn (width, opacity): {rect['strokeWidth']} {rect['strokeOpacity']}")
+                dashes = [float(v) for v in re.findall(r"[\d.]+", rect["dash"])]
+                check(len(dashes) >= 2 and all(v >= 1 for v in dashes[:2]), f"series {s} 2025E: dashes with gaps: {rect['dash']}")
             else:
                 check(rect["fillOpacity"] == "1" and rect["dash"] in ("none", ""), f"series {s} year {i}: solid: {rect['fillOpacity']} {rect['dash']}")
     check(abs(right(series[0][3]) - num(series[1][3], "x")) < 0.6, "the two 2025E columns stand side by side (a pair)")
+    # "Lighter", as seen: the same colour as the series' other years, and on screen paler than its 2024 column.
+    for s, rects in enumerate(series):
+        check(rgb(rects[3]["fill"]) == rgb(rects[0]["fill"]), f"series {s} 2025E: the series' own colour: {rects[3]['fill']}")
+        shown = [e2e.common_colour(page, _screen_box(page, "e12", s, i)) for i in (2, 3)]
+        full = rgb(rects[0]["fill"])
+        half = [round((v + 255) / 2) for v in full]
+        check(all(abs(a - b) <= 25 for a, b in zip(shown[0], full)) and all(abs(a - b) <= 25 for a, b in zip(shown[1], half)),
+              f"series {s}: on screen 2024 in its colour {full}, 2025E half as strong {half}: {shown}")
+        # The dashes, as seen: down the 2025E column's left edge, rows darker than its fill (the outline's dashes, drawn
+        # thin at this zoom) alternate with rows in the fill's colour (the gaps). A solid outline would be dark all the way.
+        # (the outer edge of the pair: series 0's left edge, series 1's right edge)
+        x, y, w, h = page.evaluate(BAR_ON_SLIDE, ["e12", s, 3])
+        edge, top = slide_to_screen(page, x if s == 0 else x + w, y + 6)
+        _, bottom_ = slide_to_screen(page, x, y + h - 6)
+        strip = {"left": edge - 2, "top": top, "right": edge + 3, "bottom": bottom_} if s == 0 else \
+            {"left": edge - 3, "top": top, "right": edge + 2, "bottom": bottom_}
+        rows = _edge_rows(page, strip, sum(half) - 25)   # navy dashes ~120 darker than the pale fill, red ones ~60
+        flips = sum(1 for a, b in zip(rows, rows[1:]) if a != b)
+        share = sum(rows) / len(rows)
+        check(0.2 < share < 0.85 and flips >= 10, f"series {s} 2025E: its edge dashed on screen: {share:.2f} dark rows, {flips} changes")
 
     # Numbers on top, written the pt-BR way (no number here reaches 1.000: see the report).
     labels = nodes(page, "e12", ".chart-data-label")
     for values, rects in zip([[410, 498, 587, 702], [74, 100, 123, 161]], series):
         for value, rect in zip(values, rects):
             found = label_on(labels, centre_x(rect), str(value))
-            check(len(found) == 1 and num(found[0], "y") < num(rect, "y"), f"{value} written on top of its column: {found}")
+            check(len(found) == 1, f"{value} written once at its column: {found}")
+            label = found[0]
+            gap = rect["box"]["y"] - (label["box"]["y"] + label["box"]["height"])
+            check(-1 <= gap <= 20 and label["box"]["height"] > 5, f"{value}: drawn just above its column: gap {gap} {label['box']}")
+            colour = rgb(label["fill"])
+            check(len(colour) == 3 and sum(colour) < 300 and label["fillOpacity"] == "1", f"{value}: dark ink: {label['fill']} {label['fillOpacity']}")
+            hit, total = _ink(page, _node_on_screen(page, label), colour, 110)   # small letters: anti-aliased, near their colour
+            check(hit >= 8 and hit < total * 0.7, f"{value}: its letters on screen: {hit} of {total} pixels near {colour}")
 
     # A legend at the bottom: under the year names, keys in the series' colours.
     legend = nodes(page, "e12", ".chart-legend-label")
@@ -175,6 +270,18 @@ def test_gap_p6_charts_drawn(browser):
           and num(legend[0], "y") > 440 * 0.85, f"the legend in a row at the bottom: {[num(n, 'y') for n in legend]} (years at {lowest_year})")
     keys = nodes(page, "e12", ".chart-legend rect")
     check([rgb(k["fill"]) for k in keys] == [rgb(series[0][0]["fill"]), rgb(series[1][0]["fill"])], "the legend keys in the series' colours")
+    # As seen: inside the drawing (not cut off at its bottom), its letters and key squares on screen.
+    svg_bottom = page.evaluate("""() => { const s = App.deck.getCurrentSlide().getBoundingClientRect();
+        return App.deck.getDocument().querySelector('[data-id="e12"] > svg').getBoundingClientRect().bottom - s.top; }""")
+    ox, oy = page.evaluate(SLIDE_ORIGIN)
+    for node in legend + keys:
+        check(node["box"]["y"] + node["box"]["height"] - oy <= svg_bottom + 0.5, f"the legend inside the drawing: {node['box']} (bottom {svg_bottom})")
+    for node in legend:
+        hit, total = _ink(page, _node_on_screen(page, node), rgb(node["fill"]), 110)
+        check(hit >= 15 and hit < total * 0.7, f"legend {node['text']!r}: its letters on screen: {hit} of {total}")
+    for key in keys:
+        shown = e2e.common_colour(page, _node_on_screen(page, key, 0.2))
+        check(all(abs(a - b) <= 25 for a, b in zip(shown, rgb(key["fill"]))), f"a legend key on screen in {rgb(key['fill'])}: {shown}")
 
     # A horizontal bar chart beside it.
     bars = nodes(page, "e20", "rect.chart-bar")
@@ -184,9 +291,27 @@ def test_gap_p6_charts_drawn(browser):
           f"bar lengths follow the values: {[num(b, 'width') for b in bars]}")
     check(num(bars[0], "y") < num(bars[1], "y") < num(bars[2], "y"), "one bar under the other")
     check(texts(page, "e20", ".chart-category-label") == ["Alfa", "Beta", "Gama"], "the names at the left")
-    columns_box, bars_box = element_rect(page, "e12"), element_rect(page, "e20")
-    check(bars_box["left"] >= columns_box["left"] + columns_box["width"] and bars_box["top"] < columns_box["top"] + columns_box["height"],
-          f"beside the column chart: {columns_box} / {bars_box}")
+    for name, bar in zip(["Alfa", "Beta", "Gama"], bars):   # painted, as seen (nothing over them)
+        colour = rgb(bar["fill"])
+        shown = e2e.common_colour(page, _node_on_screen(page, bar, 0.25))
+        check(len(colour) == 3 and all(abs(a - b) <= 25 for a, b in zip(shown, colour)), f"the {name} bar on screen in {colour}: {shown}")
+    # Beside it, as drawn: the bar chart's drawing (its svg, on the slide) right of the column chart's, at the same height.
+    drawn = page.evaluate("""() => ['e12', 'e20'].map((id) => { const s = App.deck.getCurrentSlide().getBoundingClientRect();
+        const r = App.deck.getDocument().querySelector('[data-id="' + id + '"] > svg').getBoundingClientRect();
+        return { left: r.left - s.left, top: r.top - s.top, right: r.right - s.left, bottom: r.bottom - s.top }; })""")
+    columns_box, bars_box = drawn
+    check(abs(bars_box["right"] - bars_box["left"] - 420) < 1 and abs(bars_box["bottom"] - bars_box["top"] - 280) < 1,
+          f"the bar chart drawn at its size: {bars_box}")
+    check(bars_box["left"] >= columns_box["right"] and bars_box["top"] < columns_box["bottom"] and bars_box["bottom"] > columns_box["top"],
+          f"beside the column chart, as drawn: {columns_box} / {bars_box}")
+    # On screen: a click on the lowest bar (Gama; the text box e13 lies over the chart's top) selects the bar chart.
+    bar_on_slide = page.evaluate("""() => { const s = App.deck.getCurrentSlide().getBoundingClientRect();
+        const b = App.deck.getDocument().querySelectorAll('[data-id="e20"] rect.chart-bar')[2].getBoundingClientRect();
+        return [b.left - s.left + b.width / 2, b.top - s.top + b.height / 2]; }""")
+    check(bar_on_slide[1] > 460 + 2, f"the Gama bar below the text box e13 (160..460): {bar_on_slide}")
+    page.mouse.click(*slide_to_screen(page, *bar_on_slide))
+    check(page.evaluate("App.selection.selectedId()") == "e20", f"a click on a bar on screen selects the bar chart: {page.evaluate('App.selection.selectedId()')}")
+    page.keyboard.press("Escape")
     page.screenshot(path=str(e2e.OUTPUT / (PREFIX + "charts-drawn.png")))
 
     # Drag the column chart's right edge: drawn again narrower, the text the same size.

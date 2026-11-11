@@ -562,4 +562,299 @@ def test_gap_p5_shape_handles(browser):
     editor.close()
 
 
-TESTS = [test_gap_p5_shapes, test_gap_p5_shape_format, test_gap_p5_text_in_shapes, test_gap_p5_shape_handles]
+# ----------------------------------------------------------------------
+# Picture Format
+# ----------------------------------------------------------------------
+
+PICTURE_TAB = ".ribbon-tab[data-tab='picture-format']"
+
+
+def test_gap_p5_picture_format(browser):
+    """Picture Format: click a picture: the Picture Format tab appears (it goes away when a text box is selected).
+    Stretch the picture by a side handle, then Reset Size: back to its proportions. Change Picture, pick a wide
+    logo: it fits inside the old picture's box, centred; one Ctrl+Z brings the old picture back. Right-click a
+    picture: Change Picture is in the menu"""
+    editor = Editor(browser)
+    editor.open(e2e.CONTRACT)
+    page = editor.page
+    photo = e2e.picture_file(page, "gap-p5-photo.png", "noise", 3000, 2000)
+    logo = e2e.picture_file(page, "gap-p5-wide-logo.png", "logo", 600, 100)
+    run = lambda command: page.click(f".ribbon-button[data-command='{command}']")  # noqa: E731
+    info = lambda: page.evaluate(e2e.PICTURE_INFO, picture)  # noqa: E731
+    _go_to_slide(page, 5)   # two text columns (e17, e18) under the title (e16)
+    # A picture to work on (the Pictures hand check covers inserting); the file dialog is answered by the test.
+    page.click(".ribbon-tab[data-tab='insert']")
+    with page.expect_file_chooser() as chooser:
+        run("insertPicture")
+    chooser.value.set_files([str(photo)])
+    e2e.wait_until(page, "App.history.undoLabel() === 'Insert picture'")
+    picture = _selected(page)
+    page.mouse.click(*slide_to_screen(page, 1250, 700))   # empty slide: nothing selected
+    check(_selected(page) is None and page.is_hidden(PICTURE_TAB), "nothing selected: no Picture Format tab")
+
+    # Click a picture: the Picture Format tab appears; it goes away when a text box is selected.
+    box = info()["rect"]
+    page.mouse.click(*slide_to_screen(page, box["left"] + box["width"] / 2, box["top"] + box["height"] / 2))
+    check(_selected(page) == picture and page.is_visible(PICTURE_TAB), f"click the picture: the tab appears: {_selected(page)}")
+    page.mouse.click(*slide_to_screen(page, 100, 78))   # the title text box, left of the picture
+    check(_selected(page) == "e16" and page.is_hidden(PICTURE_TAB), f"a text box selected: the tab goes away: {_selected(page)}")
+    page.mouse.click(*slide_to_screen(page, box["left"] + box["width"] / 2, box["top"] + box["height"] / 2))
+    check(_selected(page) == picture and page.is_visible(PICTURE_TAB), "the picture again: the tab is back")
+    page.click(PICTURE_TAB)
+
+    # Stretch the picture by a side handle, then Reset Size: back to its proportions.
+    natural = info()["natural"]
+    side = _centre(page, _handle("e"))
+    drag(page, side, (side[0] - 300, side[1]))
+    stretched = info()["rect"]
+    check(abs(stretched["width"] / stretched["height"] - natural[0] / natural[1]) > 0.3 and stretched["height"] == box["height"],
+          f"stretched by the side handle: {stretched}")
+    run("resetPictureSize")
+    reset = info()["rect"]
+    check(abs(reset["width"] / reset["height"] - natural[0] / natural[1]) < 0.01, f"Reset Size: back to its proportions {natural}: {reset}")
+    page.screenshot(path=str(e2e.OUTPUT / "gap-p5-picture-reset.png"))
+
+    # Change Picture, pick a wide logo: inside the old picture's box, centred; one Ctrl+Z brings the old one back.
+    old = info()
+    with page.expect_file_chooser() as chooser:
+        run("changePicture")
+    chooser.value.set_files([str(logo)])
+    e2e.wait_until(page, "App.history.undoLabel() === 'Change picture'")
+    new = info()
+    r, o = new["rect"], old["rect"]
+    centre = lambda q: (q["left"] + q["width"] / 2, q["top"] + q["height"] / 2)  # noqa: E731
+    check(new["natural"] == [600, 100] and abs(r["width"] / r["height"] - 6) < 0.05, f"the wide logo, its own proportions: {new}")
+    check(r["left"] >= o["left"] - 0.5 and r["top"] >= o["top"] - 0.5 and r["left"] + r["width"] <= o["left"] + o["width"] + 0.5
+          and r["top"] + r["height"] <= o["top"] + o["height"] + 0.5 and abs(r["width"] - o["width"]) < 0.5,
+          f"it fits inside the old picture's box (as wide as it): {r} / {o}")
+    check(all(abs(a - b) < 0.5 for a, b in zip(centre(r), centre(o))), f"centred in it: {centre(r)} / {centre(o)}")
+    page.screenshot(path=str(e2e.OUTPUT / "gap-p5-picture-changed.png"))
+    page.keyboard.press("Control+z")
+    check(info()["natural"] == old["natural"] and info()["rect"] == o, f"one Ctrl+Z: the old picture back: {info()}")
+
+    # Right-click a picture: Change Picture is in the menu.
+    page.mouse.click(*slide_to_screen(page, *centre(o)), button="right")
+    item = page.locator(".context-menu .menu-item:has-text('Change Picture')")
+    check(item.count() == 1 and item.is_visible(), "right-click: Change Picture in the menu")
+    page.keyboard.press("Escape")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+# ----------------------------------------------------------------------
+# Crop
+# ----------------------------------------------------------------------
+
+# An 800 x 400 PNG: the left half white with a dark square, the right half coloured noise (heavy to store).
+HALF_NOISE = """() => { const canvas = document.createElement('canvas'); canvas.width = 800; canvas.height = 400;
+    const c = canvas.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0, 0, 400, 400);
+    c.fillStyle = '#1F2A44'; c.fillRect(40, 40, 120, 120);
+    for (let y = 0; y < 400; y += 2) for (let x = 400; x < 800; x += 2) {
+        c.fillStyle = 'rgb(' + [0, 1, 2].map(() => Math.floor(Math.random() * 256)).join(',') + ')'; c.fillRect(x, y, 2, 2); }
+    return canvas.toDataURL('image/png').split(',')[1]; }"""
+
+# The average colour [r, g, b] of a part of the window (screen px), from a real screenshot.
+MEAN = """(png) => new Promise((resolve) => { const image = new Image();
+    image.onload = () => { const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+        const c = canvas.getContext('2d'); c.drawImage(image, 0, 0);
+        const d = c.getImageData(0, 0, image.width, image.height).data; const sum = [0, 0, 0];
+        for (let i = 0; i < d.length; i += 4) { sum[0] += d[i]; sum[1] += d[i + 1]; sum[2] += d[i + 2]; }
+        resolve(sum.map((v) => Math.round(v / (d.length / 4)))); };
+    image.src = 'data:image/png;base64,' + png; })"""
+
+
+def _mean_colour(page, x0, y0, x1, y1):
+    """Average colour of slide area (x0, y0)-(x1, y1) as shown on screen."""
+    import base64
+    left, top = slide_to_screen(page, x0, y0)
+    right, bottom = slide_to_screen(page, x1, y1)
+    png = base64.b64encode(page.screenshot(clip={"x": left, "y": top, "width": right - left, "height": bottom - top})).decode()
+    return page.evaluate(MEAN, png)
+
+
+def test_gap_p5_crop(browser):
+    """Crop: select a picture, Picture Format > Crop: black handles on its edges. Drag the right handle in: the part
+    that goes is dimmed. Press Enter: the picture is now only the kept part. Save and compare the file size with an
+    uncropped copy: smaller (the cut-away pixels are gone). Ctrl+Z: the whole picture is back. Crop again and click
+    on empty slide: applied too"""
+    import base64
+    editor = Editor(browser)
+    editor.open(e2e.CONTRACT)
+    page = editor.page
+    picture_path = e2e.OUTPUT / "gap-p5-half-noise.png"
+    picture_path.write_bytes(base64.b64decode(page.evaluate(HALF_NOISE)))
+    run = lambda command: page.click(f".ribbon-button[data-command='{command}']")  # noqa: E731
+    info = lambda: page.evaluate(e2e.PICTURE_INFO, picture)  # noqa: E731
+    crop_handles = "#overlay .crop-handle:visible"
+    _go_to_slide(page, 5)
+    page.click(".ribbon-tab[data-tab='insert']")
+    with page.expect_file_chooser() as chooser:
+        run("insertPicture")
+    chooser.value.set_files([str(picture_path)])
+    e2e.wait_until(page, "App.history.undoLabel() === 'Insert picture'")
+    picture = _selected(page)
+    box = info()["rect"]
+    check(info()["natural"] == [800, 400] and box["width"] == 800, f"the picture, 800 x 400: {info()}")
+    uncropped = editor.save_as_download("gap-p5-uncropped.html")   # the uncropped copy, for the size
+
+    # Select a picture, Picture Format > Crop: black handles on its edges.
+    page.mouse.click(*slide_to_screen(page, 1250, 700))
+    page.mouse.click(*slide_to_screen(page, box["left"] + 200, box["top"] + 300))
+    check(_selected(page) == picture, f"the picture selected by a click: {_selected(page)}")
+    page.click(PICTURE_TAB)
+    run("cropPicture")
+    check(page.locator(crop_handles).count() == 8, f"Crop: 8 handles: {page.locator(crop_handles).count()}")
+    edges = {}
+    for name in ("n", "s", "e", "w"):
+        h = page.locator(f"#overlay .crop-handle[data-crop-handle='{name}']").bounding_box()
+        edges[name] = h
+        colour = e2e.common_colour(page, {"left": h["x"] + 1, "top": h["y"] + 1, "right": h["x"] + h["width"] - 1, "bottom": h["y"] + h["height"] - 1})
+        check(max(colour) <= 30, f"the {name} handle is black on screen: {colour}")
+    left_edge, top_edge = slide_to_screen(page, box["left"], box["top"])
+    right_edge, bottom_edge = slide_to_screen(page, box["left"] + box["width"], box["top"] + box["height"])
+    check(abs(edges["e"]["x"] + edges["e"]["width"] - right_edge) <= 2 and abs(edges["w"]["x"] - left_edge) <= 2
+          and abs(edges["n"]["y"] - top_edge) <= 2 and abs(edges["s"]["y"] + edges["s"]["height"] - bottom_edge) <= 2,
+          f"on the picture's edges: {edges} / {(left_edge, top_edge, right_edge, bottom_edge)}")
+
+    # Drag the right handle in: the part that goes is dimmed (and the kept part is not).
+    going = (box["left"] + 620, box["top"] + 50, box["left"] + 780, box["top"] + 350)
+    kept = (box["left"] + 420, box["top"] + 50, box["left"] + 480, box["top"] + 350)
+    before_going, before_kept = _mean_colour(page, *going), _mean_colour(page, *kept)
+    zoom = page.evaluate("App.canvas.getZoom()")
+    east = _centre(page, "#overlay .crop-handle[data-crop-handle='e']")
+    drag(page, east, (east[0] - 300 * zoom, east[1]))
+    after_going, after_kept = _mean_colour(page, *going), _mean_colour(page, *kept)
+    check(all(a < 0.7 * b for a, b in zip(after_going, before_going)), f"the part that goes is dimmed: {before_going} -> {after_going}")
+    check(all(abs(a - b) <= 12 for a, b in zip(after_kept, before_kept)), f"the kept part is not: {before_kept} -> {after_kept}")
+    page.screenshot(path=str(e2e.OUTPUT / "gap-p5-crop-dimmed.png"))
+
+    # Press Enter: the picture is now only the kept part.
+    page.keyboard.press("Enter")
+    check(page.locator(crop_handles).count() == 0, "Enter: crop mode ends")
+    e2e.wait_until(page, "id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').naturalWidth === 500", arg=picture)
+    rect = {k: round(v) for k, v in info()["rect"].items()}
+    check(info()["natural"] == [500, 400] and rect == {"left": round(box["left"]), "top": round(box["top"]), "width": 500, "height": 400},
+          f"only the kept part, where it was: {info()}")
+    shown_kept = _mean_colour(page, *kept)
+    check(all(abs(a - b) <= 12 for a, b in zip(shown_kept, before_kept)), f"the kept part looks as before: {before_kept} -> {shown_kept}")
+
+    # Save and compare the file size with the uncropped copy: smaller.
+    cropped = editor.save_as_download("gap-p5-cropped.html")
+    small, big = cropped.stat().st_size, uncropped.stat().st_size
+    check(small < big - 100_000, f"the saved deck is smaller than the uncropped copy: {small} vs {big} bytes")
+
+    # Ctrl+Z: the whole picture is back.
+    page.keyboard.press("Control+z")
+    e2e.wait_until(page, "id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').naturalWidth === 800", arg=picture)
+    check(info()["natural"] == [800, 400] and info()["rect"] == box, f"Ctrl+Z: the whole picture back: {info()}")
+
+    # Crop again and click on empty slide: applied too.
+    page.mouse.click(*slide_to_screen(page, box["left"] + 200, box["top"] + 300))
+    page.click(PICTURE_TAB)
+    run("cropPicture")
+    east = _centre(page, "#overlay .crop-handle[data-crop-handle='e']")
+    drag(page, east, (east[0] - 300 * zoom, east[1]))
+    page.mouse.click(*slide_to_screen(page, 1250, 700))
+    check(page.locator(crop_handles).count() == 0, "a click on empty slide ends crop mode")
+    e2e.wait_until(page, "id => App.deck.getDocument().querySelector('[data-id=\"' + id + '\"]').naturalWidth === 500", arg=picture)
+    check(info()["natural"] == [500, 400] and round(info()["rect"]["width"]) == 500, f"applied too: {info()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+# ----------------------------------------------------------------------
+# Pictures
+# ----------------------------------------------------------------------
+
+# A 3000 x 2000 JPEG "photo" (coloured noise, as a camera's file is heavy).
+BIG_JPEG = """() => { const canvas = document.createElement('canvas'); canvas.width = 3000; canvas.height = 2000;
+    const c = canvas.getContext('2d');
+    for (let y = 0; y < 2000; y += 8) for (let x = 0; x < 3000; x += 8) {
+        c.fillStyle = 'rgb(' + [0, 1, 2].map(() => Math.floor(Math.random() * 256)).join(',') + ')'; c.fillRect(x, y, 8, 8); }
+    return canvas.toDataURL('image/jpeg', 0.92).split(',')[1]; }"""
+
+
+def _deck_bytes(text):
+    """'Deck 1.4 MB' / 'Deck 812 KB' as bytes."""
+    number, unit = re.search(r"Deck ([\d.,]+) (KB|MB)", text).groups()
+    return float(number.replace(",", ".")) * (1024 if unit == "KB" else 1024 * 1024)
+
+
+def test_gap_p5_pictures(browser):
+    """Pictures: Insert > Pictures, pick a big JPEG photo and a small logo PNG at once (Ctrl+click both): both
+    appear in the middle of the slide (the photo fits inside the slide), one Ctrl+Z removes both. The status bar
+    shows "Deck … MB", growing after an insert. Drag a picture's corner: it keeps its proportions; a side handle
+    stretches it. Save, look at the file's size in Explorer: close to the status bar's"""
+    import base64
+    editor = Editor(browser)
+    editor.open(e2e.CONTRACT)
+    page = editor.page
+    photo = e2e.OUTPUT / "gap-p5-big-photo.jpg"
+    photo.write_bytes(base64.b64decode(page.evaluate(BIG_JPEG)))
+    logo = e2e.picture_file(page, "gap-p5-small-logo.png", "logo", 300, 100)
+    check(photo.stat().st_size > 600_000, f"a big JPEG photo: {photo.stat().st_size} bytes")
+    status = lambda: page.text_content("#status-size") or ""  # noqa: E731
+    pictures = lambda: page.evaluate("App.deck.getCurrentSlide().querySelectorAll('[data-type=\"image\"]').length")  # noqa: E731
+    _go_to_slide(page, 5)
+    check(page.is_visible("#status-size") and re.fullmatch(r"Deck [\d.,]+ (KB|MB)", status()), f"the status bar shows the deck size: {status()!r}")
+    before = status()
+
+    # Insert > Pictures, both files at once (the file dialog is answered by the test): both in the middle of the slide,
+    # the photo fitting inside it.
+    page.click(".ribbon-tab[data-tab='insert']")
+    with page.expect_file_chooser() as chooser:
+        page.click(".ribbon-button[data-command='insertPicture']")
+    check(chooser.value.is_multiple(), "the file dialog takes several files (Ctrl+click)")
+    chooser.value.set_files([str(photo), str(logo)])
+    e2e.wait_until(page, "App.history.undoLabel() === 'Insert pictures'")
+    ids = page.evaluate("Array.from(App.deck.getCurrentSlide().querySelectorAll('[data-type=\"image\"]'), (e) => e.getAttribute('data-id'))")
+    check(len(ids) == 2, f"both appear: {ids}")
+    info = {i: page.evaluate(e2e.PICTURE_INFO, i) for i in ids}
+    by_size = sorted(ids, key=lambda i: info[i]["rect"]["width"] * info[i]["rect"]["height"])
+    logo_id, photo_id = by_size
+    for n, i in enumerate(ids):   # in the middle of the slide; each further one 10 px down and right (images.js), not stacked exactly
+        r = info[i]["rect"]
+        check(abs(r["left"] + r["width"] / 2 - 640 - 10 * n) <= 1 and abs(r["top"] + r["height"] / 2 - 360 - 10 * n) <= 1,
+              f"in the middle of the slide (picture {n + 1}): {r}")
+    r = info[photo_id]["rect"]
+    check(r["left"] >= 0 and r["top"] >= 0 and r["left"] + r["width"] <= 1280 and r["top"] + r["height"] <= 720
+          and abs(r["width"] / r["height"] - 1.5) < 0.01, f"the photo fits inside the slide, 3:2: {r}")
+    check(info[logo_id]["rect"]["width"] == 300, f"the logo at its own size: {info[logo_id]['rect']}")
+    page.screenshot(path=str(e2e.OUTPUT / "gap-p5-pictures.png"))
+
+    # The status bar shows "Deck … MB", growing after an insert.
+    e2e.wait_until(page, "t => document.getElementById('status-size').textContent !== t", arg=before)
+    check(re.fullmatch(r"Deck [\d.,]+ MB", status()) and _deck_bytes(status()) > _deck_bytes(before) + 200_000,
+          f"the deck size grew, in MB: {before} -> {status()}")
+
+    # One Ctrl+Z removes both (Ctrl+Y brings them back to go on).
+    page.keyboard.press("Control+z")
+    check(pictures() == 0, f"one Ctrl+Z removes both: {pictures()}")
+    page.keyboard.press("Control+y")
+    check(pictures() == 2, f"Ctrl+Y: both back: {pictures()}")
+
+    # Drag a picture's corner: it keeps its proportions; a side handle stretches it.
+    page.mouse.click(*slide_to_screen(page, 1250, 700))
+    page.mouse.click(*slide_to_screen(page, r["left"] + 60, r["top"] + 60))   # the photo, away from the logo on top
+    check(_selected(page) == photo_id, f"the photo selected: {_selected(page)}")
+    corner = _centre(page, _handle("se"))
+    drag(page, corner, (corner[0] - 200, corner[1] - 30))
+    cornered = page.evaluate(e2e.PICTURE_INFO, photo_id)["rect"]
+    check(cornered["width"] < r["width"] - 50 and abs(cornered["width"] / cornered["height"] - 1.5) < 0.01,
+          f"the corner keeps its proportions: {cornered}")
+    side = _centre(page, _handle("e"))
+    drag(page, side, (side[0] - 150, side[1]))
+    sided = page.evaluate(e2e.PICTURE_INFO, photo_id)["rect"]
+    check(sided["height"] == cornered["height"] and abs(sided["width"] / sided["height"] - 1.5) > 0.2,
+          f"a side handle stretches it: {sided}")
+
+    # Save: the file's size is close to the status bar's.
+    page.wait_for_timeout(1500)   # the size in the status bar follows a moment after a change
+    shown = _deck_bytes(status())
+    saved = editor.save_as_download("gap-p5-pictures-saved.html")
+    check(abs(shown - saved.stat().st_size) / saved.stat().st_size < 0.05, f"{status()} vs {saved.stat().st_size} bytes on disk")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+TESTS = [test_gap_p5_pictures, test_gap_p5_crop, test_gap_p5_picture_format, test_gap_p5_shapes, test_gap_p5_shape_format, test_gap_p5_text_in_shapes, test_gap_p5_shape_handles]

@@ -298,10 +298,10 @@ App.createHistory = function createHistory(options) {
         undo: undo, redo: redo, reset: reset, markSaved: markSaved, markDirty: markDirty,
         stateId: () => currentState,
         isPending: () => pending !== null,
-        canUndo: () => undoStack.length > 0,
+        canUndo: () => undoStack.length > 0 || pending !== null,   // undo() commits a pending step first
         canRedo: () => redoStack.length > 0,
         isDirty: () => currentState !== savedState,
-        undoLabel: () => (undoStack.length ? undoStack[undoStack.length - 1].label : null),
+        undoLabel: () => (pending ? pending.label : undoStack.length ? undoStack[undoStack.length - 1].label : null),
         redoLabel: () => (redoStack.length ? redoStack[redoStack.length - 1].label : null),
     };
 };

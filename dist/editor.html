@@ -1896,10 +1896,10 @@ App.createHistory = function createHistory(options) {
         undo: undo, redo: redo, reset: reset, markSaved: markSaved, markDirty: markDirty,
         stateId: () => currentState,
         isPending: () => pending !== null,
-        canUndo: () => undoStack.length > 0,
+        canUndo: () => undoStack.length > 0 || pending !== null,   // undo() commits a pending step first
         canRedo: () => redoStack.length > 0,
         isDirty: () => currentState !== savedState,
-        undoLabel: () => (undoStack.length ? undoStack[undoStack.length - 1].label : null),
+        undoLabel: () => (pending ? pending.label : undoStack.length ? undoStack[undoStack.length - 1].label : null),
         redoLabel: () => (redoStack.length ? redoStack[redoStack.length - 1].label : null),
     };
 };
@@ -6923,6 +6923,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         if (editing.element.isConnected) {
             return;
+        }
+        // A step that moved the cell being typed in (Insert rows above...) names it before and after: meta.cells.
+        const cells = info.meta && info.meta.cells;
+        const other = info.action === 'undo' ? 'redo' : 'undo';
+        if (cells && cells[info.action] && cells[other] === editing.id) {
+            editing.id = cells[info.action];
         }
         const found = doc && App.text.findContainer(doc, editing.slideId, editing.id);
         if (!found) {
@@ -19232,6 +19238,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (!App.tableControls.canLayout(action)) {
             return;
         }
+        // The cell typed in before and after, so undo / redo go on typing in that cell even when it moved
+        // (text.js afterHistoryChange; `redo` is filled in below, the step keeps this same object).
+        const cells = { undo: target.cell ? App.text.containerKey(target.cell) : null, redo: null };
         App.text.exitEdit({ select: false });
         clearBlock();
         let next = null;
@@ -19242,7 +19251,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 App.tables.alignNumbers(target.table);   // a deleted row of words may leave a column of numbers
                 App.tables.fitTable(target.element);
             }
-        });
+        }, { meta: { cells: cells } });
         if (!target.element.isConnected) {
             App.selection.clear();
             return;
@@ -19250,6 +19259,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.selection.select(target.element);
         const cell = next || (target.cell && target.cell.isConnected ? target.cell : null);
         if (cell) {
+            cells.redo = App.text.containerKey(cell);
             App.text.enterEdit(cell, { caret: 'end' });
         }
     };

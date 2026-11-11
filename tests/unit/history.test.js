@@ -390,3 +390,16 @@ test('history: undo commits a pending step first, then undoes it', () => {
     assert(history.redo(), 'and redo brings the typing back');
     assertEqual(textOf(doc, 'e1'), 'typed');
 });
+
+test('history: a pending step (typing) can be undone even when nothing came before it', () => {
+    const doc = deckWithTwoSlides();
+    const history = App.createHistory({ getDoc: () => doc });
+    assert(!history.canUndo(), 'nothing to undo on a fresh deck');
+    history.begin('Typing', { slideId: 's1' });
+    doc.querySelector('[data-id="e1"]').textContent = 'One7';
+    assert(history.canUndo(), 'the typing still being recorded counts: Ctrl+Z is enabled');
+    assertEqual(history.undoLabel(), 'Typing');
+    assert(history.undo(), 'undo returns true');
+    assertEqual(textOf(doc, 'e1'), 'One');
+    assert(!history.canUndo(), 'nothing left');
+});

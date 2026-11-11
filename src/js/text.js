@@ -3674,6 +3674,12 @@
         if (editing.element.isConnected) {
             return;
         }
+        // A step that moved the cell being typed in (Insert rows above...) names it before and after: meta.cells.
+        const cells = info.meta && info.meta.cells;
+        const other = info.action === 'undo' ? 'redo' : 'undo';
+        if (cells && cells[info.action] && cells[other] === editing.id) {
+            editing.id = cells[info.action];
+        }
         const found = doc && App.text.findContainer(doc, editing.slideId, editing.id);
         if (!found) {
             App.text.exitEdit({ select: false });

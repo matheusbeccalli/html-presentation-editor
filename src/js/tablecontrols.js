@@ -451,6 +451,9 @@
         if (!App.tableControls.canLayout(action)) {
             return;
         }
+        // The cell typed in before and after, so undo / redo go on typing in that cell even when it moved
+        // (text.js afterHistoryChange; `redo` is filled in below, the step keeps this same object).
+        const cells = { undo: target.cell ? App.text.containerKey(target.cell) : null, redo: null };
         App.text.exitEdit({ select: false });
         clearBlock();
         let next = null;
@@ -461,7 +464,7 @@
                 App.tables.alignNumbers(target.table);   // a deleted row of words may leave a column of numbers
                 App.tables.fitTable(target.element);
             }
-        });
+        }, { meta: { cells: cells } });
         if (!target.element.isConnected) {
             App.selection.clear();
             return;
@@ -469,6 +472,7 @@
         App.selection.select(target.element);
         const cell = next || (target.cell && target.cell.isConnected ? target.cell : null);
         if (cell) {
+            cells.redo = App.text.containerKey(cell);
             App.text.enterEdit(cell, { caret: 'end' });
         }
     };

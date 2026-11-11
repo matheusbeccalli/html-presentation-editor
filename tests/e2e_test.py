@@ -4566,6 +4566,37 @@ def App_round(value):
     return int(rounded) if rounded == int(rounded) else rounded
 
 
+def test_table_layout_undo_keeps_the_typing_cell(browser):
+    """Typing in a cell, Insert rows above (or columns left) moves the cell; Ctrl+Z and Ctrl+Y keep the typing in that
+    same cell, not in the one that now has its old row / column number."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("App.deck.goTo(2)")
+    grid = lambda: page.evaluate(E9_GRID)  # noqa: E731
+    key = lambda: page.evaluate(EDITING_KEY)  # noqa: E731
+    run = lambda command: page.click(f".ribbon-button[data-command='{command}']")  # noqa: E731
+    start = grid()
+    page.mouse.click(*slide_to_screen(page, 200, 196))   # Beta Foods
+    page.click(".ribbon-tab[data-tab='table-layout']")
+    check(key() == "e9/1/0", f"typing in Beta Foods: {key()}")
+    for command, moved in [("insertRowAbove", "e9/2/0"), ("insertColumnLeft", "e9/1/1")]:
+        run(command)
+        check(key() == moved, f"{command}: typing follows Beta Foods to {moved}: {key()}")
+        page.keyboard.press("Control+z")
+        check(grid() == start and key() == "e9/1/0", f"{command}, Ctrl+Z: typing back in Beta Foods: {key()}")
+        page.keyboard.press("Control+y")
+        check(key() == moved, f"{command}, Ctrl+Y: typing in Beta Foods again: {key()}")
+        page.keyboard.press("Control+z")
+        page.keyboard.type("7")
+        check(any(row.startswith("Beta Foods7|") or "|Beta Foods7|" in row for row in grid()) and "Gama Nutrição7" not in "".join(grid()),
+              f"{command}: a key typed after Ctrl+Z lands in Beta Foods: {grid()}")
+        page.keyboard.press("Control+z")
+        check(grid() == start, f"Ctrl+Z: the key goes: {grid()}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 def test_table_layout(browser):
     """Table > Layout: select cells by dragging or Shift+click; insert / delete rows and columns, merge, split, delete."""
     editor = Editor(browser)
@@ -4608,8 +4639,15 @@ def test_table_layout(browser):
     drag(page, slide_to_screen(page, 480, 196), slide_to_screen(page, 750, 232))
     check(key() is None and page.is_visible(".cell-block"), "a drag across cells selects cells, not text")
     block = page.evaluate("App.transform.readRect(document.querySelector('.cell-block'))")
-    check(abs(block["left"] - 375) < 2 and abs(block["top"] - 178) < 2 and abs(block["width"] - 540) < 3 and abs(block["height"] - 73.5) < 2,
-          f"the shaded block covers the four cells: {block}")
+    # The four cells as this browser lays them out (Edge's rows are a little taller than Chromium's).
+    cells = page.evaluate("""() => { const t = App.deck.getDocument().querySelector('[data-id="e9"] table');
+        const s = App.deck.getCurrentSlide().getBoundingClientRect();
+        const a = t.rows[1].cells[1].getBoundingClientRect(), b = t.rows[2].cells[2].getBoundingClientRect();
+        return { left: a.left - s.left, top: a.top - s.top, width: b.right - a.left, height: b.bottom - a.top,
+                 texts: [t.rows[1].cells[1].textContent.trim(), t.rows[2].cells[2].textContent.trim()] }; }""")
+    check(cells["texts"] == ["2.450", "8,9x"], f"from 2.450 to 8,9x: {cells['texts']}")
+    check(all(abs(block[k] - cells[k]) < 1.5 for k in ("left", "top", "width", "height")),
+          f"the shaded block covers the four cells: {block} / {cells}")
     page.click(layout_tab)
     run("mergeCells")
     check(grid()[1] == "Beta Foods|2.450/9,8x/1.120/8,9x|2.450/9,8x/1.120/8,9x|19,5%", f"merged, the text kept: {grid()[1:3]}")
@@ -5621,6 +5659,7 @@ TESTS = [
     test_insert_and_resize_table,
     test_table_cell_editing,
     test_table_layout,
+    test_table_layout_undo_keeps_the_typing_cell,
     test_table_column_borders,
     test_table_design,
     test_table_numbers,

@@ -57,3 +57,12 @@ test('elements: a locked element (data-locked) does not turn; its lock is its ow
     assertEqual([App.elements.isLocked(byId('a')), App.elements.isLocked(byId('g')), App.elements.isLocked(null)], [true, false, false]);
     assertEqual([App.elements.canRotateElement(byId('a')), App.elements.canRotateElement(byId('g'))], [false, true]);
 });
+
+test('elements: a line does not turn, unless it already is (from a turned group): then it can be set back upright', () => {
+    const doc = parseDoc('<html><body><section class="slide">' +
+        '<div class="el" data-type="shape" data-shape="line" data-id="a"></div>' +
+        '<div class="el" data-type="shape" data-shape="line" data-id="b" style="transform: rotate(30deg);"></div>' +
+        '</section></body></html>');
+    const byId = (id) => doc.querySelector('[data-id="' + id + '"]');
+    assertEqual([App.elements.canRotateElement(byId('a')), App.elements.canRotateElement(byId('b'))], [false, true]);
+});

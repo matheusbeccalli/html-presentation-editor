@@ -338,6 +338,10 @@
             return;
         }
         event.preventDefault();
+        if (event.type === 'cut' && !App.elements.canDelete()) {
+            App.ui.setStatus('Locked: Arrange > Lock unlocks it first');   // nothing cut, the clipboard left as it was
+            return;
+        }
         const text = textOfAll(elements);
         inClipboardEvent = true;
         try {
@@ -514,7 +518,7 @@
     /*
      * Can `element` be turned? Not when locked; not a table or a chart (PowerPoint does not turn
      * them either), nor a group holding one; not a line, whose two end handles
-     * already point it any way.
+     * already point it any way (unless it is turned already: see below).
      */
     App.elements.canRotateElement = function canRotateElement(element) {
         if (!element || App.elements.isLocked(element)) {
@@ -527,7 +531,8 @@
         if (type === 'group') {
             return !element.querySelector('.el[data-type="table"], .el[data-type="chart"]');
         }
-        return !(type === 'shape' && App.shapes.isLine(element.getAttribute('data-shape')));
+        // A line that is turned already (it came out of a turned group) can be turned back.
+        return !(type === 'shape' && App.shapes.isLine(element.getAttribute('data-shape'))) || App.transform.rotationOf(element) !== 0;
     };
 
     function rotatableSelected() {

@@ -13828,6 +13828,10 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         event.preventDefault();
+        if (event.type === 'cut' && !App.elements.canDelete()) {
+            App.ui.setStatus('Locked: Arrange > Lock unlocks it first');   // nothing cut, the clipboard left as it was
+            return;
+        }
         const text = textOfAll(elements);
         inClipboardEvent = true;
         try {
@@ -14004,7 +14008,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     /*
      * Can `element` be turned? Not when locked; not a table or a chart (PowerPoint does not turn
      * them either), nor a group holding one; not a line, whose two end handles
-     * already point it any way.
+     * already point it any way (unless it is turned already: see below).
      */
     App.elements.canRotateElement = function canRotateElement(element) {
         if (!element || App.elements.isLocked(element)) {
@@ -14017,7 +14021,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (type === 'group') {
             return !element.querySelector('.el[data-type="table"], .el[data-type="chart"]');
         }
-        return !(type === 'shape' && App.shapes.isLine(element.getAttribute('data-shape')));
+        // A line that is turned already (it came out of a turned group) can be turned back.
+        return !(type === 'shape' && App.shapes.isLine(element.getAttribute('data-shape'))) || App.transform.rotationOf(element) !== 0;
     };
 
     function rotatableSelected() {
@@ -17028,7 +17033,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
         // Picture Format (images.js): only while a picture is selected.
         App.commands.define('changePicture', {
-            label: 'Change Picture', isEnabled: () => App.images.isPictureSelected(),
+            label: 'Change Picture', isEnabled: () => App.images.isPictureSelected() && !App.elements.isLocked(App.selection.getElement()),
             run: () => App.images.chooseReplacement(),
         });
         App.commands.define('cropPicture', {
@@ -18131,6 +18136,10 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     App.tableControls.canLayout = function canLayout(action) {
+        // A locked table (Phase 7) keeps its size and stays: no rows or columns added or deleted, no Delete Table.
+        if (App.elements.isLocked(App.selection.getElement()) && action !== 'mergeCells' && action !== 'splitCells') {
+            return false;
+        }
         if (action === 'deleteTable') {
             return App.tableControls.isTableSelected();
         }

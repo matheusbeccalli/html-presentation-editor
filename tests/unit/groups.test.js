@@ -90,3 +90,14 @@ test('groups: ungrouping a turned group leaves each part where it shows, turned 
     assertEqual([rectText(byId(slide, 'a')), App.transform.rotationOf(byId(slide, 'a'))], ['50,-50,100,100', 90]);
     assertEqual([rectText(byId(slide, 'b')), App.transform.rotationOf(byId(slide, 'b'))], ['50,50,100,100', 100]);
 });
+
+test('groups: grouping a turned part: the group\'s box is round what shows', () => {
+    const slide = parseDoc('<html><head></head><body><section class="slide" data-slide-id="s1">' +
+        '<div class="el" data-type="text" data-id="a" style="left: 0px; top: 100px; width: 200px; height: 20px; z-index: 1; transform: rotate(90deg);"><p>A</p></div>' +
+        '<div class="el" data-type="text" data-id="b" style="left: 300px; top: 100px; width: 50px; height: 50px; z-index: 2;"><p>B</p></div>' +
+        '</section></body></html>').querySelector('section');
+    // A shows upright from x 90 to 110, y 10 to 210.
+    const group = App.groups.makeGroup(slide, [byId(slide, 'a'), byId(slide, 'b')], 'g1');
+    assertEqual(rectText(group), '90,10,260,200');
+    assertEqual([rectText(byId(slide, 'a')), App.transform.rotationOf(byId(slide, 'a'))], ['-90,90,200,20', 90]);
+});

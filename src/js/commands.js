@@ -298,7 +298,7 @@
         });
         // Picture Format (images.js): only while a picture is selected.
         App.commands.define('changePicture', {
-            label: 'Change Picture', isEnabled: () => App.images.isPictureSelected(),
+            label: 'Change Picture', isEnabled: () => App.images.isPictureSelected() && !App.elements.isLocked(App.selection.getElement()),
             run: () => App.images.chooseReplacement(),
         });
         App.commands.define('cropPicture', {

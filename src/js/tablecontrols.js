@@ -419,6 +419,10 @@
     };
 
     App.tableControls.canLayout = function canLayout(action) {
+        // A locked table (Phase 7) keeps its size and stays: no rows or columns added or deleted, no Delete Table.
+        if (App.elements.isLocked(App.selection.getElement()) && action !== 'mergeCells' && action !== 'splitCells') {
+            return false;
+        }
         if (action === 'deleteTable') {
             return App.tableControls.isTableSelected();
         }

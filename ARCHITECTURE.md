@@ -262,7 +262,8 @@ Drag the round handle → selection.startDrag 'rotate' → transform.angleAt(cen
   'Rotate'); Rotation field / Arrange > Rotate → elements.rotateTo / rotateBy; a turned element: elementAt passes its angle to
   hitTest, resize → resizeRotated (no snapping), move / align / snap targets / rubber band / rulers use visualRect
 Arrange > Lock / right-click > Lock → commands 'lock' → elements.toggleLock (history 'Lock' / 'Unlock') → selection.refresh:
-  box.locked; startDrag / nudge / remove / placeSelected / formatpane / groups.canGroup / canUngroup / crop / Reset Size check isLocked
+  box.locked; startDrag / nudge / remove / cut event / placeSelected / formatpane / groups.canGroup / canUngroup / tableControls.canLayout /
+  Crop / Reset Size / Change Picture check isLocked
 Drag a thumbnail (or Ctrl+Up / Ctrl+Down in the rail) → slides.move(from, gap) → history 'Move slide' { slides: [] } → the moved
   slide shown (after undo / redo too)
 Hide Slide (Slide Show tab, right-click a thumbnail) → commands 'hideSlide' → slides.toggleHidden → history 'Hide slide' /

@@ -3981,6 +3981,9 @@ def test_rotate(browser):
     for _ in range(3):
         page.keyboard.press("Control+z")
     check(angle() == 90, f"undo three times: {angle()}")
+    page.click(button("alignObjectsLeft"))
+    check(shows()[0] == 0 and element_rect(page, "e1")["left"] == -40, f"aligned by what shows: {shows()}")
+    page.keyboard.press("Control+z")
 
     # A turned picture is not cropped (the crop frame is upright): Crop is off until it is upright again.
     page.mouse.click(*slide_to_screen(page, 124, 76))
@@ -4004,7 +4007,9 @@ def test_lock(browser):
     """Phase 7: Arrange > Lock (and the right-click menu): a locked element stays selectable (to unlock it, format it,
     type in it) but cannot be moved, resized, turned or deleted: no handles; drag, arrows, Delete, Ctrl+X, align and
     the Format pane leave it; with others selected they move, it stays. One undo step; kept when saved; copies are not locked."""
-    editor = Editor(browser)
+    context = browser.new_context(viewport={"width": 1440, "height": 900}, accept_downloads=True)
+    context.grant_permissions(["clipboard-read", "clipboard-write"])
+    editor = Editor(browser, context)
     editor.open(CONTRACT)
     page = editor.page
     label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
@@ -4036,6 +4041,11 @@ def test_lock(browser):
     check(page.is_disabled("#format-x") and page.is_disabled("#format-w") and page.is_disabled("#format-rotation"),
           "the Format pane's size and position are off")
     check(page.is_disabled(button("rotateRight90")), "no turning")
+    check(not page.evaluate("App.commands.isEnabled('changePicture') || App.commands.isEnabled('resetPictureSize')"),
+          "Change Picture and Reset Size are off (they would resize it)")
+    put_text_on_clipboard(page, "kept")
+    page.keyboard.press("Control+x")
+    check(page.evaluate("navigator.clipboard.readText()") == "kept", "Ctrl+X on a locked element leaves the clipboard alone")
 
     # With others selected: they move, it stays.
     page.keyboard.press("Control+a")
@@ -4066,6 +4076,16 @@ def test_lock(browser):
     page.keyboard.press("Control+z")
     page.keyboard.press("Control+z")
     check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').getAttribute('data-locked')") == "true", "undo: locked")
+
+    # A locked table keeps its rows and columns: Table > Layout cannot add, delete or remove it.
+    page.evaluate("App.deck.goTo(2)")
+    page.evaluate("App.selection.select(App.deck.getDocument().querySelector('[data-id=\"e9\"]')); App.elements.toggleLock()")
+    page.mouse.click(*slide_to_screen(page, 200, 196))   # types in Beta Foods' cell
+    check(page.evaluate("App.text.isEditing()"), "typing in a locked table's cell")
+    check(not page.evaluate("['insertRowBelow', 'insertColumnLeft', 'deleteRows', 'deleteColumns', 'deleteTable']"
+                            ".some((name) => App.commands.isEnabled(name))"), "no rows or columns added or deleted")
+    page.keyboard.press("Escape")
+    page.evaluate("App.deck.goTo(0)")
 
     # Saved and reopened: still locked.
     saved = editor.save_as_download("locked.html")

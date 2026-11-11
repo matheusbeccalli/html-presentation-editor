@@ -1,6 +1,7 @@
 /*
  * images.test.js - pictures (Phase 5): sizes, compression on insert (longest
- * side 1920 px; the smaller of PNG and JPEG 0.85; transparent stays PNG) and
+ * side 1920 px; graphics (few colours: logos, screenshots) and transparent
+ * pictures stay PNG, photos take the smaller of PNG and JPEG 0.85) and
  * the picture element. Test pictures are drawn on a canvas here: fake data only.
  */
 
@@ -66,6 +67,38 @@ test('images: a logo or screenshot with flat colours stays PNG when that is smal
     const picture = await App.images.compress(await drawnBlob(300, 100, logo));
     assertEqual(picture.type, 'image/png');
     assertEqual([picture.width, picture.height], [300, 100]);
+});
+
+/* The RGBA pixels of a canvas `width` x `height` drawn by draw(context). */
+function drawnPixels(width, height, draw) {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    draw(canvas.getContext('2d'));
+    return canvas.getContext('2d').getImageData(0, 0, width, height).data;
+}
+
+test('images: a logo or screenshot (few colours) is a graphic; a photo is not', () => {
+    assertEqual(App.images.isGraphic(drawnPixels(300, 100, logo), 300, 100), true, 'a logo');
+    assertEqual(App.images.isGraphic(drawnPixels(1200, 800, noise), 1200, 800), false, 'a photo');
+    const gradient = (context) => {   // a smooth photo-like sky: every pixel a little different
+        for (let y = 0; y < 300; y += 1) {
+            for (let x = 0; x < 400; x += 1) {
+                context.fillStyle = 'rgb(' + (x % 256) + ',' + (y % 256) + ',' + ((x * 3 + y * 7) % 256) + ')';
+                context.fillRect(x, y, 1, 1);
+            }
+        }
+    };
+    assertEqual(App.images.isGraphic(drawnPixels(400, 300, gradient), 400, 300), false, 'a smooth photo');
+});
+
+test('images: a graphic stays PNG even when its JPEG is smaller (sharp edges); a photo takes the smaller', () => {
+    const png = { src: 'data:image/png;base64,' + 'A'.repeat(100), type: 'image/png' };
+    const jpeg = { src: 'data:image/jpeg;base64,' + 'A'.repeat(80), type: 'image/jpeg' };
+    assertEqual(App.images.pickEncoding({ png: png, jpeg: jpeg, graphic: true, transparent: false }).type, 'image/png');
+    assertEqual(App.images.pickEncoding({ png: png, jpeg: jpeg, graphic: false, transparent: true }).type, 'image/png');
+    assertEqual(App.images.pickEncoding({ png: png, jpeg: jpeg, graphic: false, transparent: false }).type, 'image/jpeg');
+    assertEqual(App.images.pickEncoding({ png: png, jpeg: null, graphic: false, transparent: false }).type, 'image/png', 'no JPEG made');
 });
 
 test('images: a picture with transparency always stays PNG, transparent', async () => {

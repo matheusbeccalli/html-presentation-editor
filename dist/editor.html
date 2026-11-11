@@ -8503,8 +8503,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     }
 
-    function hasTransparency(context, width, height) {
-        const pixels = context.getImageData(0, 0, width, height).data;
+    function hasTransparency(pixels) {
         for (let i = 3; i < pixels.length; i += 4) {
             if (pixels[i] < 255) {
                 return true;
@@ -8512,6 +8511,36 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         return false;
     }
+
+    /*
+     * A graphic (a logo, a screenshot, a chart from Excel) rather than a photo:
+     * few different colours. Counted on a grid of at most 256 x 256 of its
+     * pixels (`pixels`: RGBA, width x height): a graphic has under 5% different
+     * colours there (at least 256 allowed, for anti-aliased edges); a photo has
+     * far more. A graphic stays PNG: JPEG smudges sharp edges and text.
+     */
+    App.images.isGraphic = function isGraphic(pixels, width, height) {
+        const stepX = Math.max(1, Math.ceil(width / 256));
+        const stepY = Math.max(1, Math.ceil(height / 256));
+        const colours = new Set();
+        let sampled = 0;
+        for (let y = 0; y < height; y += stepY) {
+            for (let x = 0; x < width; x += stepX) {
+                const at = (y * width + x) * 4;
+                colours.add((pixels[at] << 16) | (pixels[at + 1] << 8) | pixels[at + 2]);
+                sampled += 1;
+            }
+        }
+        return colours.size <= Math.max(256, sampled * 0.05);
+    };
+
+    /* PNG for a graphic or a transparent picture; otherwise the smaller of PNG and JPEG. */
+    App.images.pickEncoding = function pickEncoding(options) {
+        if (options.graphic || options.transparent || !options.jpeg) {
+            return options.png;
+        }
+        return options.jpeg.src.length < options.png.src.length ? options.jpeg : options.png;
+    };
 
     /*
      * A picture file (a Blob) made ready for the deck: { src (data: URI), width,
@@ -8541,13 +8570,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { src: smallest.src, width: size.width, height: size.height, type: smallest.type };
     };
 
-    /* A canvas as a data: URI: PNG if it has transparency, else the smaller of PNG and JPEG 0.85. { src, type } */
+    /* A canvas as a data: URI: PNG for a graphic or a transparent picture, else the smaller of PNG and JPEG 0.85. { src, type } */
     App.images.encode = function encode(canvas) {
-        const candidates = [{ src: canvas.toDataURL('image/png'), type: 'image/png' }];
-        if (!hasTransparency(canvas.getContext('2d'), canvas.width, canvas.height)) {
-            candidates.push({ src: canvas.toDataURL('image/jpeg', JPEG_QUALITY), type: 'image/jpeg' });
-        }
-        return candidates.reduce((best, next) => (next.src.length < best.src.length ? next : best));
+        const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
+        const transparent = hasTransparency(pixels);
+        const graphic = !transparent && App.images.isGraphic(pixels, canvas.width, canvas.height);
+        return App.images.pickEncoding({
+            png: { src: canvas.toDataURL('image/png'), type: 'image/png' },
+            jpeg: transparent || graphic ? null : { src: canvas.toDataURL('image/jpeg', JPEG_QUALITY), type: 'image/jpeg' },
+            graphic: graphic, transparent: transparent,
+        });
     };
 
     // ---------------------------------------------------------------

@@ -118,6 +118,51 @@
         return true;
     };
 
+    // ---------------------------------------------------------------
+    // Words for the Comments pane (commentspane.js)
+    // ---------------------------------------------------------------
+
+    /* Initials as kept: no spaces, at most 4 characters, upper case ("m b" -> "MB"). */
+    App.comments.cleanInitials = function cleanInitials(text) {
+        return String(text || '').replace(/\s+/g, '').slice(0, 4).toUpperCase();
+    };
+
+    /*
+     * The date on a card, "11/11/2026 14:32" in pt-BR. `locale` and `timeZone`
+     * are left out in the editor (the computer's own); the tests pass them.
+     */
+    App.comments.dateText = function dateText(iso, locale, timeZone) {
+        const date = new Date(iso || NaN);
+        if (!iso || Number.isNaN(date.getTime())) {
+            return '';
+        }
+        const zone = timeZone ? { timeZone: timeZone } : {};
+        return date.toLocaleDateString(locale, Object.assign({ day: '2-digit', month: '2-digit', year: 'numeric' }, zone)) + ' ' +
+            date.toLocaleTimeString(locale, Object.assign({ hour: '2-digit', minute: '2-digit' }, zone));
+    };
+
+    const KIND_WORDS = { text: 'Text', image: 'Picture', table: 'Table', chart: 'Chart', shape: 'Shape', group: 'Group' };
+    const LABEL_LENGTH = 30;
+
+    /* What a comment points at, in words: "Slide", "Picture", "Text: Receita e margem…" (its element gone: "Slide"). */
+    App.comments.targetLabel = function targetLabel(slide, target) {
+        const element = target && slide ? slide.querySelector('.el[data-id="' + CSS.escape(target) + '"]') : null;
+        if (!element) {
+            return 'Slide';
+        }
+        const kind = element.getAttribute('data-type');
+        const word = KIND_WORDS[kind] || 'Element';
+        const holder = kind === 'text' ? element : kind === 'shape' ? element.querySelector(':scope > .shape-text') : null;
+        if (!holder) {
+            return word;
+        }
+        const text = Array.from(holder.querySelectorAll('p'), (p) => p.textContent).join(' ').replace(/\s+/g, ' ').trim();
+        if (!text) {
+            return kind === 'text' ? 'Text box' : word;
+        }
+        return word + ': ' + (text.length > LABEL_LENGTH ? text.slice(0, LABEL_LENGTH).trim() + '…' : text);
+    };
+
     /* Remove every comment in `root` ("Delete All Comments", a clean copy). Returns how many there were. */
     App.comments.removeAll = function removeAll(root) {
         const count = App.comments.countIn(root);

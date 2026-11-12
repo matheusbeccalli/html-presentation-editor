@@ -7,6 +7,8 @@
  *                   (only possible while drafts are kept)
  *   numberLocale    how table numbers are written: 'pt-BR' (1.234,5) or 'en-US'
  *                   (1,234.5); null until chosen: the deck's language decides
+ *   authorInitials  the initials put on review comments ('' until the first
+ *                   comment asks for them, commentspane.js)
  *
  * The settings live in localStorage, not in the IndexedDB database, so
  * "Delete all drafts now" empties that database without resetting them.
@@ -24,7 +26,7 @@
 
     const KEY = 'deck-editor-settings';
     App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null,
-        showGridlines: false, showRulers: false, pdfHintShown: false });
+        showGridlines: false, showRulers: false, pdfHintShown: false, authorInitials: '' });
     const NUMBER_LOCALES = ['pt-BR', 'en-US'];
 
     let store = null;   // localStorage, or a fake one in the tests
@@ -50,6 +52,7 @@
             showGridlines: !!value.showGridlines,   // View tab (rulers.js)
             showRulers: !!value.showRulers,
             pdfHintShown: !!value.pdfHintShown,   // Export > PDF's "Save as PDF" hint, shown the first time only (pdf.js)
+            authorInitials: App.comments.cleanInitials(value.authorInitials),   // on review comments (Phase 9)
         };
     };
 
@@ -117,6 +120,8 @@
         days.value = String(settings.retentionDays);
         const recent = el('input', { type: 'checkbox', id: 'settings-recent' });
         recent.checked = settings.rememberRecent;
+        const initials = el('input', { type: 'text', id: 'settings-initials', maxlength: '4', size: '5', autocomplete: 'off', spellcheck: 'false' });
+        initials.value = settings.authorInitials;
 
         const syncControls = () => {
             if (!keep.checked) {
@@ -155,6 +160,8 @@
                 'Other HTML files you open from disk in this browser can read them.']),
             el('div', { class: 'settings-row' }, [deleteAll]),
             result,
+            el('h3', {}, ['Review comments']),
+            el('label', { class: 'settings-row' }, ['Your initials ', initials, ' (put on the comments you add)']),
         ]);
 
         const choice = await App.dialogs.show({
@@ -162,8 +169,10 @@
             body: body,
             buttons: [{ label: 'Cancel', value: false }, { label: 'OK', value: true, primary: true }],
         });
-        if (choice === true && available) {
-            App.settings.update({ keepDrafts: keep.checked, retentionDays: days.value, rememberRecent: recent.checked });
+        if (choice === true) {
+            // The initials are kept even where the drafts' storage is blocked (settings fall back to this session).
+            App.settings.update(Object.assign({ authorInitials: initials.value },
+                available ? { keepDrafts: keep.checked, retentionDays: days.value, rememberRecent: recent.checked } : {}));
         }
     };
 })();

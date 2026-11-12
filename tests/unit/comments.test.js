@@ -118,3 +118,42 @@ test('import: a deck that is normalized (not contract) keeps its slides\' commen
     assertEqual(App.comments.listOf(slide).map((comment) => comment.text), ['Revisar título']);
     assertNotIncludes(Array.from(slide.querySelectorAll('.el'), (el) => el.textContent).join('|'), 'Revisar');
 });
+
+test('comments: initials are cleaned (no spaces, at most 4, upper case); settings keep them', () => {
+    assertEqual(App.comments.cleanInitials(' m b '), 'MB');
+    assertEqual(App.comments.cleanInitials('mjsb2x'), 'MJSB');
+    assertEqual(App.comments.cleanInitials(''), '');
+    assertEqual(App.comments.cleanInitials(null), '');
+    assertEqual(App.settings.DEFAULTS.authorInitials, '', 'asked at the first comment');
+    assertEqual(App.settings.normalize({ authorInitials: 'jd ' }).authorInitials, 'JD');
+    assertEqual(App.settings.normalize({}).authorInitials, '');
+});
+
+test('comments: the date as the card shows it (the computer\'s language and time zone)', () => {
+    assertEqual(App.comments.dateText(COMMENT_DATE, 'pt-BR', 'UTC'), '11/11/2026 14:32');
+    assertEqual(App.comments.dateText(COMMENT_DATE, 'pt-BR', 'America/Sao_Paulo'), '11/11/2026 11:32');
+    assertEqual(App.comments.dateText('', 'pt-BR', 'UTC'), '');
+    assertEqual(App.comments.dateText('not a date', 'pt-BR', 'UTC'), '');
+});
+
+test('comments: what a comment points at, in words', () => {
+    const doc = parseDoc('<section class="slide" data-slide-id="s1">' +
+        '<div class="el" data-type="text" data-id="e1"><p>Receita e margem por segmento de negócio em 2025</p></div>' +
+        '<img class="el" data-type="image" data-id="e2" src="data:,">' +
+        '<div class="el" data-type="table" data-id="e3"></div>' +
+        '<figure class="el" data-type="chart" data-id="e4"></figure>' +
+        '<div class="el" data-type="shape" data-id="e5"><svg></svg><div class="shape-text"><p>Próximos passos</p></div></div>' +
+        '<div class="el" data-type="group" data-id="e6"></div>' +
+        '<div class="el" data-type="text" data-id="e7"><p></p></div></section>');
+    const slide = doc.querySelector('section');
+    const label = (target) => App.comments.targetLabel(slide, target);
+    assertEqual(label(null), 'Slide');
+    assertEqual(label('e1'), 'Text: Receita e margem por segmento…');
+    assertEqual(label('e2'), 'Picture');
+    assertEqual(label('e3'), 'Table');
+    assertEqual(label('e4'), 'Chart');
+    assertEqual(label('e5'), 'Shape: Próximos passos');
+    assertEqual(label('e6'), 'Group');
+    assertEqual(label('e7'), 'Text box');
+    assertEqual(label('e99'), 'Slide', 'its element was deleted');
+});

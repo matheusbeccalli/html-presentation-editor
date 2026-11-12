@@ -5471,7 +5471,7 @@ def test_settings_recent_files_and_status(browser):
     editor.click_dialog_button("OK")
     saved = page.evaluate("JSON.parse(localStorage.getItem('deck-editor-settings'))")
     check(saved == {"keepDrafts": True, "retentionDays": 30, "rememberRecent": True, "numberLocale": None,
-                     "showGridlines": False, "showRulers": False, "pdfHintShown": False}, f"saved settings: {saved}")
+                     "showGridlines": False, "showRulers": False, "pdfHintShown": False, "authorInitials": ""}, f"saved settings: {saved}")
 
     # Recent files: an opened file is remembered; choosing it opens the Open window in its folder.
     page.evaluate("""() => App.events.emit('file-opened',
@@ -6611,6 +6611,120 @@ def test_comments_saved_but_never_shown_or_sent(browser):
     editor.close()
 
 
+COMMENT_CARDS = """() => Array.from(document.querySelectorAll('#comments-list .comment-card')).map((card) => ({
+    id: card.getAttribute('data-comment-id'), initials: card.querySelector('.comment-initials').textContent,
+    date: card.querySelector('.comment-date').textContent, on: card.querySelector('.comment-on').textContent,
+    text: card.querySelector('.comment-text') ? card.querySelector('.comment-text').textContent : null }))"""
+
+DECK_COMMENTS = "() => App.deck.getSlides().map((slide) => App.comments.listOf(slide))"
+
+
+def test_comments_pane(browser):
+    """Phase 9 (SPEC 4, step 2): Review > New Comment (Ctrl+Alt+M) on the selected element asks for the initials the
+    first time (kept in Settings), Post / Ctrl+Enter adds the comment as one undo step; with nothing selected it is on
+    the slide; a card's text is edited in place (one undo step); the delete button removes it (undo brings it back);
+    Review > Comments opens and closes the pane."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    check(page.is_hidden("#comments-pane"), "the pane starts closed")
+    # The subtitle (e4) selected, then Ctrl+Alt+M.
+    page.mouse.click(*slide_to_screen(page, 600, 410))
+    check(page.evaluate("App.selection.selectedId()") == "e4", page.evaluate("App.selection.selectedId()"))
+    page.keyboard.press("Control+Alt+m")
+    wait_until(page, "!document.getElementById('comments-pane').hidden && !!document.getElementById('comment-draft-text')")
+    check(page.evaluate("document.activeElement.id") == "comment-initials", "it asks for the initials first")
+    check(page.inner_text(".comment-draft .comment-on").startswith("New comment on Text: "), page.inner_text(".comment-draft .comment-on"))
+    page.keyboard.type("mb")
+    page.keyboard.press("Tab")
+    page.keyboard.type("Checar a fonte do número")
+    page.screenshot(path=str(OUTPUT / "121-comment-draft.png"))
+    page.keyboard.press("Control+Enter")
+    wait_until(page, "document.querySelectorAll('#comments-list .comment-card').length === 1")
+    cards = page.evaluate(COMMENT_CARDS)
+    check(cards[0]["initials"] == "MB" and cards[0]["text"] == "Checar a fonte do número" and
+          cards[0]["on"].startswith("Text: ") and re.match(r"\d\d/\d\d/\d{4} ", cards[0]["date"]) is not None, f"the card: {cards}")
+    stored = page.evaluate(DECK_COMMENTS)[0]
+    check(len(stored) == 1 and stored[0]["target"] == "e4" and stored[0]["author"] == "MB", f"in the deck: {stored}")
+    check(page.evaluate("App.settings.get().authorInitials") == "MB", "the initials are kept")
+    check(page.evaluate("App.history.isDirty()"), "the deck has an unsaved change")
+
+    # Nothing selected: Review > New Comment is on the slide, no initials asked any more.
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 1200, 680))
+    check(page.evaluate("App.selection.selectedId()") is None, "nothing selected")
+    page.click("[role='tab']:has-text('Review')")
+    page.click("button[data-command='newComment']")
+    wait_until(page, "!!document.getElementById('comment-draft-text')")
+    check(page.query_selector("#comment-initials") is None, "the initials are not asked again")
+    check(page.inner_text(".comment-draft .comment-on") == "New comment on Slide", page.inner_text(".comment-draft .comment-on"))
+    page.keyboard.type("Slide inteiro: revisar")
+    page.click("#comment-post")
+    wait_until(page, "document.querySelectorAll('#comments-list .comment-card').length === 2")
+    check(page.evaluate(DECK_COMMENTS)[0][1]["target"] is None, "on the slide")
+    page.screenshot(path=str(OUTPUT / "122-comments-pane.png"))
+
+    # Undo removes the second comment, redo puts it back.
+    page.keyboard.press("Control+z")
+    wait_until(page, "document.querySelectorAll('#comments-list .comment-card').length === 1")
+    page.keyboard.press("Control+y")
+    wait_until(page, "document.querySelectorAll('#comments-list .comment-card').length === 2")
+
+    # Editing the first card in place: one undo step.
+    page.click("#comments-list .comment-card >> nth=0 >> .comment-text")
+    wait_until(page, "document.activeElement && document.activeElement.classList.contains('comment-edit')")
+    page.keyboard.press("Control+a")
+    page.keyboard.type("Fonte: relatório anual")
+    page.keyboard.press("Control+Enter")
+    wait_until(page, "!document.querySelector('.comment-edit')")
+    check(page.evaluate(COMMENT_CARDS)[0]["text"] == "Fonte: relatório anual", f"edited: {page.evaluate(COMMENT_CARDS)}")
+    page.keyboard.press("Control+z")
+    wait_until(page, "document.querySelector('#comments-list .comment-text').textContent === 'Checar a fonte do número'")
+    # Esc leaves an edit unchanged.
+    page.click("#comments-list .comment-card >> nth=0 >> .comment-text")
+    wait_until(page, "!!document.querySelector('.comment-edit')")
+    page.keyboard.type(" XYZ")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.querySelector('.comment-edit')")
+    check(page.evaluate(COMMENT_CARDS)[0]["text"] == "Checar a fonte do número", "Esc: unchanged")
+
+    # Delete the second one; undo brings it back.
+    page.click("#comments-list .comment-card >> nth=1 >> .comment-delete")
+    wait_until(page, "document.querySelectorAll('#comments-list .comment-card').length === 1")
+    check(len(page.evaluate(DECK_COMMENTS)[0]) == 1, "gone from the deck")
+    page.keyboard.press("Control+z")
+    wait_until(page, "document.querySelectorAll('#comments-list .comment-card').length === 2")
+
+    # Another slide has no comments; back on slide 1 they are there.
+    page.evaluate("App.deck.goTo(1)")
+    wait_until(page, "document.querySelectorAll('#comments-list .comment-card').length === 0")
+    check(page.is_visible("#comments-empty"), "a slide without comments says so")
+    page.evaluate("App.deck.goTo(0)")
+    wait_until(page, "document.querySelectorAll('#comments-list .comment-card').length === 2")
+
+    # Review > Comments closes and opens the pane; × closes it.
+    page.click("[role='tab']:has-text('Review')")
+    check(page.get_attribute("button[data-command='commentsPane']", "aria-pressed") == "true", "Comments shows it is on")
+    page.click("button[data-command='commentsPane']")
+    check(page.is_hidden("#comments-pane"), "closed")
+    check(page.get_attribute("button[data-command='commentsPane']", "aria-pressed") == "false", "Comments shows it is off")
+    page.click("button[data-command='commentsPane']")
+    check(page.is_visible("#comments-pane"), "open again")
+    page.click("#comments-close")
+    check(page.is_hidden("#comments-pane"), "× closes it")
+
+    # File > Settings shows the initials, and changes them.
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='settings']")
+    wait_until(page, "!!document.getElementById('settings-initials')")
+    check(page.input_value("#settings-initials") == "MB", page.input_value("#settings-initials"))
+    page.fill("#settings-initials", "jd")
+    editor.click_dialog_button("OK")
+    check(page.evaluate("App.settings.get().authorInitials") == "JD", "changed in Settings")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -6703,6 +6817,7 @@ TESTS = [
     test_save_clean_copy,
     test_phase8_done_when,
     test_comments_saved_but_never_shown_or_sent,
+    test_comments_pane,
 ]
 
 

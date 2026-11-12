@@ -670,6 +670,49 @@ iframe.pdf-print-frame {
 #format-autofit input { margin: 0; accent-color: var(--accent); }
 #format-autofit-hint { margin: 8px 0 0; font-size: 12px; }
 
+/* ---- Comments pane (right, Phase 9: commentspane.js) ---- */
+#comments-pane {
+    flex: none; width: 260px; padding: 12px 14px; overflow-y: auto;
+    background: var(--surface); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 8px;
+}
+#comments-pane[hidden] { display: none; }
+.comments-head { display: flex; align-items: baseline; gap: 8px; }
+.comments-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
+.comments-head #comments-count { flex: 1; font-size: 12px; }
+#comments-new { align-self: flex-start; }
+#comments-empty { margin: 0; font-size: 12px; line-height: 1.5; }
+#comments-list { display: flex; flex-direction: column; gap: 8px; }
+.comment-card, .comment-draft {
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; background: var(--surface-alt);
+}
+.comment-card { cursor: default; }
+.comment-card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.comment-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.comment-initials {
+    flex: none; min-width: 26px; height: 26px; padding: 0 4px; border-radius: 13px; box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: #F2C744; color: #3B2F00; font-size: 11px; font-weight: 700;
+}
+.comment-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; font-size: 11px; color: var(--text-muted); }
+.comment-on { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-muted); }
+.comment-delete { flex: none; border: 0; background: none; padding: 2px; cursor: pointer; color: var(--text-muted); border-radius: 3px; }
+.comment-delete:hover { background: var(--surface); color: var(--text); }
+.comment-delete svg { width: 16px; height: 16px; }
+.comment-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.4; cursor: text; }
+.comment-edit, #comment-draft-text {
+    width: 100%; box-sizing: border-box; resize: vertical; padding: 4px 6px; font: inherit; font-size: 13px;
+    border: 1px solid var(--border); border-radius: 3px;
+}
+.comment-draft { display: flex; flex-direction: column; gap: 6px; border-color: var(--accent); }
+.comment-initials-row { font-size: 12px; }
+#comment-initials { width: 4em; padding: 2px 4px; font: inherit; text-transform: uppercase; }
+.comment-draft-hint { margin: 0; font-size: 11px; }
+.comment-draft-buttons { display: flex; gap: 6px; }
+@media (max-width: 900px) {
+    #comments-pane { display: none; }
+}
+
 /* ---- Status bar (bottom) ---- */
 #zoom-controls { display: flex; align-items: center; gap: 4px; }
 #zoom-slider { width: 110px; accent-color: var(--accent); }
@@ -955,6 +998,19 @@ iframe.pdf-print-frame {
             </fieldset>
             <p class="panel-hint" id="format-autofit-hint"></p>
         </section>
+    </aside>
+
+    <!-- Review comments of the slide shown (commentspane.js): opened by Review > New Comment / Comments, a marker or the status bar. -->
+    <aside id="comments-pane" aria-label="Comments" hidden>
+        <div class="comments-head">
+            <h2>Comments</h2>
+            <span id="comments-count" class="panel-hint"></span>
+            <button type="button" class="banner-close" id="comments-close" title="Close the comments">×</button>
+        </div>
+        <button type="button" class="btn" id="comments-new" title="New comment (Ctrl+Alt+M)">+ New comment</button>
+        <p class="panel-hint" id="comments-empty">No comments on this slide. Select an element (or nothing, for the whole slide) and click New comment.
+            Comments are saved with the deck, but never shown when presenting, printing or exporting.</p>
+        <div id="comments-list"></div>
     </aside>
 </main>
 
@@ -1320,6 +1376,7 @@ App.start = function start() {
     App.chartControls.init();   // its Format pane section too
     App.chartData.init();       // the data grid under the slide
     App.notes.init();           // the speaker notes under the slide
+    App.commentsPane.init();    // the review comments pane on the right (Phase 9)
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
@@ -1761,6 +1818,7 @@ App.createEventBus = function createEventBus() {
         ['Alt+F5', 'presenterView', { whileTyping: true, blockBrowserDefault: true }],
         // Ctrl+P would otherwise print the editor's own screen: it asks which slides to print instead.
         ['Ctrl+P', 'exportPdf', { whileTyping: true, blockBrowserDefault: true }],
+        ['Ctrl+Alt+M', 'newComment', { whileTyping: true, blockBrowserDefault: true }],   // as in PowerPoint
         ['Shift+F10', 'contextMenu'],
         ['Shift+F9', 'toggleGridlines'],
         ['ContextMenu', 'contextMenu'],
@@ -11460,6 +11518,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         backward: '<rect x="8" y="8" width="9" height="9"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
         recent: '<circle cx="10" cy="10" r="7.5"/><path d="M10 5.5V10l3 2"/>',
         settings: '<circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2.5M10 15v2.5M2.5 10H5M15 10h2.5M4.7 4.7l1.8 1.8M13.5 13.5l1.8 1.8M4.7 15.3l1.8-1.8M13.5 6.5l1.8-1.8"/>',
+        newComment: '<path d="M3 3.5h12v9H8l-3.5 3v-3H3z"/><path d="M9 5.5v5M6.5 8h5"/>',
+        comments: '<path d="M2.5 3.5h11v8H7l-3 2.5v-2.5H2.5z"/><path d="M15.5 7.5h2v8h-1.5v2l-2.5-2h-5v-1.5"/>',
+        deleteComment: '<path d="M4 5.5h12M8 5.5V3.5h4v2M5.5 5.5l1 11h7l1-11"/><path d="M8.5 8.5v5.5M11.5 8.5v5.5"/>',
         find: '<circle cx="8.5" cy="8.5" r="5"/><path d="M12.2 12.2l5 5"/>',
         replace: '<path d="M3 6.5h9.5M9.5 3.5l3 3-3 3"/><path d="M17 13.5H7.5M10.5 10.5l-3 3 3 3"/>',
         back: '<rect x="8" y="8" width="9" height="9" stroke-dasharray="2 1.5"/><rect x="3" y="3" width="8" height="8" fill="currentColor" fill-opacity="0.25"/>',
@@ -17374,6 +17435,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  *                   (only possible while drafts are kept)
  *   numberLocale    how table numbers are written: 'pt-BR' (1.234,5) or 'en-US'
  *                   (1,234.5); null until chosen: the deck's language decides
+ *   authorInitials  the initials put on review comments ('' until the first
+ *                   comment asks for them, commentspane.js)
  *
  * The settings live in localStorage, not in the IndexedDB database, so
  * "Delete all drafts now" empties that database without resetting them.
@@ -17391,7 +17454,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     const KEY = 'deck-editor-settings';
     App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null,
-        showGridlines: false, showRulers: false, pdfHintShown: false });
+        showGridlines: false, showRulers: false, pdfHintShown: false, authorInitials: '' });
     const NUMBER_LOCALES = ['pt-BR', 'en-US'];
 
     let store = null;   // localStorage, or a fake one in the tests
@@ -17417,6 +17480,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             showGridlines: !!value.showGridlines,   // View tab (rulers.js)
             showRulers: !!value.showRulers,
             pdfHintShown: !!value.pdfHintShown,   // Export > PDF's "Save as PDF" hint, shown the first time only (pdf.js)
+            authorInitials: App.comments.cleanInitials(value.authorInitials),   // on review comments (Phase 9)
         };
     };
 
@@ -17484,6 +17548,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         days.value = String(settings.retentionDays);
         const recent = el('input', { type: 'checkbox', id: 'settings-recent' });
         recent.checked = settings.rememberRecent;
+        const initials = el('input', { type: 'text', id: 'settings-initials', maxlength: '4', size: '5', autocomplete: 'off', spellcheck: 'false' });
+        initials.value = settings.authorInitials;
 
         const syncControls = () => {
             if (!keep.checked) {
@@ -17522,6 +17588,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 'Other HTML files you open from disk in this browser can read them.']),
             el('div', { class: 'settings-row' }, [deleteAll]),
             result,
+            el('h3', {}, ['Review comments']),
+            el('label', { class: 'settings-row' }, ['Your initials ', initials, ' (put on the comments you add)']),
         ]);
 
         const choice = await App.dialogs.show({
@@ -17529,8 +17597,10 @@ App.template.newDeckHtml = function newDeckHtml() {
             body: body,
             buttons: [{ label: 'Cancel', value: false }, { label: 'OK', value: true, primary: true }],
         });
-        if (choice === true && available) {
-            App.settings.update({ keepDrafts: keep.checked, retentionDays: days.value, rememberRecent: recent.checked });
+        if (choice === true) {
+            // The initials are kept even where the drafts' storage is blocked (settings fall back to this session).
+            App.settings.update(Object.assign({ authorInitials: initials.value },
+                available ? { keepDrafts: keep.checked, retentionDays: days.value, rememberRecent: recent.checked } : {}));
         }
     };
 })();
@@ -18339,6 +18409,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             label: 'From Current Slide', run: () => App.present.start(true), isEnabled: hasDeck,
         });
         // Export (Phase 8): PDF through the print window (pdf.js); Ctrl+P opens it too.
+        // Review comments (Phase 9, commentspane.js).
+        App.commands.define('newComment', { label: 'New Comment', run: () => App.commentsPane.newComment(), isEnabled: hasDeck });
+        App.commands.define('commentsPane', {
+            label: 'Comments', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
+            isChecked: () => App.commentsPane.isOpen(),
+        });
         App.commands.define('exportPdf', { label: 'PDF', run: () => App.pdf.open(), isEnabled: hasDeck });
         // Pictures of slides (snapshot.js): the browser draws the slide itself, at 2×.
         App.commands.define('exportPng', { label: 'PNG of This Slide', run: () => App.snapshot.exportCurrent(), isEnabled: hasDeck });
@@ -22317,11 +22393,393 @@ App.template.newDeckHtml = function newDeckHtml() {
         return true;
     };
 
+    // ---------------------------------------------------------------
+    // Words for the Comments pane (commentspane.js)
+    // ---------------------------------------------------------------
+
+    /* Initials as kept: no spaces, at most 4 characters, upper case ("m b" -> "MB"). */
+    App.comments.cleanInitials = function cleanInitials(text) {
+        return String(text || '').replace(/\s+/g, '').slice(0, 4).toUpperCase();
+    };
+
+    /*
+     * The date on a card, "11/11/2026 14:32" in pt-BR. `locale` and `timeZone`
+     * are left out in the editor (the computer's own); the tests pass them.
+     */
+    App.comments.dateText = function dateText(iso, locale, timeZone) {
+        const date = new Date(iso || NaN);
+        if (!iso || Number.isNaN(date.getTime())) {
+            return '';
+        }
+        const zone = timeZone ? { timeZone: timeZone } : {};
+        return date.toLocaleDateString(locale, Object.assign({ day: '2-digit', month: '2-digit', year: 'numeric' }, zone)) + ' ' +
+            date.toLocaleTimeString(locale, Object.assign({ hour: '2-digit', minute: '2-digit' }, zone));
+    };
+
+    const KIND_WORDS = { text: 'Text', image: 'Picture', table: 'Table', chart: 'Chart', shape: 'Shape', group: 'Group' };
+    const LABEL_LENGTH = 30;
+
+    /* What a comment points at, in words: "Slide", "Picture", "Text: Receita e margem…" (its element gone: "Slide"). */
+    App.comments.targetLabel = function targetLabel(slide, target) {
+        const element = target && slide ? slide.querySelector('.el[data-id="' + CSS.escape(target) + '"]') : null;
+        if (!element) {
+            return 'Slide';
+        }
+        const kind = element.getAttribute('data-type');
+        const word = KIND_WORDS[kind] || 'Element';
+        const holder = kind === 'text' ? element : kind === 'shape' ? element.querySelector(':scope > .shape-text') : null;
+        if (!holder) {
+            return word;
+        }
+        const text = Array.from(holder.querySelectorAll('p'), (p) => p.textContent).join(' ').replace(/\s+/g, ' ').trim();
+        if (!text) {
+            return kind === 'text' ? 'Text box' : word;
+        }
+        return word + ': ' + (text.length > LABEL_LENGTH ? text.slice(0, LABEL_LENGTH).trim() + '…' : text);
+    };
+
     /* Remove every comment in `root` ("Delete All Comments", a clean copy). Returns how many there were. */
     App.comments.removeAll = function removeAll(root) {
         const count = App.comments.countIn(root);
         root.querySelectorAll(App.comments.SELECTOR).forEach((box) => box.remove());
         return count;
+    };
+})();
+
+</script>
+<script>
+// ---- js/commentspane.js ----
+/*
+ * commentspane.js - the Comments pane on the right and the Review tab's
+ * comment commands (SPEC Phase 9). The comments themselves: comments.js.
+ *
+ * The pane lists the comments of the slide shown, oldest first, each as a
+ * card: the author's initials, the date, what it points at ("Slide" or the
+ * element, e.g. "Text: Receita e margem"), its text and a delete button.
+ * Clicking a card's text edits it in place (Ctrl+Enter or leaving the box
+ * keeps the change, Esc drops it). New Comment (Review tab, Ctrl+Alt+M)
+ * opens a box at the end of the list for the selected element, or for the
+ * slide when nothing is selected; Post (or Ctrl+Enter) adds it.
+ *
+ * The first comment asks for the author's initials (a box above the text);
+ * they are kept in the editor's settings on this computer and can be
+ * changed in File > Settings (Phase 9 Q&A: browsers cannot read the Windows
+ * user name).
+ *
+ * Every change (add, edit, delete) is one undo step for the slide (history.js).
+ *
+ * Talks to: comments.js (the model), deck.js, history.js, selection.js, text.js
+ *           (the box being typed in), settings.js (initials), commands.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.commentsPane = {};
+
+    const el = (...args) => App.util.el(...args);
+    let nodes = null;
+    let draft = null;        // the New Comment box while open: { target, slideId }
+    let editingId = null;    // the comment whose text is being edited in its card
+    let activeId = null;     // the comment last clicked or added (highlighted card)
+
+    App.commentsPane.isOpen = function isOpen() {
+        return !!nodes && !nodes.pane.hidden;
+    };
+
+    App.commentsPane.open = function open() {
+        nodes.pane.hidden = false;
+        render();
+        App.events.emit('comments-pane-changed', { open: true });
+    };
+
+    App.commentsPane.close = function close() {
+        draft = null;
+        editingId = null;
+        nodes.pane.hidden = true;
+        App.events.emit('comments-pane-changed', { open: false });
+    };
+
+    App.commentsPane.toggle = function toggle() {
+        if (App.commentsPane.isOpen()) {
+            App.commentsPane.close();
+        } else {
+            App.commentsPane.open();
+        }
+    };
+
+    /* The comment card highlighted (and scrolled into view): after a marker click, Previous / Next. */
+    App.commentsPane.focusComment = function focusComment(id) {
+        activeId = id;
+        if (!App.commentsPane.isOpen()) {
+            App.commentsPane.open();
+        } else {
+            render();
+        }
+        const card = nodes.list.querySelector('[data-comment-id="' + id + '"]');
+        if (card) {
+            card.scrollIntoView({ block: 'nearest' });
+        }
+        App.events.emit('comments-active-changed', { id: id });
+    };
+
+    App.commentsPane.activeId = function activeIdFn() {
+        return activeId;
+    };
+
+    /* What New Comment points at: the element being typed in or selected (the first of several), else the slide. */
+    function currentTarget() {
+        const editing = App.text.editingElement();
+        const element = editing ? App.groups.topOf(editing) : App.selection.getElement() || App.selection.getElements()[0];
+        return element ? element.getAttribute('data-id') : null;
+    }
+
+    /* Review > New Comment (Ctrl+Alt+M): open the pane with an empty comment box. */
+    App.commentsPane.newComment = function newComment() {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        App.text.exitEdit();
+        draft = { target: currentTarget(), slideId: slide.getAttribute('data-slide-id') };
+        editingId = null;
+        nodes.pane.hidden = false;
+        render();
+        App.events.emit('comments-pane-changed', { open: true });
+        const first = nodes.list.querySelector('.comment-draft input:not([hidden]), .comment-draft textarea');
+        const initials = nodes.list.querySelector('#comment-initials');
+        (initials && !initials.value ? initials : nodes.list.querySelector('#comment-draft-text') || first).focus();
+    };
+
+    function post() {
+        const text = nodes.list.querySelector('#comment-draft-text').value.trim();
+        const initialsBox = nodes.list.querySelector('#comment-initials');
+        const initials = App.comments.cleanInitials(initialsBox ? initialsBox.value : App.settings.get().authorInitials);
+        if (!initials) {
+            setDraftHint('Type your initials first (for example MB).');
+            initialsBox.focus();
+            return;
+        }
+        if (!text) {
+            setDraftHint('Type the comment first.');
+            nodes.list.querySelector('#comment-draft-text').focus();
+            return;
+        }
+        if (initials !== App.settings.get().authorInitials) {
+            App.settings.update({ authorInitials: initials });
+        }
+        const slide = App.deck.getSlides().find((s) => s.getAttribute('data-slide-id') === draft.slideId);
+        const target = draft.target;
+        draft = null;
+        if (!slide) {
+            render();
+            return;
+        }
+        let id = null;
+        App.history.change('New comment', { slideId: slide.getAttribute('data-slide-id') }, () => {
+            id = App.comments.add(slide, { target: target, author: initials, date: new Date().toISOString(), text: text });
+        });
+        App.commentsPane.focusComment(id);
+    }
+
+    function setDraftHint(text) {
+        const hint = nodes.list.querySelector('.comment-draft-hint');
+        if (hint) {
+            hint.textContent = text;
+        }
+    }
+
+    function cancelDraft() {
+        draft = null;
+        render();
+    }
+
+    function slideOf(id) {
+        return App.deck.getSlides().find((slide) => App.comments.listOf(slide).some((c) => c.id === id)) || null;
+    }
+
+    function saveEdit(id, text) {
+        editingId = null;
+        const slide = slideOf(id);
+        const before = slide && App.comments.listOf(slide).find((c) => c.id === id);
+        if (!before || before.text === text || !text.trim()) {
+            render();
+            return;
+        }
+        App.history.change('Edit comment', { slideId: slide.getAttribute('data-slide-id') },
+            () => App.comments.setText(App.deck.getDocument(), id, text));
+    }
+
+    App.commentsPane.deleteComment = function deleteComment(id) {
+        const slide = slideOf(id);
+        if (!slide) {
+            return;
+        }
+        if (activeId === id) {
+            activeId = null;
+        }
+        App.history.change('Delete comment', { slideId: slide.getAttribute('data-slide-id') },
+            () => App.comments.remove(App.deck.getDocument(), id));
+    };
+
+    // ---------------------------------------------------------------
+    // Drawing the pane
+    // ---------------------------------------------------------------
+
+    function card(slide, comment) {
+        const text = el('div', { class: 'comment-text', title: 'Click to edit', tabindex: '0' }, [comment.text]);
+        const startEdit = () => {
+            editingId = comment.id;
+            activeId = comment.id;
+            render();
+        };
+        text.addEventListener('click', startEdit);
+        text.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                startEdit();
+            }
+        });
+        const remove = el('button', {
+            type: 'button', class: 'comment-delete', title: 'Delete comment', 'aria-label': 'Delete comment',
+            onclick: () => App.commentsPane.deleteComment(comment.id),
+        });
+        remove.innerHTML = App.icons.get('deleteComment');
+        const article = el('article', { class: 'comment-card' + (comment.id === activeId ? ' active' : ''), 'data-comment-id': comment.id }, [
+            el('header', { class: 'comment-head' }, [
+                el('span', { class: 'comment-initials', title: 'Author' }, [comment.author || '?']),
+                el('span', { class: 'comment-meta' }, [
+                    el('span', { class: 'comment-date' }, [App.comments.dateText(comment.date)]),
+                    el('span', { class: 'comment-on' }, [App.comments.targetLabel(slide, comment.target)]),
+                ]),
+                remove,
+            ]),
+            text,
+        ]);
+        article.addEventListener('click', (event) => {
+            if (event.target.closest('button, textarea') || activeId === comment.id) {
+                return;
+            }
+            App.commentsPane.focusComment(comment.id);
+        });
+        if (editingId === comment.id) {
+            const box = el('textarea', { class: 'comment-edit', rows: '3', 'aria-label': 'Comment text' });
+            box.value = comment.text;
+            let done = false;
+            const finish = (keep) => {
+                if (done) {
+                    return;
+                }
+                done = true;
+                if (keep) {
+                    saveEdit(comment.id, box.value);
+                } else {
+                    editingId = null;
+                    render();
+                }
+            };
+            box.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    finish(false);
+                } else if (event.key === 'Enter' && event.ctrlKey) {
+                    event.preventDefault();
+                    finish(true);
+                }
+            });
+            box.addEventListener('blur', () => finish(true));
+            text.replaceWith(box);   // render() puts the cursor in it once it is on the page
+        }
+        return article;
+    }
+
+    function draftBox(slide) {
+        const known = App.settings.get().authorInitials;
+        const children = [el('div', { class: 'comment-on' }, ['New comment on ' + App.comments.targetLabel(slide, draft.target)])];
+        if (!known) {
+            children.push(el('label', { class: 'comment-initials-row' }, [
+                'Your initials ',
+                el('input', { id: 'comment-initials', type: 'text', maxlength: '4', size: '4', autocomplete: 'off', spellcheck: 'false' }),
+                el('span', { class: 'panel-hint' }, [' (kept on this computer; File > Settings)']),
+            ]));
+        }
+        const text = el('textarea', { id: 'comment-draft-text', rows: '3', placeholder: 'Type a comment', 'aria-label': 'New comment' });
+        text.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && event.ctrlKey) {
+                event.preventDefault();
+                post();
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                cancelDraft();
+            }
+        });
+        children.push(text);
+        children.push(el('p', { class: 'comment-draft-hint panel-hint' }, ['Ctrl+Enter posts it.']));
+        children.push(el('div', { class: 'comment-draft-buttons' }, [
+            el('button', { type: 'button', class: 'btn btn-primary', id: 'comment-post', onclick: post }, ['Post']),
+            el('button', { type: 'button', class: 'btn', onclick: cancelDraft }, ['Cancel']),
+        ]));
+        return el('div', { class: 'comment-draft' }, children);
+    }
+
+    function render() {
+        if (!nodes || nodes.pane.hidden) {
+            return;
+        }
+        const slide = App.deck.getCurrentSlide();
+        if (draft && (!slide || slide.getAttribute('data-slide-id') !== draft.slideId)) {
+            draft = null;   // another slide: the unposted box goes, as an unsent PowerPoint comment does
+        }
+        const comments = App.comments.listOf(slide);
+        // Keep a half-typed new comment while the list is redrawn (an undo, a slide redraw).
+        const typed = nodes.list.querySelector('#comment-draft-text');
+        const typedInitials = nodes.list.querySelector('#comment-initials');
+        const keepText = typed ? typed.value : '';
+        const keepInitials = typedInitials ? typedInitials.value : '';
+        nodes.list.replaceChildren(...comments.map((comment) => card(slide, comment)));
+        if (draft) {
+            nodes.list.appendChild(draftBox(slide));
+            nodes.list.querySelector('#comment-draft-text').value = keepText;
+            if (nodes.list.querySelector('#comment-initials')) {
+                nodes.list.querySelector('#comment-initials').value = keepInitials;
+            }
+        }
+        const editBox = nodes.list.querySelector('.comment-edit');
+        if (editBox) {
+            editBox.focus();
+            editBox.setSelectionRange(editBox.value.length, editBox.value.length);
+        }
+        nodes.empty.hidden = comments.length > 0 || !!draft;
+        const total = App.state.hasDeck ? App.comments.countIn(App.deck.getDocument()) : 0;
+        nodes.count.textContent = total ? total + ' in the deck' : '';
+    }
+
+    App.commentsPane.render = render;
+
+    /* Wiring, called once from App.start(). */
+    App.commentsPane.init = function init() {
+        nodes = {
+            pane: document.getElementById('comments-pane'),
+            list: document.getElementById('comments-list'),
+            empty: document.getElementById('comments-empty'),
+            count: document.getElementById('comments-count'),
+        };
+        document.getElementById('comments-new').addEventListener('click', () => App.commands.run('newComment'));
+        document.getElementById('comments-close').addEventListener('click', () => App.commentsPane.close());
+        App.events.on('deck-loaded', () => {
+            draft = null;
+            editingId = null;
+            activeId = null;
+            render();
+        });
+        ['slide-changed', 'history-changed'].forEach((name) => App.events.on(name, () => {
+            if (editingId) {
+                return;   // the card being edited keeps its box until it is left
+            }
+            render();
+        }));
     };
 })();
 
@@ -25315,6 +25773,14 @@ App.template.newDeckHtml = function newDeckHtml() {
                 'your notes, a timer and the clock: move it to your own screen. Saved decks also present on their own in the browser.',
         },
         {
+            id: 'review', label: 'Review',
+            groups: [
+                { label: 'Comments', commands: [['newComment', 'newComment'], ['commentsPane', 'comments']] },
+            ],
+            note: 'A comment sticks to the selected element, or to the slide when nothing is selected. ' +
+                'Comments are saved with the deck for the people who review it, but never shown when presenting, printing or exporting.',
+        },
+        {
             id: 'view', label: 'View',
             groups: [
                 { label: 'Master Views', commands: [['slideMaster', 'slideMaster']] },
@@ -25501,7 +25967,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
          'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed', 'crop-changed',
-         'chart-data-changed']
+         'chart-data-changed', 'comments-pane-changed', 'settings-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 

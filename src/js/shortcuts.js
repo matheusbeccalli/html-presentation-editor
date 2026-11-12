@@ -243,6 +243,7 @@
         ['Alt+F5', 'presenterView', { whileTyping: true, blockBrowserDefault: true }],
         // Ctrl+P would otherwise print the editor's own screen: it asks which slides to print instead.
         ['Ctrl+P', 'exportPdf', { whileTyping: true, blockBrowserDefault: true }],
+        ['Ctrl+Alt+M', 'newComment', { whileTyping: true, blockBrowserDefault: true }],   // as in PowerPoint
         ['Shift+F10', 'contextMenu'],
         ['Shift+F9', 'toggleGridlines'],
         ['ContextMenu', 'contextMenu'],

@@ -150,6 +150,19 @@
             <p class="panel-hint" id="format-autofit-hint"></p>
         </section>
     </aside>
+
+    <!-- Review comments of the slide shown (commentspane.js): opened by Review > New Comment / Comments, a marker or the status bar. -->
+    <aside id="comments-pane" aria-label="Comments" hidden>
+        <div class="comments-head">
+            <h2>Comments</h2>
+            <span id="comments-count" class="panel-hint"></span>
+            <button type="button" class="banner-close" id="comments-close" title="Close the comments">×</button>
+        </div>
+        <button type="button" class="btn" id="comments-new" title="New comment (Ctrl+Alt+M)">+ New comment</button>
+        <p class="panel-hint" id="comments-empty">No comments on this slide. Select an element (or nothing, for the whole slide) and click New comment.
+            Comments are saved with the deck, but never shown when presenting, printing or exporting.</p>
+        <div id="comments-list"></div>
+    </aside>
 </main>
 
 <footer id="statusbar">
@@ -228,6 +241,7 @@
 <!-- INLINE-JS: js/chartdata.js -->
 <!-- INLINE-JS: js/notes.js -->
 <!-- INLINE-JS: js/comments.js -->
+<!-- INLINE-JS: js/commentspane.js -->
 <!-- INLINE-JS: js/slides.js -->
 <!-- INLINE-JS: js/findreplace.js -->
 <!-- INLINE-JS: js/present.js -->

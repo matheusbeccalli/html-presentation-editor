@@ -59,6 +59,7 @@ App.start = function start() {
     App.chartControls.init();   // its Format pane section too
     App.chartData.init();       // the data grid under the slide
     App.notes.init();           // the speaker notes under the slide
+    App.commentsPane.init();    // the review comments pane on the right (Phase 9)
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();

@@ -170,6 +170,14 @@
                 'your notes, a timer and the clock: move it to your own screen. Saved decks also present on their own in the browser.',
         },
         {
+            id: 'review', label: 'Review',
+            groups: [
+                { label: 'Comments', commands: [['newComment', 'newComment'], ['commentsPane', 'comments']] },
+            ],
+            note: 'A comment sticks to the selected element, or to the slide when nothing is selected. ' +
+                'Comments are saved with the deck for the people who review it, but never shown when presenting, printing or exporting.',
+        },
+        {
             id: 'view', label: 'View',
             groups: [
                 { label: 'Master Views', commands: [['slideMaster', 'slideMaster']] },
@@ -356,7 +364,7 @@
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
          'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed', 'crop-changed',
-         'chart-data-changed']
+         'chart-data-changed', 'comments-pane-changed', 'settings-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 

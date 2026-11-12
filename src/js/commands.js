@@ -147,6 +147,12 @@
             label: 'From Current Slide', run: () => App.present.start(true), isEnabled: hasDeck,
         });
         // Export (Phase 8): PDF through the print window (pdf.js); Ctrl+P opens it too.
+        // Review comments (Phase 9, commentspane.js).
+        App.commands.define('newComment', { label: 'New Comment', run: () => App.commentsPane.newComment(), isEnabled: hasDeck });
+        App.commands.define('commentsPane', {
+            label: 'Comments', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
+            isChecked: () => App.commentsPane.isOpen(),
+        });
         App.commands.define('exportPdf', { label: 'PDF', run: () => App.pdf.open(), isEnabled: hasDeck });
         // Pictures of slides (snapshot.js): the browser draws the slide itself, at 2×.
         App.commands.define('exportPng', { label: 'PNG of This Slide', run: () => App.snapshot.exportCurrent(), isEnabled: hasDeck });

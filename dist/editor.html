@@ -24444,6 +24444,217 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { kind: 'table', rows: data, options: options };
     }
 
+    /* ---------- Charts ---------- */
+
+    /*
+     * An Excel number format for a chart's numbers (PowerPoint shows its separators the
+     * way Windows is set up, so 1.234,5 on a Brazilian PC): decimals, %, (negatives in
+     * parentheses), units such as " mn".
+     */
+    App.pptx.numberFormat = function numberFormat(options) {
+        const decimals = Math.max(0, Math.min(6, options.decimals || 0));
+        let format = '#,##0' + (decimals ? '.' + '0'.repeat(decimals) : '') + (options.percent ? '%' : '');
+        if (options.units && !options.percent) {
+            format += '"' + String(options.units).replace(/"/g, '') + '"';
+        }
+        return options.parens ? format + ';(' + format + ')' : format;
+    };
+
+    /*
+     * A waterfall as PowerPoint can keep it editable (SPEC 7.4): stacked columns, the first
+     * series an invisible base under each floating bar, then totals, increases and decreases
+     * (each category has a value in one of them). null when the bridge goes below zero: a
+     * stacked base cannot float a bar there, so that chart goes as a picture instead.
+     */
+    App.pptx.waterfallSeries = function waterfallSeries(steps) {
+        if (steps.some((step) => step.from < 0 || step.to < 0)) {
+            return null;
+        }
+        const pick = (kind, value) => steps.map((step) => (step.kind === kind ? value(step) : null));
+        return {
+            base: steps.map((step) => (step.kind === 'total' ? null : Math.min(step.from, step.to))),
+            total: pick('total', (step) => step.to),
+            increase: pick('increase', (step) => step.to - step.from),
+            decrease: pick('decrease', (step) => step.from - step.to),
+        };
+    };
+
+    const BAR_TYPES = {
+        column: ['col', 'clustered'], 'stacked-column': ['col', 'stacked'], 'stacked-column-100': ['col', 'percentStacked'],
+        bar: ['bar', 'clustered'], 'stacked-bar': ['bar', 'stacked'], 'stacked-bar-100': ['bar', 'percentStacked'],
+    };
+    const LEGEND_PLACES = { bottom: 'b', top: 't', right: 'r', left: 'l' };
+    const WATERFALL_DEFAULTS = { total: null, increase: '#3C9D5D', decrease: '#D9534F' };
+
+    // A colour the deck writes as CSS (var(--color-accent), a colour mix …) → 'RRGGBB', computed in the deck.
+    function resolvedColor(doc, css, fallback) {
+        const probe = doc.createElement('span');
+        probe.setAttribute('data-editor-only', '');
+        probe.style.color = css;
+        doc.body.appendChild(probe);
+        const color = App.pptx.colorOf(doc.defaultView.getComputedStyle(probe).color);
+        probe.remove();
+        return color ? color.hex : fallback;
+    }
+
+    function seriesData(series, categories) {
+        return { name: series.name, labels: categories, values: series.values };
+    }
+
+    /*
+     * A chart → PowerPoint's own chart, built from the chart's JSON (SPEC 7.4): its data
+     * stays editable in PowerPoint (Edit Data). Colours, title, legend, labels and their
+     * number format, axis limits and gridlines follow the deck; what PowerPoint cannot show
+     * the same way is reported.
+     */
+    function chartItem(element, offset, ctx) {
+        const script = element.querySelector(':scope > script.chart-data');
+        const data = script ? App.charts.parseChartData(script.textContent) : null;
+        if (!data || !App.charts.canDraw(data.type) || App.pptx.rotationOf(element.style.transform)) {
+            return pictureItem(element, offset, ctx);
+        }
+        const doc = element.ownerDocument;
+        const m = App.charts.modelOf(data);
+        const o = m.options;
+        const box = boxOf(element, offset);
+        const text = resolvedColor(doc, 'var(--color-text, #222222)', '222222');
+        const colors = m.series.map((series) => resolvedColor(doc, series.color, '1F2A44'));
+        const decimalsOf = (series) => (typeof o.labelDecimals === 'number' ? o.labelDecimals
+            : /-100$/.test(m.type) ? 0 : App.charts.decimalsOf(series.values, series.percent));
+        const formatOf = (series) => App.pptx.numberFormat({ decimals: decimalsOf(series), percent: series.percent,
+            parens: !!o.parens, units: o.units });
+        const legend = o.legend === 'none' ? null : LEGEND_PLACES[o.legend] || 'b';
+        const options = Object.assign(position(box, 0), {
+            fontFace: ctx.bodyFont, showTitle: !!o.title, title: o.title || '', titleFontSize: 13, titleColor: text,
+            titleFontFace: ctx.bodyFont, showLegend: !!legend && m.series.length > 1, legendPos: legend || 'b',
+            legendFontSize: 9, legendColor: text, legendFontFace: ctx.bodyFont,
+            catAxisLabelFontSize: 9, valAxisLabelFontSize: 9, catAxisLabelColor: text, valAxisLabelColor: text,
+            catAxisLabelFontFace: ctx.bodyFont, valAxisLabelFontFace: ctx.bodyFont,
+            valGridLine: o.gridlines === false ? { style: 'none' } : { color: 'D9D9D9', size: 0.75 },
+            catGridLine: { style: 'none' }, valAxisLineShow: false,
+            dataLabelFontSize: 9, dataLabelColor: text, dataLabelFontFace: ctx.bodyFont,
+        });
+        if (typeof o.axisMin === 'number') {
+            options.valAxisMinVal = o.axisMin;
+        }
+        if (typeof o.axisMax === 'number') {
+            options.valAxisMaxVal = o.axisMax;
+        }
+        if (o.valueAxisTitle) {
+            Object.assign(options, { showValAxisTitle: true, valAxisTitle: o.valueAxisTitle, valAxisTitleFontSize: 9 });
+        }
+        if (o.categoryAxisTitle) {
+            Object.assign(options, { showCatAxisTitle: true, catAxisTitle: o.categoryAxisTitle, catAxisTitleFontSize: 9 });
+        }
+        if (o.source) {
+            // The source line under the chart: a small text box, as the slide shows it.
+            options.h = App.pptx.inches(Math.max(1, box.height - 22));
+            ctx.extra.push({ kind: 'text', runs: [{ text: o.source, options: { fontSize: 8, color: '7F7F7F', fontFace: ctx.bodyFont } }],
+                options: Object.assign(position({ left: box.left, top: box.top + box.height - 20, width: box.width, height: 20 }, 0),
+                    { margin: 0, valign: 'bottom', isTextBox: true }) });
+        }
+        const first = m.series[0] || { values: [], percent: false };
+        if (o.dataLabels) {
+            Object.assign(options, { showValue: true, dataLabelFormatCode: formatOf(first) });
+        }
+        options.valAxisLabelFormatCode = App.pptx.numberFormat({ decimals: 0, percent: first.percent || /-100$/.test(m.type),
+            parens: !!o.parens, units: o.units });
+        if (m.estimates.some(Boolean)) {
+            ctx.report.push("a chart's estimate columns are not shaded lighter (PowerPoint: Format Data Point)");
+        }
+        if (o.cagr) {
+            ctx.report.push("a chart's CAGR arrow is not drawn (add it in PowerPoint)");
+        }
+
+        const type = m.type;
+        if (BAR_TYPES[type]) {
+            Object.assign(options, { barDir: BAR_TYPES[type][0], barGrouping: BAR_TYPES[type][1], chartColors: colors,
+                barGapWidthPct: typeof o.gapWidth === 'number' ? o.gapWidth : 100 });
+            if (BAR_TYPES[type][1] !== 'clustered') {
+                options.barOverlapPct = 100;
+            }
+            return { kind: 'chart', type: 'bar', data: m.series.map((s) => seriesData(s, m.categories)), options: options };
+        }
+        if (type === 'line' || type === 'area' || type === 'stacked-area') {
+            Object.assign(options, { chartColors: colors, lineSize: 2, lineDataSymbol: type === 'line' ? 'circle' : 'none',
+                lineDataSymbolSize: 6, barGrouping: type === 'stacked-area' ? 'stacked' : 'standard' });
+            return { kind: 'chart', type: type === 'line' ? 'line' : 'area', data: m.series.map((s) => seriesData(s, m.categories)),
+                options: options };
+        }
+        if (type === 'pie' || type === 'donut') {
+            const given = data.series && data.series[0] && Array.isArray(data.series[0].colors) ? data.series[0].colors : [];
+            const slices = m.categories.map((name, i) => resolvedColor(doc, given[i] || App.charts.defaultColor(i), '1F2A44'));
+            Object.assign(options, { chartColors: slices, showLegend: !!legend, holeSize: 55, showValue: false,
+                showPercent: !!o.dataLabels, dataLabelColor: 'FFFFFF' });
+            delete options.dataLabelFormatCode;
+            return { kind: 'chart', type: type === 'pie' ? 'pie' : 'doughnut', data: [seriesData(first, m.categories)], options: options };
+        }
+        if (type === 'scatter' || type === 'bubble') {
+            if (m.series.length < 2) {
+                return pictureItem(element, offset, ctx);
+            }
+            const points = [{ name: m.series[0].name, values: m.series[0].values },
+                Object.assign({ name: m.series[1].name, values: m.series[1].values },
+                    type === 'bubble' && m.series[2] ? { sizes: m.series[2].values } : {})];
+            Object.assign(options, { chartColors: [colors[1] || colors[0]], lineSize: 0, lineDataSymbol: 'circle', lineDataSymbolSize: 9,
+                showLegend: false, showValue: false });
+            return { kind: 'chart', type: type, data: points, options: options };
+        }
+        if (type === 'combo') {
+            const secondary = m.series.some((s) => s.axis === 'secondary');
+            const group = (kind) => m.series.map((s, i) => ({ s: s, color: colors[i] })).filter((entry) => entry.s.kind === kind);
+            const bars = group('bar');
+            const lines = group('line');
+            const lineFormat = lines[0] ? formatOf(lines[0].s) : null;
+            const charts = [];
+            if (bars.length) {
+                charts.push({ type: 'bar', data: bars.map((e) => seriesData(e.s, m.categories)), options: {
+                    barDir: 'col', barGrouping: 'clustered', chartColors: bars.map((e) => e.color),
+                    barGapWidthPct: typeof o.gapWidth === 'number' ? o.gapWidth : 100,
+                    showValue: !!o.dataLabels, dataLabelFormatCode: formatOf(bars[0].s) } });
+            }
+            if (lines.length) {
+                charts.push({ type: 'line', data: lines.map((e) => seriesData(e.s, m.categories)), options: Object.assign({
+                    chartColors: lines.map((e) => e.color), lineSize: 2, lineDataSymbol: 'circle', lineDataSymbolSize: 6,
+                    showValue: !!o.dataLabels, dataLabelFormatCode: lineFormat, dataLabelPosition: 't' },
+                secondary ? { secondaryValAxis: true, secondaryCatAxis: true } : {}) });
+            }
+            if (secondary) {
+                options.valAxes = [
+                    { showValAxisTitle: !!o.valueAxisTitle, valAxisTitle: o.valueAxisTitle || '', valGridLine: options.valGridLine,
+                        valAxisLabelFormatCode: options.valAxisLabelFormatCode, valAxisLineShow: false },
+                    { showValAxisTitle: !!o.secondaryAxisTitle, valAxisTitle: o.secondaryAxisTitle || '', valGridLine: { style: 'none' },
+                        valAxisLabelFormatCode: lineFormat || options.valAxisLabelFormatCode, valAxisLineShow: false },
+                ];
+                options.catAxes = [{ catAxisTitle: o.categoryAxisTitle || '', showCatAxisTitle: !!o.categoryAxisTitle }, { catAxisHidden: true }];
+            }
+            delete options.showValue;
+            delete options.dataLabelFormatCode;
+            return { kind: 'chart', combo: charts, options: options };
+        }
+        if (type === 'waterfall') {
+            const bars = App.pptx.waterfallSeries(App.charts.waterfallSteps(m));
+            if (!bars) {
+                return pictureItem(element, offset, ctx, 'a waterfall that goes below zero came across as a picture');
+            }
+            const look = Object.assign({}, WATERFALL_DEFAULTS, o.waterfall);
+            const names = { base: 'Base', total: 'Total', increase: 'Increase', decrease: 'Decrease' };
+            Object.assign(options, {
+                barDir: 'col', barGrouping: 'stacked', barOverlapPct: 100, barGapWidthPct: typeof o.gapWidth === 'number' ? o.gapWidth : 60,
+                showLegend: false, showValue: false,
+                chartColors: ['transparent', resolvedColor(doc, look.total || App.charts.defaultColor(0), '1F2A44'),
+                    resolvedColor(doc, look.increase, '3C9D5D'), resolvedColor(doc, look.decrease, 'D9534F')],
+            });
+            delete options.dataLabelFormatCode;
+            if (o.dataLabels) {
+                ctx.report.push("a waterfall's data labels are left off (PowerPoint would label its invisible base too)");
+            }
+            return { kind: 'chart', type: 'bar', data: ['base', 'total', 'increase', 'decrease'].map((key) =>
+                ({ name: names[key], labels: m.categories, values: bars[key] })), options: options };
+        }
+        return pictureItem(element, offset, ctx);
+    }
+
     // A part PowerPoint gets as a picture: where it is, and what to tell the user.
     function pictureItem(part, offset, ctx, reason) {
         const isMaster = part.classList.contains('master-layer');
@@ -24480,6 +24691,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             items.push(shapeItem(part, offset, ctx));
         } else if (type === 'table') {
             items.push(tableItem(part, offset, ctx));
+        } else if (type === 'chart') {
+            items.push(chartItem(part, offset, ctx));
+            ctx.extra.splice(0).forEach((extra) => items.push(extra));   // its source line, on top of it
         } else if (type === 'group' && !App.pptx.rotationOf(part.style.transform)) {
             // PowerPoint groups cannot be written: the parts come one by one, where they show.
             const box = boxOf(part, offset);
@@ -24498,7 +24712,9 @@ App.template.newDeckHtml = function newDeckHtml() {
      */
     function readSlide(slide, view, schemes, master) {
         const style = view.getComputedStyle(slide);
-        const ctx = { view: view, schemes: schemes, report: [], masterNative: !!master, numberAsText: !!(master && master.numberAsText) };
+        const ctx = { view: view, schemes: schemes, report: [], masterNative: !!master, numberAsText: !!(master && master.numberAsText),
+            bodyFont: App.pptx.fontFace(view.getComputedStyle(slide.ownerDocument.documentElement).getPropertyValue('--font-body') || 'Calibri'),
+            extra: [] };
         const items = [];
         partsOf(slide, view).forEach((part) => readPart(part, null, ctx, items));
         return {
@@ -24606,6 +24822,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
         }
 
+        // A PowerPoint chart keeps its numbers and a format; the separators come from the PC's Windows region
+        // settings, never from the file (a format code cannot fix them), so say it once when there are charts.
+        if (plans.some((plan) => plan.items.some((item) => item.kind === 'chart'))) {
+            report.push({ slide: null, text: "chart numbers use this PC's Windows number format (Brazil: 1.234,5; " +
+                'United States: 1,234.5), not the deck\'s: check one chart on the PC that will show it' });
+        }
         const root = App.serialize.cleanCopy(doc);   // what the pictures are drawn from
         for (let index = 0; index < plans.length; index++) {
             if (onProgress) {
@@ -24631,6 +24853,10 @@ App.template.newDeckHtml = function newDeckHtml() {
                     slide.addImage(item.options);
                 } else if (item.kind === 'shape') {
                     slide.addShape(item.shape, item.options);
+                } else if (item.kind === 'chart' && item.combo) {
+                    slide.addChart(item.combo, item.options);
+                } else if (item.kind === 'chart') {
+                    slide.addChart(item.type, item.data, item.options);
                 } else if (item.kind === 'table') {
                     slide.addTable(item.rows, item.options);
                 } else if (item.kind === 'picture') {
@@ -24652,8 +24878,21 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (report.length === 0) {
             return 'Everything came across as editable PowerPoint objects.';
         }
-        return 'Check these in PowerPoint (they are pictures or simplified there):\n' +
-            report.map((entry) => '• ' + (entry.slide ? 'Slide ' + entry.slide + ': ' : '') + entry.text).join('\n');
+        // The same remark on one slide once, with how many times ("2 ×").
+        const lines = [];
+        const counts = new Map();
+        report.forEach((entry) => {
+            const line = (entry.slide ? 'Slide ' + entry.slide + ': ' : '') + entry.text;
+            if (!counts.has(line)) {
+                lines.push(line);
+            }
+            counts.set(line, (counts.get(line) || 0) + 1);
+        });
+        return 'Everything else came across as editable PowerPoint objects. Check these in PowerPoint:\n' +
+            lines.map((line) => {
+                const count = counts.get(line);
+                return '• ' + (count > 1 ? line.replace(/: (an? |the )?/, ': ' + count + ' × ') : line);
+            }).join('\n');
     };
 
     /* Export > PowerPoint: build, download deck.pptx, show the report. */

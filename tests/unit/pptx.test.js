@@ -91,3 +91,43 @@ test('pptx: paragraphs become PptxGenJS text runs with paragraph options', () =>
     assertEqual([runs[2].options.align, runs[3].options.align, runs[3].options.fontSize], ['center', 'right', 13.5]);
     assertEqual(runs[3].options.bullet, false, 'a plain line has no bullet');
 });
+
+test('pptx: chart numbers get an Excel format: decimals, %, parentheses, units', () => {
+    assertEqual(App.pptx.numberFormat({ decimals: 0 }), '#,##0');
+    assertEqual(App.pptx.numberFormat({ decimals: 1, percent: true }), '#,##0.0%');
+    assertEqual(App.pptx.numberFormat({ decimals: 1, units: ' mn' }), '#,##0.0" mn"');
+    assertEqual(App.pptx.numberFormat({ decimals: 0, parens: true }), '#,##0;(#,##0)');
+});
+
+test('pptx: a waterfall becomes stacked columns over an invisible base; one going below zero cannot', () => {
+    const steps = App.charts.waterfallSteps(App.charts.modelOf({
+        type: 'waterfall', categories: ['2024', 'Volume', 'Preço', 'Custos', '2025'],
+        series: [{ name: 'EBITDA', values: [100, 30, 10, -25, null] }],
+    }));
+    assertEqual(App.pptx.waterfallSeries(steps), {
+        base: [null, 100, 130, 115, null],
+        total: [100, null, null, null, 115],
+        increase: [null, 30, 10, null, null],
+        decrease: [null, null, null, 25, null],
+    });
+    const below = App.charts.waterfallSteps(App.charts.modelOf({
+        type: 'waterfall', categories: ['A', 'B', 'C'], series: [{ name: 'x', values: [10, -30, null] }],
+    }));
+    assertEqual(App.pptx.waterfallSeries(below), null);
+});
+
+test('pptx: the report lists what to check, one line per remark and slide, repeats counted', () => {
+    assertEqual(App.pptx.reportText([]), 'Everything came across as editable PowerPoint objects.');
+    const text = App.pptx.reportText([
+        { slide: 2, text: 'a group came across as its separate parts' },
+        { slide: 2, text: 'a group came across as its separate parts' },
+        { slide: 5, text: 'a chart came across as a picture' },
+        { slide: null, text: 'slide numbers like "3 / 15" are typed on each slide' },
+    ]);
+    assertEqual(text.split('\n'), [
+        'Everything else came across as editable PowerPoint objects. Check these in PowerPoint:',
+        '• Slide 2: 2 × group came across as its separate parts',
+        '• Slide 5: a chart came across as a picture',
+        '• slide numbers like "3 / 15" are typed on each slide',
+    ]);
+});

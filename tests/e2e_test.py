@@ -6112,7 +6112,10 @@ def test_pptx_export_text(browser):
     for number, slide_boxes in enumerate(boxes, start=1):
         xml = parts[f"ppt/slides/slide{number}.xml"]
         shapes = re.findall(r"<p:sp>(.*?)</p:sp>", xml, flags=re.S)
-        native = [shape for shape in shapes if 'txBox="1"' in shape]
+        # Text boxes of the deck (a chart's source line is a small text box of its own, under the chart).
+        sources = page.evaluate("""n => Array.from(App.deck.getSlides()[n].querySelectorAll('.el[data-type="chart"]'))
+            .map((f) => (App.charts.readData(f).options || {}).source).filter(Boolean)""", number - 1)
+        native = [shape for shape in shapes if 'txBox="1"' in shape and "".join(pptx_texts(shape)) not in sources]
         check(len(native) == len(slide_boxes), f"slide {number}: {len(slide_boxes)} text boxes, {len(native)} native")
         for box, shape in zip(slide_boxes, native):
             offset = re.search(r'<a:off x="(\d+)" y="(\d+)"/>', shape)
@@ -6133,7 +6136,8 @@ def test_pptx_export_text(browser):
     notes = page.evaluate("App.notes.textOf(App.deck.getSlides()[0])")
     notes_xml = next(text for name, text in parts.items() if name.startswith("ppt/notesSlides/notesSlide") and notes[:20] in text)
     check(notes[:20] in notes_xml, "slide 1's speaker notes")
-    check("Slide 4: a chart came across as a picture" in report, f"what is not native comes as a picture, listed: {report}")
+    check("came across as a picture" not in report, f"everything native by now: {report}")
+    check("Windows number format" in report, "the deck has a chart: the separators note")
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
 
@@ -6283,6 +6287,86 @@ def test_pptx_export_table(browser):
     editor.close()
 
 
+def slide_charts(parts, number):
+    """The chart XML parts a slide uses, in the order the slide names them."""
+    rels = parts[f"ppt/slides/_rels/slide{number}.xml.rels"]
+    return [parts["ppt/charts/" + name] for name in re.findall(r'Target="(?:\.\.|/ppt)/charts/(chart\d+\.xml)"', rels)]
+
+
+def chart_numbers(chart_xml, series_index):
+    """The numbers of series `series_index` in a chart part (empty points as None)."""
+    series = re.findall(r"<c:ser>(.*?)</c:ser>", chart_xml, flags=re.S)[series_index]
+    values = re.search(r"<c:val>(.*?)</c:val>", series, flags=re.S) or re.search(r"<c:yVal>(.*?)</c:yVal>", series, flags=re.S)
+    points = re.findall(r'<c:pt idx="(\d+)"><c:v>([^<]*)</c:v></c:pt>', values.group(1))
+    count = int(re.search(r'<c:ptCount val="(\d+)"/>', values.group(1)).group(1))
+    out = [None] * count
+    for index, value in points:
+        out[int(index)] = float(value) if value != "" else None
+    return out
+
+
+def test_pptx_export_charts(browser):
+    """Phase 8 (SPEC 7.4) step 9: every chart type the editor draws becomes PowerPoint's own chart from the chart's
+    data: the combo chart (columns + a line on a second axis), stacked and 100% columns, bars, lines, areas, pie, donut,
+    scatter, bubble, and the waterfall as stacked columns over an invisible base; nothing comes as a picture."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    kinds = page.evaluate("""() => {
+        const doc = App.deck.getDocument();
+        const types = ['waterfall', 'donut', 'pie', 'stacked-column', 'stacked-column-100', 'bar', 'line', 'area', 'scatter', 'bubble'];
+        types.forEach((type, i) => {
+            const slide = App.deck.getSlides()[i < 5 ? 5 : 4];
+            const figure = App.charts.createChart(doc, App.charts.sampleData(type, 'pt-BR'),
+                { left: 40 + (i % 5) * 245, top: 330, width: 230, height: 180 }, 'c' + i);
+            figure.style.zIndex = '60';
+            slide.appendChild(figure);
+        });
+        return types;
+    }""")
+    combo = page.evaluate("App.charts.readData(App.deck.getSlides()[3].querySelector('.el[data-type=\"chart\"]'))")
+    waterfall = page.evaluate("""() => {
+        const data = App.charts.readData(App.deck.getSlides()[5].querySelector('[data-id="c0"]'));
+        return App.pptx.waterfallSeries(App.charts.waterfallSteps(App.charts.modelOf(data)));
+    }""")
+    path, report = export_pptx(editor, "contract-deck-charts.pptx")
+    parts = pptx_parts(path)
+    check("chart came across as a picture" not in report, f"no chart as a picture: {report}")
+    check("chart numbers use this PC's Windows number format" in report, "the report says where the separators come from")
+
+    # The combo chart on slide 4: columns on the first axis, the margin line on the second, the deck's numbers.
+    [chart] = slide_charts(parts, 4)
+    check("<c:barChart>" in chart and "<c:lineChart>" in chart, "columns and a line")
+    check(len(re.findall(r"<c:valAx>", chart)) == 2, "two value axes (the margin on the right)")
+    check(chart_numbers(chart, 0) == [float(v) for v in combo["series"][0]["values"]], f"the revenue: {chart_numbers(chart, 0)}")
+    check(chart_numbers(chart, 1) == [float(v) for v in combo["series"][1]["values"]], f"the margin: {chart_numbers(chart, 1)}")
+    for category in combo["categories"]:
+        check(f"<c:v>{category}</c:v>" in chart, f"category {category}")
+    check(combo["options"]["title"] in chart, "the title")
+    check("0%" in chart, "the margin's labels and axis as percents")
+
+    # The other types.
+    found = [re.search(r"<c:(barChart|bar3DChart|lineChart|areaChart|pieChart|doughnutChart|scatterChart|bubbleChart)>", c).group(1)
+             for c in slide_charts(parts, 6) + slide_charts(parts, 5)]
+    check(found == ["barChart", "doughnutChart", "pieChart", "barChart", "barChart", "barChart", "lineChart", "areaChart",
+                    "scatterChart", "bubbleChart"], f"each type native: {found}")
+    sixth = slide_charts(parts, 6)
+    check('<c:grouping val="stacked"/>' in sixth[3] and '<c:grouping val="percentStacked"/>' in sixth[4], "stacked and 100%")
+    check('<c:barDir val="bar"/>' in slide_charts(parts, 5)[0], "bars run sideways")
+
+    # The waterfall: stacked columns, the first series (the base) invisible, each part's numbers.
+    bridge = sixth[0]
+    check('<c:grouping val="stacked"/>' in bridge, "stacked")
+    first_series = re.findall(r"<c:ser>(.*?)</c:ser>", bridge, flags=re.S)[0]
+    check("<a:noFill/>" in first_series.split("<c:cat>")[0], "the base series is invisible")
+    for index, key in enumerate(["base", "total", "increase", "decrease"]):
+        check(chart_numbers(bridge, index) == [None if v is None else float(v) for v in waterfall[key]],
+              f"the waterfall's {key}: {chart_numbers(bridge, index)} / {waterfall[key]}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -6371,6 +6455,7 @@ TESTS = [
     test_pptx_export_text,
     test_pptx_export_pictures_shapes_master,
     test_pptx_export_table,
+    test_pptx_export_charts,
 ]
 
 

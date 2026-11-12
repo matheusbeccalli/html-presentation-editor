@@ -81,6 +81,13 @@ class TextIsBehindOneDoor(unittest.TestCase):
                 self.assertNotIn(needle, source, f"{path.name} uses {needle}: text belongs to text.js")
 
 
+class SavedDeckHidesEditorData(unittest.TestCase):
+    def test_player_css_hides_speaker_notes_and_review_comments(self):
+        # A saved deck opened on its own (and its print) never shows notes or comments (Phases 7, 9).
+        css = (build.ROOT / "src" / "player" / "player.css").read_text(encoding="utf-8")
+        self.assertIn("aside.notes, aside.comments { display: none !important; }", css)
+
+
 class FullBuild(unittest.TestCase):
     def test_build_succeeds_and_output_is_offline(self):
         size = build.build()

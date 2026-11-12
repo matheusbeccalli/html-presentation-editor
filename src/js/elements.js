@@ -148,11 +148,16 @@
         return App.util.uniqueId('e', used);
     };
 
+    /* Put `element` into `slide` after its other elements, before the speaker notes and review comments in the HTML. */
+    App.elements.insertIntoSlide = function insertIntoSlide(slide, element) {
+        slide.insertBefore(element, slide.querySelector(':scope > aside.notes, :scope > aside.comments'));
+    };
+
     /* A new element goes in front of everything on the slide (before the speaker notes in the HTML). */
     App.elements.addOnTop = function addOnTop(slide, element) {
         const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
         element.style.zIndex = String(top + 1);
-        slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+        App.elements.insertIntoSlide(slide, element);
     };
 
     /* Give `element` and every element inside it that has a data-id a new, unused id. */
@@ -283,8 +288,8 @@
                 App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element),
                     spot.left - first.left, spot.top - first.top));
                 element.style.zIndex = String(topZ + 1 + index);
-                // Speaker notes stay the last thing in the slide.
-                slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+                // Speaker notes and comments stay the last things in the slide.
+                App.elements.insertIntoSlide(slide, element);
             });
         });
         App.selection.selectMany(elements);

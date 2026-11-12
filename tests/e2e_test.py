@@ -303,7 +303,7 @@ def test_format1_deck_text_is_converted(browser):
         return [box(parse(a)), box(parse(b))];
     }""", [CONTRACT_FORMAT1.read_text(encoding="utf-8"), saved.read_text(encoding="utf-8")])
     check(positions[0] == positions[1], "every element kept its id, position, size and stacking order")
-    check('<meta name="deck-format" content="3">' in saved.read_text(encoding="utf-8"), "saved as format 3")
+    check('<meta name="deck-format" content="4">' in saved.read_text(encoding="utf-8"), "saved as format 4 (the current one)")
     cells = page.evaluate("""() => Array.from(App.deck.getDocument().querySelectorAll('[data-id="e9"] td'))
         .map((cell) => App.text.getModel(cell).map((line) => line.text).join('/'))""")
     check(len(cells) == 24 and cells[:4] == ["Empresa", "EV (R$ mn)", "EV/EBITDA 2025E", "Margem EBITDA"],
@@ -6507,6 +6507,110 @@ def test_phase8_done_when(browser):
     editor.close()
 
 
+COMMENT_SENTINEL = "COMENTARIO-SENTINELA-9"
+
+
+def test_comments_saved_but_never_shown_or_sent(browser):
+    """Phase 9 (SPEC 4, step 1): a review comment is saved in the deck file (deck-format 4) and comes back as a comment
+    when the file is opened again (not as text on the slide), but nothing shown or sent carries it: the slide show,
+    the presenter view, print / PDF, slide pictures, PowerPoint, Save a Clean Copy; Find does not find its text."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("""(text) => App.history.change('Add comment', { slideId: 's1' }, () => {
+        const slide = App.deck.getSlides()[0];
+        App.comments.add(slide, { target: slide.querySelector('.el').getAttribute('data-id'), author: 'MB',
+                                  date: '2026-11-11T14:32:00.000Z', text: text });
+    })""", COMMENT_SENTINEL)
+    check(page.evaluate("App.comments.countIn(App.deck.getDocument())") == 1, "one comment in the deck")
+    check(COMMENT_SENTINEL not in page.evaluate("document.getElementById('deck-frame').contentDocument.body.innerText"),
+          "the editor's slide view does not show it")
+
+    # Saved: in the file, format 4; opened again it is a comment, not a text box.
+    saved = editor.save_as_download("comments-saved.html")
+    html = saved.read_text(encoding="utf-8")
+    check(COMMENT_SENTINEL in html and '<meta name="deck-format" content="4">' in html, "saved with the deck, format 4")
+    player, errors = play_saved_deck(browser, saved)
+    check(COMMENT_SENTINEL not in player.inner_text("body") and errors == [], "the saved deck on its own never shows it")
+    player.context.close()
+    editor.open(saved)
+    reopened = page.evaluate("""(text) => ({
+        comments: App.comments.countIn(App.deck.getDocument()),
+        inElements: Array.from(App.deck.getDocument().querySelectorAll('.el')).some((el) => el.textContent.includes(text)),
+        dirty: App.history.isDirty() })""", COMMENT_SENTINEL)
+    check(reopened == {"comments": 1, "inElements": False, "dirty": False}, f"opened again: {reopened}")
+    editor.close_dialog_if_open()
+
+    # Spies on the real export paths: what the pictures and the presenter window are made from.
+    page.evaluate("""() => {
+        window.__svgs = [];
+        const slideSvg = App.snapshot.slideSvg;
+        App.snapshot.slideSvg = (...args) => { const svg = slideSvg(...args); window.__svgs.push(svg); return svg; };
+        window.__presenterHtml = [];
+        const open = App.presenter.open;
+        App.presenter.open = (html, count) => { window.__presenterHtml.push(html); return open(html, count); };
+    }""")
+    page.evaluate(CATCH_PRINT)
+
+    # Slide show (F5) and presenter view (Alt+F5).
+    page.keyboard.press("F5")
+    wait_until(page, SHOWN_IN_SHOW)
+    show_html = page.evaluate("document.querySelector('#slideshow iframe').contentDocument.documentElement.outerHTML")
+    check(COMMENT_SENTINEL not in show_html and "aside class=\"comments\"" not in show_html, "not in the slide show")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.getElementById('slideshow')")
+    with editor.context.expect_page() as popup_info:
+        page.keyboard.press("Alt+F5")
+    popup = popup_info.value
+    wait_until(page, "window.__presenterHtml.length === 1")
+    check(COMMENT_SENTINEL not in page.evaluate("window.__presenterHtml[0]"), "not in the presenter view")
+    wait_until(popup, "document.getElementById('presenter-count') && document.getElementById('presenter-count').textContent")
+    check(COMMENT_SENTINEL not in popup.content(), "not in the presenter window")
+    page.evaluate("App.present.stop()")
+
+    # Print / PDF (Ctrl+P).
+    page.keyboard.press("Control+p")
+    wait_until(page, "!!document.querySelector('dialog[open] .pdf-dialog')")
+    page.click("dialog[open] button:has-text('Print')")
+    wait_until(page, "window.__printed.length === 1")
+    check(COMMENT_SENTINEL not in page.evaluate("window.__printed[0]"), "not in the print")
+
+    # Slide pictures: PNG of this slide and the ZIP of all slides.
+    page.click("[role='tab']:has-text('Export')")
+    with page.expect_download():
+        page.click("button[data-command='exportPng']")
+    with page.expect_download(timeout=120000):
+        page.click("button[data-command='exportPngAll']")
+    svgs = page.evaluate("window.__svgs")
+    check(len(svgs) >= 2 and not any(COMMENT_SENTINEL in svg for svg in svgs), f"not in the slide pictures ({len(svgs)})")
+
+    # PowerPoint.
+    pptx, _ = export_pptx(editor, "comments-hidden.pptx")
+    check(not any(COMMENT_SENTINEL in part for part in pptx_parts(pptx).values()), "not in the PowerPoint file")
+
+    # Save a Clean Copy.
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='saveCleanCopy']")
+    wait_until(page, "!!document.querySelector('dialog[open] .clean-copy-dialog')")
+    with page.expect_download() as download_info:
+        page.click("dialog[open] button:has-text('Save')")
+    clean = OUTPUT / "comments-clean-copy.html"
+    download_info.value.save_as(clean)
+    check(COMMENT_SENTINEL not in clean.read_text(encoding="utf-8"), "not in the clean copy")
+
+    # Find (Ctrl+F) does not look into comments.
+    page.keyboard.press("Control+f")
+    wait_until(page, "!!document.querySelector('#find-panel:not([hidden])')")
+    page.keyboard.type(COMMENT_SENTINEL)
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(300)
+    found = page.evaluate(FIND_STATE)
+    check(found["highlighted"] == 0 and found["selected"] == "", f"Find does not find the comment's text: {found}")
+    check(page.evaluate("App.comments.countIn(App.deck.getDocument())") == 1, "the deck keeps its comment")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -6598,6 +6702,7 @@ TESTS = [
     test_pptx_export_charts,
     test_save_clean_copy,
     test_phase8_done_when,
+    test_comments_saved_but_never_shown_or_sent,
 ]
 
 

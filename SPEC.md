@@ -105,7 +105,7 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="deck-format" content="3">
+  <meta name="deck-format" content="4">
   <style>
     :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
             --color-primary: #CC092F; --color-accent: #1F2A44; --color-text: #222; --color-bg: #fff;
@@ -144,6 +144,9 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
       <svg>…static rendering…</svg>
     </figure>
     <aside class="notes">Speaker notes</aside>
+    <aside class="comments">
+      <div class="comment" data-comment-id="c1" data-target="e5" data-author="MB" data-date="2026-11-11T14:32:00.000Z">Checar a fonte</div>
+    </aside>
   </section>
 </body>
 </html>
@@ -154,6 +157,8 @@ Text inside text elements, shapes and table cells follows the **flat-paragraph t
 Tables follow the **table model** (Phase 4, deck format 3): one `<tbody>` of `<td>` only (no `<thead>`/`<th>`: the header row is a style option), merged cells as `colspan`/`rowspan`, column widths in px in a `<colgroup>` (`table-layout: fixed`), row heights in px on each `<tr>`. The table style options are attributes on `<table>` (`data-header-row`, `data-banded-rows`, `data-total-row`, `data-first-column`), drawn by `<style data-deck-table>` from the theme variables (optional `--table-header-fill`, `--table-band-fill` … in `:root`). Look shared by most cells sits once on the `<table>`: its text look inline (cells inherit it) and its cell box as `--cell-padding`, `--cell-vertical-align`, `--cell-border-top|right|bottom|left`; a cell's own fill, borders, padding or text look is inline on its `<td>` and wins. Opening a format-2 (or older) deck converts its tables, keeping their look, and says so in the import report.
 
 Element types: `text`, `image`, `table`, `shape`, `chart`, `group`. Every element has a unique `data-id`, absolute `left/top/width/height` in px, and a `z-index`. Theme colors and fonts come from the CSS variables in `:root`, so changing a variable restyles the whole deck. Slides may carry `data-hidden="true"` and `data-layout="title|title-content|two-columns|blank"`. A deck-level `<div class="master">` holds elements repeated on every slide (logo, footer, "Confidencial", slide number).
+
+Review comments (Phase 9, deck format 4) live in each slide's hidden `<aside class="comments">`: one `<div class="comment">` per comment, plain text, with its id (`data-comment-id`, unique in the deck), the element it points at (`data-target` = that element's `data-id`; none = the slide), the author's initials and the date (ISO). They are saved with the deck but never shown, presented, printed or exported, and Save a Clean Copy leaves them out. Format 4 only added them, so opening a format-3 deck changes nothing but the number.
 
 **3.4 Importing decks that do not follow the contract**
 

@@ -300,7 +300,7 @@
     // ---------------------------------------------------------------
 
     function isInsideMasterOrNotes(element) {
-        return !!element.closest('.master, aside.notes, .notes');
+        return !!element.closest('.master, aside.notes, .notes, aside.comments');
     }
 
     /*

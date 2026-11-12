@@ -1075,7 +1075,7 @@ html.deck-player-on .slide.deck-player-current {
     transform-origin: center center !important;
 }
 html.deck-player-on .master { display: none !important; }
-aside.notes { display: none !important; }
+aside.notes, aside.comments { display: none !important; }
 .deck-player-counter {
     position: fixed; right: 14px; bottom: 10px; z-index: 2147483647;
     font: 13px "Segoe UI", Arial, sans-serif; color: #fff; opacity: 0.55;
@@ -1275,9 +1275,10 @@ JSZip's own dependencies, bundled with it (all permissive):
 
 window.App = {
     // The deck format this editor writes (<meta name="deck-format">, SPEC 3.3).
-    // 2 = text in the flat-paragraph model (Phase 3); 3 = tables in the table model (Phase 4).
+    // 2 = text in the flat-paragraph model (Phase 3); 3 = tables in the table model (Phase 4);
+    // 4 = review comments in <aside class="comments"> (Phase 9, comments.js).
     // Older decks are migrated on open (normalize.js).
-    DECK_FORMAT: 3,
+    DECK_FORMAT: 4,
 
     // Shared state that several modules read. Kept small on purpose.
     state: {
@@ -3414,7 +3415,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="deck-format" content="3">
+<meta name="deck-format" content="${App.DECK_FORMAT}">
 <title>Nova apresentação</title>
 <style>
   :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
@@ -9859,7 +9860,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     // ---------------------------------------------------------------
 
     function isInsideMasterOrNotes(element) {
-        return !!element.closest('.master, aside.notes, .notes');
+        return !!element.closest('.master, aside.notes, .notes, aside.comments');
     }
 
     /*
@@ -10265,6 +10266,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         return element.matches('.notes, .speaker-notes, [data-notes]') && computed.display === 'none';
     }
 
+    // Review comments (deck-format 4, comments.js): hidden data of the slide, never content to convert.
+    function isComments(element) {
+        return element.matches(App.comments.SELECTOR);
+    }
+
     function isContractSlide(slide) {
         const view = slide.ownerDocument.defaultView;
         const hasLooseText = Array.from(slide.childNodes).some((node) => {
@@ -10275,7 +10281,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         return Array.from(slide.children).every((child) => {
             const computed = view.getComputedStyle(child);
-            if (isNotes(child, computed) || SKIP_TAGS.has(child.tagName.toLowerCase())) {
+            if (isNotes(child, computed) || isComments(child) || SKIP_TAGS.has(child.tagName.toLowerCase())) {
                 return true;
             }
             return child.classList.contains('el') &&
@@ -10767,6 +10773,10 @@ App.template.newDeckHtml = function newDeckHtml() {
                 ctx.notes.push(element.innerHTML.trim());
                 return;
             }
+            if (isComments(element)) {
+                ctx.comments.push(element);
+                return;
+            }
             if (computed.display === 'none' || element.closest('.master')) {
                 return;
             }
@@ -10947,7 +10957,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
             const ctx = {
                 out: out, slide: frameSlide, box: box, fit: fit, slideNumber: index + 1,
-                items: [], notes: [], removed: report.otherRemoved, report: report, textChecks: textChecks,
+                items: [], notes: [], comments: [], removed: report.otherRemoved, report: report, textChecks: textChecks,
             };
             collect(frameSlide, ctx);
 
@@ -10967,6 +10977,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             notes.setAttribute('class', 'notes');
             notes.innerHTML = ctx.notes.join('\n');
             section.appendChild(notes);
+            ctx.comments.forEach((box) => section.appendChild(out.importNode(box, true)));
             out.body.appendChild(section);
         });
 
@@ -11029,7 +11040,9 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     // Decks saved before format 2 hold their text as <h1>, <ul> …; before format 3,
-    // their tables as the deck's own HTML and CSS.
+    // their tables as the deck's own HTML and CSS. Format 4 only added review comments
+    // (<aside class="comments">), so a format-3 deck has nothing to convert: it is
+    // simply marked format 4 (importer.js ensureDeckFormatMeta).
     const TEXT_MODEL_FORMAT = 2;
     const TABLE_MODEL_FORMAT = 3;
 
@@ -11247,10 +11260,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         const root = doc.documentElement.cloneNode(true);
         stripEditorMarks(root);
         root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
+        // Review comments (Phase 9) stay only in the deck file itself (Save, AutoSave, drafts ask for them);
+        // everything else made from this copy - the show, print, pictures, PowerPoint, a clean copy - leaves
+        // them out, so a new export path cannot leak them by forgetting to.
+        if (!(options && options.keepComments)) {
+            App.comments.removeAll(root);
+        }
         if (options && options.cleanCopy) {
             // File > Save a Clean Copy (Phase 8): a copy to send. It is a deck of its own (no deck id: opened
             // later, it is never taken for the original or offered the original's recovery drafts), and the
-            // hidden slides go when asked. Review comments go too, once they exist (Phase 9).
+            // hidden slides go when asked. Its review comments are already gone (above).
             root.querySelectorAll('meta[name="deck-id"]').forEach((meta) => meta.remove());
             if (options.removeHidden) {
                 root.querySelectorAll('section.slide[data-hidden="true"]').forEach((slide) => slide.remove());
@@ -11714,7 +11733,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         '.slide[data-editor-current] { display: block !important; position: absolute !important;',
         '  left: 0 !important; top: 0 !important; margin: 0 !important; transform: none !important;',
         '  opacity: 1 !important; visibility: visible !important; }',
-        'aside.notes, .master { display: none !important; }',
+        'aside.notes, aside.comments, .master { display: none !important; }',
         '*, *::before, *::after { animation: none !important; transition: none !important; }',
         // Find & replace paints its matches with the CSS Highlight API (findreplace.js), as the browser's own find does.
         '::highlight(editor-find) { background-color: #ffe14d; }',
@@ -15015,11 +15034,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         return App.util.uniqueId('e', used);
     };
 
+    /* Put `element` into `slide` after its other elements, before the speaker notes and review comments in the HTML. */
+    App.elements.insertIntoSlide = function insertIntoSlide(slide, element) {
+        slide.insertBefore(element, slide.querySelector(':scope > aside.notes, :scope > aside.comments'));
+    };
+
     /* A new element goes in front of everything on the slide (before the speaker notes in the HTML). */
     App.elements.addOnTop = function addOnTop(slide, element) {
         const top = App.transform.topLevelElements(slide).reduce((max, other) => Math.max(max, App.transform.zIndexOf(other)), 0);
         element.style.zIndex = String(top + 1);
-        slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+        App.elements.insertIntoSlide(slide, element);
     };
 
     /* Give `element` and every element inside it that has a data-id a new, unused id. */
@@ -15150,8 +15174,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 App.transform.writeRect(element, App.transform.moveRect(App.transform.readRect(element),
                     spot.left - first.left, spot.top - first.top));
                 element.style.zIndex = String(topZ + 1 + index);
-                // Speaker notes stay the last thing in the slide.
-                slide.insertBefore(element, slide.querySelector(':scope > aside.notes'));
+                // Speaker notes and comments stay the last things in the slide.
+                App.elements.insertIntoSlide(slide, element);
             });
         });
         App.selection.selectMany(elements);
@@ -16584,7 +16608,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     App.fileio.currentHtml = function currentHtml() {
-        return App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource());
+        // The deck file keeps its review comments (Phase 9); exports and clean copies do not.
+        return App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource(), { keepComments: true });
     };
 
     /*
@@ -22171,6 +22196,137 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/comments.js ----
+/*
+ * comments.js - review comments (SPEC Phase 9): sticky notes on a slide or
+ * on one element of it, with the author's initials and the date.
+ *
+ *   <section class="slide"> …
+ *     <aside class="comments">
+ *       <div class="comment" data-comment-id="c1" data-target="e5" data-author="MB"
+ *            data-date="2026-11-11T14:32:00.000Z">Checar a fonte do número</div>
+ *     </aside>
+ *   </section>
+ *
+ * Decided in the Phase 9 Q&A:
+ *  - The comments are part of the deck file (deck-format 4), so they survive
+ *    Save, AutoSave and recovery drafts and reach a colleague who reviews it.
+ *  - They are plain text (line breaks kept), no replies, no "resolved" state.
+ *  - data-target is the data-id of the element the comment points at; no
+ *    data-target = a comment on the slide itself.
+ *  - Nothing that is shown or sent carries them: the deck view and a saved
+ *    deck hide <aside class="comments"> (deck.js VIEW_CSS, player.css), and
+ *    serialize.cleanCopy leaves them out unless asked to keep them (only
+ *    Save, AutoSave and drafts ask), so the slide show, print / PDF, slide
+ *    pictures, PowerPoint and Save a Clean Copy never include them.
+ *
+ * This file is the model (read and change the HTML). Each change made by the
+ * user goes through history.js in the caller, so it is one undo step.
+ *
+ * Talks to: util.js (unique ids). Used by serialize.js, normalize.js, importer.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.comments = {};
+
+    App.comments.SELECTOR = 'aside.comments';
+
+    function boxOf(slide) {
+        return slide ? slide.querySelector(':scope > aside.comments') : null;
+    }
+
+    function nodesIn(root) {
+        return Array.from(root.querySelectorAll('aside.comments > .comment[data-comment-id]'));
+    }
+
+    function nodeById(root, id) {
+        return nodesIn(root).find((node) => node.getAttribute('data-comment-id') === id) || null;
+    }
+
+    function read(node) {
+        return {
+            id: node.getAttribute('data-comment-id'),
+            target: node.getAttribute('data-target') || null,
+            author: node.getAttribute('data-author') || '',
+            date: node.getAttribute('data-date') || '',
+            text: node.textContent,
+        };
+    }
+
+    /* A slide's comments, in the order they were added: [{ id, target, author, date, text }]. */
+    App.comments.listOf = function listOf(slide) {
+        const box = boxOf(slide);
+        return box ? Array.from(box.querySelectorAll(':scope > .comment[data-comment-id]'), read) : [];
+    };
+
+    /* How many comments `root` (a document or a copy of its <html>) holds. */
+    App.comments.countIn = function countIn(root) {
+        return nodesIn(root).length;
+    };
+
+    /*
+     * Add a comment to `slide`: { target (element id or none), author, date (ISO text), text }.
+     * Returns its id, unused anywhere in the deck. The slide's comments box is
+     * made at the end of the slide if it has none.
+     */
+    App.comments.add = function add(slide, comment) {
+        const doc = slide.ownerDocument;
+        const used = new Set(nodesIn(doc).map((node) => node.getAttribute('data-comment-id')));
+        const id = App.util.uniqueId('c', used);
+        let box = boxOf(slide);
+        if (!box) {
+            box = doc.createElement('aside');
+            box.setAttribute('class', 'comments');
+            slide.appendChild(box);
+        }
+        const node = doc.createElement('div');
+        node.setAttribute('class', 'comment');
+        node.setAttribute('data-comment-id', id);
+        if (comment.target) {
+            node.setAttribute('data-target', comment.target);
+        }
+        node.setAttribute('data-author', comment.author || '');
+        node.setAttribute('data-date', comment.date || '');
+        node.textContent = comment.text || '';   // text, never markup
+        box.appendChild(node);
+        return id;
+    };
+
+    /* Change a comment's text. False when there is no such comment. */
+    App.comments.setText = function setText(root, id, text) {
+        const node = nodeById(root, id);
+        if (node) {
+            node.textContent = text;
+        }
+        return !!node;
+    };
+
+    /* Remove one comment; a slide's last comment takes the empty box along. False when there is no such comment. */
+    App.comments.remove = function remove(root, id) {
+        const node = nodeById(root, id);
+        if (!node) {
+            return false;
+        }
+        const box = node.parentNode;
+        node.remove();
+        if (!box.querySelector('.comment')) {
+            box.remove();
+        }
+        return true;
+    };
+
+    /* Remove every comment in `root` ("Delete All Comments", a clean copy). Returns how many there were. */
+    App.comments.removeAll = function removeAll(root) {
+        const count = App.comments.countIn(root);
+        root.querySelectorAll(App.comments.SELECTOR).forEach((box) => box.remove());
+        return count;
+    };
+})();
+
+</script>
+<script>
 // ---- js/slides.js ----
 /*
  * slides.js - adding, duplicating and deleting slides (SPEC 4, Phase 7).
@@ -23875,7 +24031,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         'html, body { margin: 0 !important; padding: 0 !important; background: transparent !important; }' +
         'section.slide { display: block !important; position: relative !important; left: 0 !important; top: 0 !important;' +
         ' margin: 0 !important; transform: none !important; opacity: 1 !important; visibility: visible !important; }' +
-        'aside.notes, .master { display: none !important; }';
+        'aside.notes, aside.comments, .master { display: none !important; }';
 
     /* 'contract-deck', slide 3 of 12 → 'contract-deck-slide-03.png'. */
     App.snapshot.fileName = function fileName(deckName, number, count) {

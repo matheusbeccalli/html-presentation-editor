@@ -40,7 +40,7 @@
         '.slide[data-editor-current] { display: block !important; position: absolute !important;',
         '  left: 0 !important; top: 0 !important; margin: 0 !important; transform: none !important;',
         '  opacity: 1 !important; visibility: visible !important; }',
-        'aside.notes, .master { display: none !important; }',
+        'aside.notes, aside.comments, .master { display: none !important; }',
         '*, *::before, *::after { animation: none !important; transition: none !important; }',
         // Find & replace paints its matches with the CSS Highlight API (findreplace.js), as the browser's own find does.
         '::highlight(editor-find) { background-color: #ffe14d; }',

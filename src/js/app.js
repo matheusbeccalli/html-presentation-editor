@@ -14,9 +14,10 @@
 
 window.App = {
     // The deck format this editor writes (<meta name="deck-format">, SPEC 3.3).
-    // 2 = text in the flat-paragraph model (Phase 3); 3 = tables in the table model (Phase 4).
+    // 2 = text in the flat-paragraph model (Phase 3); 3 = tables in the table model (Phase 4);
+    // 4 = review comments in <aside class="comments"> (Phase 9, comments.js).
     // Older decks are migrated on open (normalize.js).
-    DECK_FORMAT: 3,
+    DECK_FORMAT: 4,
 
     // Shared state that several modules read. Kept small on purpose.
     state: {

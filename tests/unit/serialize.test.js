@@ -36,7 +36,7 @@ test('serialize: starts with a doctype and declares charset and deck-format', ()
     assert(html.startsWith('<!DOCTYPE html>'), 'doctype first');
     const doc = parseDoc(html);
     assertEqual(doc.querySelectorAll('meta[name="deck-format"]').length, 1);
-    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '3');
+    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '4');
     assert(doc.head.firstElementChild.matches('meta[charset]'), 'charset is the first element of <head>');
 });
 

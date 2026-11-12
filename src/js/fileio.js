@@ -391,7 +391,8 @@
     };
 
     App.fileio.currentHtml = function currentHtml() {
-        return App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource());
+        // The deck file keeps its review comments (Phase 9); exports and clean copies do not.
+        return App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource(), { keepComments: true });
     };
 
     /*

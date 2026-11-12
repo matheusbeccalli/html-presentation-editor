@@ -79,10 +79,16 @@
         const root = doc.documentElement.cloneNode(true);
         stripEditorMarks(root);
         root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
+        // Review comments (Phase 9) stay only in the deck file itself (Save, AutoSave, drafts ask for them);
+        // everything else made from this copy - the show, print, pictures, PowerPoint, a clean copy - leaves
+        // them out, so a new export path cannot leak them by forgetting to.
+        if (!(options && options.keepComments)) {
+            App.comments.removeAll(root);
+        }
         if (options && options.cleanCopy) {
             // File > Save a Clean Copy (Phase 8): a copy to send. It is a deck of its own (no deck id: opened
             // later, it is never taken for the original or offered the original's recovery drafts), and the
-            // hidden slides go when asked. Review comments go too, once they exist (Phase 9).
+            // hidden slides go when asked. Its review comments are already gone (above).
             root.querySelectorAll('meta[name="deck-id"]').forEach((meta) => meta.remove());
             if (options.removeHidden) {
                 root.querySelectorAll('section.slide[data-hidden="true"]').forEach((slide) => slide.remove());

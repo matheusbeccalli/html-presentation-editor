@@ -12,7 +12,7 @@ html.deck-player-on .slide.deck-player-current {
     transform-origin: center center !important;
 }
 html.deck-player-on .master { display: none !important; }
-aside.notes { display: none !important; }
+aside.notes, aside.comments { display: none !important; }
 .deck-player-counter {
     position: fixed; right: 14px; bottom: 10px; z-index: 2147483647;
     font: 13px "Segoe UI", Arial, sans-serif; color: #fff; opacity: 0.55;

@@ -34,7 +34,7 @@
         'html, body { margin: 0 !important; padding: 0 !important; background: transparent !important; }' +
         'section.slide { display: block !important; position: relative !important; left: 0 !important; top: 0 !important;' +
         ' margin: 0 !important; transform: none !important; opacity: 1 !important; visibility: visible !important; }' +
-        'aside.notes, .master { display: none !important; }';
+        'aside.notes, aside.comments, .master { display: none !important; }';
 
     /* 'contract-deck', slide 3 of 12 → 'contract-deck-slide-03.png'. */
     App.snapshot.fileName = function fileName(deckName, number, count) {

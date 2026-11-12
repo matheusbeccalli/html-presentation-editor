@@ -169,7 +169,7 @@ test('import: a format-1 contract deck keeps its layout; its text moves to the t
     assertEqual(doc.querySelector('[data-id="e2"]').innerHTML, '<p data-list="none" data-level="1">Two</p>');
     assertEqual(doc.querySelector('[data-slide-id="s2"]').getAttribute('data-hidden'), 'true');
     assertEqual(doc.querySelector('aside.notes').textContent, 'Notas do slide');
-    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '3');
+    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '4');
 });
 
 const FORMAT_2_DECK = CONTRACT_DECK
@@ -248,7 +248,7 @@ test('import: a flow-layout deck is normalized to absolute elements', async () =
     assertIncludes(els[0].getAttribute('style'), 'left: 40px');
     assertIncludes(els[0].getAttribute('style'), 'top: 40px');
     assertIncludes(els[1].getAttribute('style'), 'top: 110px');
-    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '3');
+    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '4');
     assertEqual(els[0].innerHTML, '<p data-list="none" data-level="1">Title</p>');
 });
 

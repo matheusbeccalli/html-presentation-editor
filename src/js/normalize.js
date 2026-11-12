@@ -220,6 +220,11 @@
         return element.matches('.notes, .speaker-notes, [data-notes]') && computed.display === 'none';
     }
 
+    // Review comments (deck-format 4, comments.js): hidden data of the slide, never content to convert.
+    function isComments(element) {
+        return element.matches(App.comments.SELECTOR);
+    }
+
     function isContractSlide(slide) {
         const view = slide.ownerDocument.defaultView;
         const hasLooseText = Array.from(slide.childNodes).some((node) => {
@@ -230,7 +235,7 @@
         }
         return Array.from(slide.children).every((child) => {
             const computed = view.getComputedStyle(child);
-            if (isNotes(child, computed) || SKIP_TAGS.has(child.tagName.toLowerCase())) {
+            if (isNotes(child, computed) || isComments(child) || SKIP_TAGS.has(child.tagName.toLowerCase())) {
                 return true;
             }
             return child.classList.contains('el') &&
@@ -722,6 +727,10 @@
                 ctx.notes.push(element.innerHTML.trim());
                 return;
             }
+            if (isComments(element)) {
+                ctx.comments.push(element);
+                return;
+            }
             if (computed.display === 'none' || element.closest('.master')) {
                 return;
             }
@@ -902,7 +911,7 @@
 
             const ctx = {
                 out: out, slide: frameSlide, box: box, fit: fit, slideNumber: index + 1,
-                items: [], notes: [], removed: report.otherRemoved, report: report, textChecks: textChecks,
+                items: [], notes: [], comments: [], removed: report.otherRemoved, report: report, textChecks: textChecks,
             };
             collect(frameSlide, ctx);
 
@@ -922,6 +931,7 @@
             notes.setAttribute('class', 'notes');
             notes.innerHTML = ctx.notes.join('\n');
             section.appendChild(notes);
+            ctx.comments.forEach((box) => section.appendChild(out.importNode(box, true)));
             out.body.appendChild(section);
         });
 
@@ -984,7 +994,9 @@
     }
 
     // Decks saved before format 2 hold their text as <h1>, <ul> …; before format 3,
-    // their tables as the deck's own HTML and CSS.
+    // their tables as the deck's own HTML and CSS. Format 4 only added review comments
+    // (<aside class="comments">), so a format-3 deck has nothing to convert: it is
+    // simply marked format 4 (importer.js ensureDeckFormatMeta).
     const TEXT_MODEL_FORMAT = 2;
     const TABLE_MODEL_FORMAT = 3;
 

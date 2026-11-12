@@ -6875,6 +6875,50 @@ def test_delete_all_comments(browser):
     editor.close()
 
 
+def test_shortcut_cheat_sheet(browser):
+    """Phase 9 (SPEC 4, step 5): ? (and Help > Keyboard Shortcuts) shows every shortcut of the editor's table, plus the
+    keys handled elsewhere, in sections; the filter box narrows it; Esc closes it; typing a ? in a text box types it."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.keyboard.press("?")
+    wait_until(page, "!!document.querySelector('dialog[open] .shortcut-sheet')")
+    check(page.evaluate("document.activeElement.id") == "shortcut-filter", "the filter box has the cursor")
+    sheet = page.inner_text("dialog[open] .shortcut-list")
+    registered = page.evaluate("App.shortcuts.registry.list().map((entry) => App.help.keyText(entry.combo))")
+    shown = page.evaluate("""() => Array.from(document.querySelectorAll('dialog[open] .shortcut-keys')).map((cell) =>
+        cell.textContent)""")
+    joined = " | ".join(shown)
+    missing = [combo for combo in registered if combo not in joined]
+    check(len(registered) > 50 and missing == [], f"every registered shortcut is on the sheet; missing: {missing}")
+    for words in ["Ctrl+Shift+V", "Ctrl+mouse wheel", "Alt while dragging", "Tab / Shift+Tab", "B or ."]:
+        check(words in sheet or words in joined, f"{words} is on the sheet")
+    titles = page.evaluate("Array.from(document.querySelectorAll('dialog[open] .shortcut-section h3')).map((h) => h.textContent)")
+    check("Other" not in titles and "Text" in titles and "Slide show" in titles and "Mouse" in titles, f"sections: {titles}")
+    page.screenshot(path=str(OUTPUT / "125-shortcut-sheet.png"))
+    page.keyboard.type("comment")
+    rows = page.evaluate("Array.from(document.querySelectorAll('dialog[open] .shortcut-table tr')).map((tr) => tr.textContent)")
+    check(rows and all("omment" in row for row in rows) and any("Ctrl+Alt+M" in row for row in rows), f"filtered: {rows}")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.querySelector('dialog[open]')")
+
+    # Help > Keyboard Shortcuts opens it too.
+    page.click("[role='tab']:has-text('Help')")
+    page.click("button[data-command='shortcuts']")
+    wait_until(page, "!!document.querySelector('dialog[open] .shortcut-sheet')")
+    editor.click_dialog_button("Close")
+
+    # A ? typed in a text box is a ?.
+    page.mouse.dblclick(*slide_to_screen(page, 600, 410))
+    wait_until(page, "!!App.text.editingElement()")
+    page.keyboard.press("End")
+    page.keyboard.type("?")
+    check(page.query_selector("dialog[open]") is None, "no sheet while typing")
+    check(page.evaluate("App.text.editingElement().textContent.endsWith('?')"), "the ? is typed")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -6970,6 +7014,7 @@ TESTS = [
     test_comments_pane,
     test_comment_markers_and_anchors,
     test_delete_all_comments,
+    test_shortcut_cheat_sheet,
 ]
 
 

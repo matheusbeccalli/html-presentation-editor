@@ -105,4 +105,6 @@ HAND_CHECKS = [
     {"key": "Delete all: in a deck with comments on two slides", "auto": False,
      "tests": ["test_delete_all_comments", "test_comments_saved_but_never_shown_or_sent"],
      "left": "Ctrl+U (page source) of the clean copy is read as its file text; Edge's print window is imitated"},
+    {"key": "Shortcuts: with a deck open press ?", "auto": False, "tests": ["test_shortcut_cheat_sheet"],
+     "left": "the filter word here is 'comment', not 'bold' (needs a replay of the exact line)"},
 ]

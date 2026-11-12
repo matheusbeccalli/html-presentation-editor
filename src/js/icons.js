@@ -145,6 +145,7 @@
         recent: '<circle cx="10" cy="10" r="7.5"/><path d="M10 5.5V10l3 2"/>',
         settings: '<circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2.5M10 15v2.5M2.5 10H5M15 10h2.5M4.7 4.7l1.8 1.8M13.5 13.5l1.8 1.8M4.7 15.3l1.8-1.8M13.5 6.5l1.8-1.8"/>',
         commentMarker: '<path d="M4 3.5h12v9.5H9l-4 3.5V13H4z" fill="currentColor" fill-opacity="0.25"/>',
+        keyboard: '<rect x="1.5" y="5" width="17" height="10" rx="1.5"/><path d="M4.5 8h1M7.5 8h1M10.5 8h1M13.5 8h2M4.5 11h1M14.5 11h1M7.5 12h5"/>',
         newComment: '<path d="M3 3.5h12v9H8l-3.5 3v-3H3z"/><path d="M9 5.5v5M6.5 8h5"/>',
         comments: '<path d="M2.5 3.5h11v8H7l-3 2.5v-2.5H2.5z"/><path d="M15.5 7.5h2v8h-1.5v2l-2.5-2h-5v-1.5"/>',
         deleteComment: '<path d="M4 5.5h12M8 5.5V3.5h4v2M5.5 5.5l1 11h7l1-11"/><path d="M8.5 8.5v5.5M11.5 8.5v5.5"/>',

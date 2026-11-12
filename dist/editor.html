@@ -886,6 +886,25 @@ iframe.pdf-print-frame {
 .clean-copy-dialog p { margin: 0; }
 .clean-copy-note { color: #605e5c; }
 
+/* Keyboard shortcut cheat sheet (help.js) */
+.dialog.dialog-shortcuts { width: min(900px, calc(100vw - 32px)); }
+.dialog-shortcuts .dialog-body { max-height: none; overflow: visible; }
+.shortcut-sheet { display: flex; flex-direction: column; gap: 10px; }
+#shortcut-filter { box-sizing: border-box; width: 100%; padding: 6px 8px; font: inherit; border: 1px solid var(--border); border-radius: 4px; }
+.shortcut-list { height: 60vh; overflow-y: auto; columns: 2 340px; column-gap: 28px; }
+.shortcut-section { break-inside: avoid; margin-bottom: 12px; }
+.shortcut-section h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.shortcut-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.shortcut-table td { padding: 3px 4px; vertical-align: top; border-bottom: 1px solid var(--border); }
+.shortcut-table { table-layout: fixed; }
+.shortcut-keys { width: 48%; padding-right: 12px !important; }
+.shortcut-keys kbd {
+    display: inline-block; min-width: 1.4em; padding: 0 5px; text-align: center; font: 12px "Segoe UI", Arial, sans-serif;
+    border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 3px; background: var(--surface-alt);
+}
+.shortcut-words { white-space: normal; font-weight: 600; font-size: 12px; }
+.shortcut-or { color: var(--text-muted); font-size: 12px; }
+
 </style>
 </head>
 <body>
@@ -1844,6 +1863,8 @@ App.createEventBus = function createEventBus() {
         // Ctrl+P would otherwise print the editor's own screen: it asks which slides to print instead.
         ['Ctrl+P', 'exportPdf', { whileTyping: true, blockBrowserDefault: true }],
         ['Ctrl+Alt+M', 'newComment', { whileTyping: true, blockBrowserDefault: true }],   // as in PowerPoint
+        ['?', 'shortcuts'],            // the cheat sheet (help.js); not while typing: there it types a ?
+        ['Ctrl+Alt+?', 'shortcuts'],   // the same ? typed with AltGr (Brazilian keyboards), which Windows reports as Ctrl+Alt
         ['Shift+F10', 'contextMenu'],
         ['Shift+F9', 'toggleGridlines'],
         ['ContextMenu', 'contextMenu'],
@@ -11544,6 +11565,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         recent: '<circle cx="10" cy="10" r="7.5"/><path d="M10 5.5V10l3 2"/>',
         settings: '<circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2.5M10 15v2.5M2.5 10H5M15 10h2.5M4.7 4.7l1.8 1.8M13.5 13.5l1.8 1.8M4.7 15.3l1.8-1.8M13.5 6.5l1.8-1.8"/>',
         commentMarker: '<path d="M4 3.5h12v9.5H9l-4 3.5V13H4z" fill="currentColor" fill-opacity="0.25"/>',
+        keyboard: '<rect x="1.5" y="5" width="17" height="10" rx="1.5"/><path d="M4.5 8h1M7.5 8h1M10.5 8h1M13.5 8h2M4.5 11h1M14.5 11h1M7.5 12h5"/>',
         newComment: '<path d="M3 3.5h12v9H8l-3.5 3v-3H3z"/><path d="M9 5.5v5M6.5 8h5"/>',
         comments: '<path d="M2.5 3.5h11v8H7l-3 2.5v-2.5H2.5z"/><path d="M15.5 7.5h2v8h-1.5v2l-2.5-2h-5v-1.5"/>',
         deleteComment: '<path d="M4 5.5h12M8 5.5V3.5h4v2M5.5 5.5l1 11h7l1-11"/><path d="M8.5 8.5v5.5M11.5 8.5v5.5"/>',
@@ -11613,13 +11635,14 @@ App.template.newDeckHtml = function newDeckHtml() {
     const el = (...args) => App.util.el(...args);
 
     /*
-     * Show a dialog. options = { title, body (Node or text), buttons, wide, side }
+     * Show a dialog. options = { title, body (Node or text), buttons, wide, side, className (one more class) }
      * side: beside the slide, without darkening it (a live preview, theme.js).
      * buttons = [{ label, value, primary, danger }]. Esc resolves with null.
      */
     App.dialogs.show = function show(options) {
         return new Promise((resolve) => {
-            const dialog = el('dialog', { class: 'dialog' + (options.wide ? ' dialog-wide' : '') + (options.side ? ' dialog-side' : '') });
+            const dialog = el('dialog', { class: 'dialog' + (options.wide ? ' dialog-wide' : '') + (options.side ? ' dialog-side' : '') +
+                (options.className ? ' ' + options.className : '') });
             const body = options.body instanceof Node ? options.body : el('p', {}, [options.body || '']);
             const buttonRow = el('div', { class: 'dialog-buttons' });
 
@@ -18471,6 +18494,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
         });
+        App.commands.define('shortcuts', { label: 'Keyboard Shortcuts', run: () => App.help.openShortcuts() });
         App.commands.define('deleteAllComments', {
             label: 'Delete All Comments', run: () => App.commentsPane.deleteAll(), isEnabled: () => App.commentsPane.hasComments(),
         });
@@ -23061,6 +23085,205 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/help.js ----
+/*
+ * help.js - the Help tab: the keyboard shortcut cheat sheet (press ?) and,
+ * in step 6, the About / Licenses window (SPEC Phase 9, 2.2).
+ *
+ * The cheat sheet is built from the shortcut table itself (shortcuts.js), so a
+ * shortcut added there shows up here without anyone remembering to; every
+ * command is put under a section by SECTIONS (a test fails when one is left
+ * over). Keys that are handled elsewhere - while typing in text or a table
+ * cell, during the slide show, with the mouse - are listed by hand in EXTRA.
+ *
+ * ? opens the sheet (also typed with AltGr, which Windows reports as Ctrl+Alt,
+ * as on Brazilian keyboards); typing a ? into a text box types it.
+ *
+ * Talks to: shortcuts.js (the table), commands.js (labels), dialogs.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.help = {};
+
+    const el = (...args) => App.util.el(...args);
+
+    // Which section each shortcut command goes under, in the order shown; the words where the command's
+    // own label would be unclear out of context.
+    const SECTIONS = [
+        { title: 'File', commands: { open: 'Open a deck', save: 'Save', saveAs: 'Save As', exportPdf: 'Print / PDF' } },
+        {
+            title: 'Edit', commands: {
+                undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy', paste: 'Paste', duplicate: 'Duplicate',
+                delete: 'Delete the selection', selectAll: 'Select everything on the slide', deselect: 'Deselect / leave the text',
+                find: 'Find', replace: 'Replace', contextMenu: 'Menu of the selection',
+            },
+        },
+        {
+            title: 'Move and arrange', commands: {
+                nudgeLeft: 'Move 1 px left', nudgeRight: 'Move 1 px right', nudgeUp: 'Move 1 px up', nudgeDown: 'Move 1 px down',
+                nudgeLeftFar: 'Move 10 px left', nudgeRightFar: 'Move 10 px right', nudgeUpFar: 'Move 10 px up',
+                nudgeDownFar: 'Move 10 px down', group: 'Group', ungroup: 'Ungroup',
+            },
+        },
+        {
+            title: 'Text', commands: {
+                editText: 'Type in the selected box', bold: 'Bold', italic: 'Italic', underline: 'Underline',
+                alignLeft: 'Align left', alignCenter: 'Centre', alignRight: 'Align right', alignJustify: 'Justify',
+                growFont: 'Bigger text', shrinkFont: 'Smaller text',
+            },
+        },
+        { title: 'Tables', commands: {} },
+        {
+            title: 'Slides', commands: {
+                newSlide: 'New slide', nextSlide: 'Next slide', previousSlide: 'Previous slide',
+                firstSlide: 'First slide', lastSlide: 'Last slide',
+            },
+        },
+        {
+            title: 'Slide show', commands: {
+                slideShowFromStart: 'From the beginning', slideShowFromCurrent: 'From this slide', presenterView: 'Presenter view',
+            },
+        },
+        { title: 'Review', commands: { newComment: 'New comment' } },
+        { title: 'View', commands: { toggleGridlines: 'Gridlines on / off' } },
+        { title: 'Mouse', commands: {} },
+        { title: 'Help', commands: { shortcuts: 'This list of shortcuts' } },
+    ];
+
+    // Keys handled outside the shortcut table: [section, keys, what they do].
+    const EXTRA = [
+        ['Text', 'Tab / Shift+Tab', 'At the start of a line or on several lines: indent / outdent the bullets'],
+        ['Text', 'Alt+Shift+→ / Alt+Shift+←', 'Indent / outdent the bullets'],
+        ['Text', 'Enter', 'New paragraph (on an empty bullet: ends the list or goes up a level)'],
+        ['Text', 'Backspace', 'At the start of a bullet: removes the bullet or goes up a level'],
+        ['Text', 'Ctrl+Shift+V', 'Paste as plain text (the look of the place you paste into)'],
+        ['Text', 'Esc', 'Stop typing; the box stays selected'],
+        ['Tables', 'Tab / Shift+Tab', 'Next / previous cell while typing in a table'],
+        ['Tables', 'Delete', 'Clear the selected cells'],
+        ['Slide show', '→ ↓ Space Enter Page Down N, or a click', 'Next slide'],
+        ['Slide show', '← ↑ Backspace Page Up P', 'Previous slide'],
+        ['Slide show', 'a number, then Enter', 'Go to that slide'],
+        ['Slide show', 'Home / End', 'First / last slide'],
+        ['Slide show', 'B or .', 'Black screen (again: back)'],
+        ['Slide show', 'Esc', 'End the show'],
+        ['Review', 'Ctrl+Enter', 'In the Comments pane: post the comment, keep an edit'],
+        ['Review', 'Esc', 'In the Comments pane: drop the comment or the edit'],
+        ['View', 'Ctrl+mouse wheel', 'Zoom in / out around the mouse'],
+        ['Mouse', 'Shift+click or Ctrl+click', 'Add to the selection or take out of it'],
+        ['Mouse', 'Double-click', 'Type in a text box, a shape or a table; on an empty spot: a new text box'],
+        ['Mouse', 'Shift while resizing', 'Keep the proportions'],
+        ['Mouse', 'Shift while turning', 'Turn in steps of 15°'],
+        ['Mouse', 'Shift while drawing a line', 'Lines in steps of 45°'],
+        ['Mouse', 'Alt while dragging', 'No snapping to the smart guides'],
+        ['Mouse', 'Right-click', 'Menu of what is under the mouse'],
+    ];
+
+    /*
+     * The cheat sheet from a shortcut list (registry.list()): [{ title, rows: [{ keys: [...], label }] }].
+     * Every command gets one row with all its keys; a command no section names goes under "Other".
+     */
+    App.help.shortcutSections = function shortcutSections(entries) {
+        const byCommand = new Map();
+        entries.forEach((entry) => {
+            if (!byCommand.has(entry.command)) {
+                byCommand.set(entry.command, []);
+            }
+            byCommand.get(entry.command).push(entry.combo);
+        });
+        const used = new Set();
+        const sections = SECTIONS.map((section) => {
+            const rows = Object.keys(section.commands).filter((name) => byCommand.has(name)).map((name) => {
+                used.add(name);
+                return { keys: byCommand.get(name), label: section.commands[name] };
+            });
+            EXTRA.filter((extra) => extra[0] === section.title).forEach((extra) => rows.push({ keys: [extra[1]], label: extra[2] }));
+            return { title: section.title, rows: rows };
+        });
+        const other = Array.from(byCommand.keys()).filter((name) => !used.has(name))
+            .map((name) => ({ keys: byCommand.get(name), label: App.commands.label(name) }));
+        if (other.length) {
+            sections.push({ title: 'Other', rows: other });
+        }
+        return sections.filter((section) => section.rows.length);
+    };
+
+    /* The sections with only the rows whose keys or words hold `text` (any case); empty sections dropped. */
+    App.help.filterSections = function filterSections(sections, text) {
+        const wanted = String(text || '').trim().toLowerCase();
+        if (!wanted) {
+            return sections;
+        }
+        return sections.map((section) => ({
+            title: section.title,
+            rows: section.rows.filter((row) => (row.label + ' ' + row.keys.join(' ') + ' ' + row.keys.map(App.help.keyText).join(' ') +
+                ' ' + section.title).toLowerCase().includes(wanted)),
+        })).filter((section) => section.rows.length);
+    };
+
+    const KEY_NAMES = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Escape: 'Esc', ContextMenu: 'Menu key' };
+
+    /* A combo as the sheet writes it: "Shift+ArrowLeft" -> "Shift+←", "Escape" -> "Esc". */
+    App.help.keyText = function keyText(combo) {
+        return combo.split(/\+(?=.)/).map((part) => KEY_NAMES[part] || part).join('+');
+    };
+
+    function keyCaps(keys) {
+        // "Ctrl+Shift+S" -> <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd>; free text (Mouse, slide show) stays text.
+        if (/\s/.test(keys)) {
+            return [el('span', { class: 'shortcut-words' }, [keys])];
+        }
+        const parts = [];
+        App.help.keyText(keys).split(/\+(?=.)/).forEach((part, index) => {
+            if (index) {
+                parts.push('+');
+            }
+            parts.push(el('kbd', {}, [part]));
+        });
+        return parts;
+    }
+
+    function drawSections(list, sections) {
+        list.replaceChildren(...sections.map((section) => el('section', { class: 'shortcut-section' }, [
+            el('h3', {}, [section.title]),
+            el('table', { class: 'shortcut-table' }, [el('tbody', {}, section.rows.map((row) => el('tr', {}, [
+                el('td', { class: 'shortcut-keys' }, [].concat(...row.keys.map((keys, i) =>
+                    (i ? [el('span', { class: 'shortcut-or' }, [' or '])] : []).concat(keyCaps(keys))))),
+                el('td', { class: 'shortcut-label' }, [row.label]),
+            ])))]),
+        ])));
+        if (!sections.length) {
+            list.appendChild(el('p', { class: 'panel-hint' }, ['No shortcut matches.']));
+        }
+    }
+
+    /* Help > Keyboard Shortcuts, or ?: the sheet, with a box to filter it. */
+    App.help.openShortcuts = function openShortcuts() {
+        if (document.querySelector('dialog[open] .shortcut-sheet')) {
+            return Promise.resolve();
+        }
+        const sections = App.help.shortcutSections(App.shortcuts.registry.list());
+        const filter = el('input', {
+            type: 'text', id: 'shortcut-filter', placeholder: 'Filter: a word or a key (e.g. bold, Ctrl+S)',
+            'aria-label': 'Filter the shortcuts', autocomplete: 'off', spellcheck: 'false',
+        });
+        const list = el('div', { class: 'shortcut-list' });
+        filter.addEventListener('input', () => drawSections(list, App.help.filterSections(sections, filter.value)));
+        drawSections(list, sections);
+        const shown = App.dialogs.show({
+            title: 'Keyboard shortcuts',
+            body: el('div', { class: 'shortcut-sheet' }, [filter, list]),
+            buttons: [{ label: 'Close', value: true, primary: true }],
+            className: 'dialog-shortcuts',
+        });
+        filter.focus();
+        return shown;
+    };
+})();
+
+</script>
+<script>
 // ---- js/slides.js ----
 /*
  * slides.js - adding, duplicating and deleting slides (SPEC 4, Phase 7).
@@ -26088,6 +26311,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             note: 'PDF: choose the slides, then in the print window set Destination to "Save as PDF". ' +
                 'Charts, shapes and text stay sharp in the PDF. Pictures are PNG at twice the slide\'s size ' +
                 '(2560 × 1440); all slides (hidden ones left out) come in one ZIP file; Copy Slide as Picture puts one on the clipboard for Outlook or Teams.',
+        },
+        {
+            id: 'help', label: 'Help',
+            groups: [{ label: 'Help', commands: [['shortcuts', 'keyboard']] }],
+            note: 'Press ? anywhere (not while typing) to see every keyboard shortcut. Nothing in this editor goes on the internet: ' +
+                'the browser blocks all network access for this page.',
         },
     ];
 

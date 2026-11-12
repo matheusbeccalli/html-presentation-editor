@@ -201,6 +201,12 @@
                 'Charts, shapes and text stay sharp in the PDF. Pictures are PNG at twice the slide\'s size ' +
                 '(2560 × 1440); all slides (hidden ones left out) come in one ZIP file; Copy Slide as Picture puts one on the clipboard for Outlook or Teams.',
         },
+        {
+            id: 'help', label: 'Help',
+            groups: [{ label: 'Help', commands: [['shortcuts', 'keyboard']] }],
+            note: 'Press ? anywhere (not while typing) to see every keyboard shortcut. Nothing in this editor goes on the internet: ' +
+                'the browser blocks all network access for this page.',
+        },
     ];
 
     const FILE_MENU = [

@@ -244,6 +244,8 @@
         // Ctrl+P would otherwise print the editor's own screen: it asks which slides to print instead.
         ['Ctrl+P', 'exportPdf', { whileTyping: true, blockBrowserDefault: true }],
         ['Ctrl+Alt+M', 'newComment', { whileTyping: true, blockBrowserDefault: true }],   // as in PowerPoint
+        ['?', 'shortcuts'],            // the cheat sheet (help.js); not while typing: there it types a ?
+        ['Ctrl+Alt+?', 'shortcuts'],   // the same ? typed with AltGr (Brazilian keyboards), which Windows reports as Ctrl+Alt
         ['Shift+F10', 'contextMenu'],
         ['Shift+F9', 'toggleGridlines'],
         ['ContextMenu', 'contextMenu'],

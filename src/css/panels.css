@@ -384,6 +384,10 @@
     font-size: 12px; color: var(--text-muted);
 }
 #status-message { flex: 1; }
+.status-button { border: 0; background: none; padding: 0 6px; font: inherit; color: inherit; cursor: pointer; border-radius: 3px; }
+.status-button:hover { background: var(--surface); color: var(--text); }
+#status-comments::before { content: ""; display: inline-block; width: 9px; height: 8px; margin-right: 5px; vertical-align: -1px;
+    background: #F2C744; border: 1px solid #B8860B; border-radius: 2px 2px 2px 0; }
 #status-size.too-big { color: #9C5700; background: #FFEB9C; padding: 0 6px; border-radius: 3px; }
 
 @media (max-width: 900px) {

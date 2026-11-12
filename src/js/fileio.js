@@ -542,10 +542,14 @@
         const el = App.util.el;
         const hiddenCount = App.deck.getSlides().filter((slide) => App.slides.isHidden(slide)).length;
         const removeBox = el('input', { type: 'checkbox', id: 'clean-copy-remove-hidden', checked: true });
+        const commentCount = App.comments.countIn(App.deck.getDocument());
         const body = el('div', { class: 'clean-copy-dialog' }, [
             el('p', {}, ['A copy to send: saved under another name; the deck you are editing stays as it is.']),
             el('label', {}, [removeBox, ' Remove hidden slides (' + hiddenCount + ')']),
-            el('p', { class: 'clean-copy-note' }, ['Review comments are removed too (they arrive in Phase 9).']),
+            el('p', { class: 'clean-copy-note' }, [commentCount
+                ? 'Its ' + App.ui.commentsText(commentCount).replace('comment', 'review comment') + ' ' +
+                  (commentCount === 1 ? 'is' : 'are') + ' left out.'
+                : 'Review comments are always left out.']),
         ]);
         const go = await App.dialogs.show({
             title: 'Save a Clean Copy', body: body,

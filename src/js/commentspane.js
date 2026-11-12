@@ -254,6 +254,31 @@
             () => App.comments.remove(App.deck.getDocument(), id));
     };
 
+    /*
+     * Review > Delete All Comments: before sending the deck (SPEC Phase 9). Asks
+     * first, saying how many; every slide's comments go in one undo step.
+     */
+    App.commentsPane.deleteAll = async function deleteAll() {
+        const count = App.comments.countIn(App.deck.getDocument());
+        if (!count) {
+            return;
+        }
+        const ok = await App.dialogs.confirm({
+            title: 'Delete all comments?',
+            message: 'Delete all ' + App.ui.commentsText(count) + ' in this deck? Ctrl+Z brings them back. ' +
+                '(Exports and Save a Clean Copy leave comments out anyway.)',
+            ok: 'Delete All', danger: true,
+        });
+        if (!ok) {
+            return;
+        }
+        activeId = null;
+        editingId = null;
+        draft = null;
+        App.history.change('Delete all comments', 'deck', () => App.comments.removeAll(App.deck.getDocument()));
+        App.ui.setStatus('Deleted ' + App.ui.commentsText(count));
+    };
+
     // ---------------------------------------------------------------
     // Drawing the pane
     // ---------------------------------------------------------------

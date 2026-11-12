@@ -153,6 +153,9 @@
             label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
         });
+        App.commands.define('deleteAllComments', {
+            label: 'Delete All Comments', run: () => App.commentsPane.deleteAll(), isEnabled: () => App.commentsPane.hasComments(),
+        });
         App.commands.define('previousComment', {
             label: 'Previous', run: () => App.commentsPane.step(-1), isEnabled: () => App.commentsPane.hasComments(),
         });

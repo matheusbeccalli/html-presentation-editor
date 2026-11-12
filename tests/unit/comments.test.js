@@ -157,3 +157,9 @@ test('comments: what a comment points at, in words', () => {
     assertEqual(label('e7'), 'Text box');
     assertEqual(label('e99'), 'Slide', 'its element was deleted');
 });
+
+test('comments: the status bar count', () => {
+    assertEqual(App.ui.commentsText(0), '');
+    assertEqual(App.ui.commentsText(1), '1 comment');
+    assertEqual(App.ui.commentsText(12), '12 comments');
+});

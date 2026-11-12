@@ -172,12 +172,13 @@
         {
             id: 'review', label: 'Review',
             groups: [
-                { label: 'Comments', commands: [['newComment', 'newComment'], ['previousComment', 'previous'], ['nextComment', 'next']] },
+                { label: 'Comments', commands: [['newComment', 'newComment'], ['deleteAllComments', 'deleteComment'],
+                    ['previousComment', 'previous'], ['nextComment', 'next']] },
                 { label: 'Show', rows: [[{ command: 'commentsPane', icon: 'comments' }], [{ command: 'showCommentMarkers', icon: 'commentMarker' }]] },
             ],
             note: 'A comment sticks to the selected element, or to the slide when nothing is selected; a yellow marker shows ' +
                 'where (click it to read). Comments are saved with the deck for the people who review it, but never shown ' +
-                'when presenting, printing or exporting.',
+                'when presenting, printing or exporting. Before sending the deck itself: Delete All Comments, or File > Save a Clean Copy.',
         },
         {
             id: 'view', label: 'View',

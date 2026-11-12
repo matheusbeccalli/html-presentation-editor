@@ -4,7 +4,8 @@
  *
  * It mostly listens to events and updates text; it never changes the deck.
  *
- * The status bar has two texts: the save state (always one of Saved ·
+ * The status bar also counts the deck's review comments (a click opens the
+ * Comments pane). It has two texts: the save state (always one of Saved ·
  * Saving… · Unsaved changes · AutoSave off, plus "Draft saved 14:32" or
  * "Recovery unavailable" when they apply, SPEC 6.4) and a message about the
  * last action ("Opened deck.html").
@@ -36,6 +37,11 @@
         return { text: text, tooBig: bytes > TOO_BIG };
     };
 
+    /* The status bar's comment count: '' (none), '1 comment', '3 comments'. */
+    App.ui.commentsText = function commentsText(count) {
+        return count ? count + (count === 1 ? ' comment' : ' comments') : '';
+    };
+
     App.ui.statusText = function statusText(state) {
         const parts = [];
         if (state.hasDeck) {
@@ -61,7 +67,7 @@
     }
 
     App.ui.init = function init() {
-        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size',
+        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size', 'status-comments',
          'welcome', 'canvas-stage-box', 'drop-zone', 'drop-zone-text', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
@@ -83,6 +89,8 @@
         App.events.on('saved', App.ui.updateTitle);
         ['deck-loaded', 'history-changed', 'saved', 'saving', 'autosave-changed', 'drafts-changed']
             .forEach((name) => App.events.on(name, updateSaveState));
+        ['deck-loaded', 'history-changed'].forEach((name) => App.events.on(name, updateComments));
+        nodes['status-comments'].addEventListener('click', () => App.commentsPane.open());
         const sizeLater = App.util.debounce(updateSize, 1000);   // a big deck takes a moment to measure
         App.events.on('deck-loaded', updateSize);
         App.events.on('history-changed', sizeLater);
@@ -101,6 +109,13 @@
         node.classList.toggle('too-big', size.tooBig);
         node.title = size.tooBig ? 'Over 20 MB: the file may be too big to send by email. Pictures take most of the space.'
             : 'The deck file\'s size, pictures included';
+    }
+
+    /* How many review comments the deck holds (Phase 9): a reminder that they travel in the file. */
+    function updateComments() {
+        const count = App.state.hasDeck ? App.comments.countIn(App.deck.getDocument()) : 0;
+        nodes['status-comments'].hidden = !count;
+        nodes['status-comments'].textContent = App.ui.commentsText(count);
     }
 
     function updateSaveState() {

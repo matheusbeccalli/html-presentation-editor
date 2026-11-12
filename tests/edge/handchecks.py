@@ -102,4 +102,7 @@ HAND_CHECKS = [
     {"key": "Comments: open samples/contract-deck.html, click the subtitle", "auto": False,
      "tests": ["test_comments_pane", "test_comment_markers_and_anchors", "test_comments_saved_but_never_shown_or_sent"],
      "left": "not yet audited clause by clause (closing the file and opening it again from disk is a re-open of a download)"},
+    {"key": "Delete all: in a deck with comments on two slides", "auto": False,
+     "tests": ["test_delete_all_comments", "test_comments_saved_but_never_shown_or_sent"],
+     "left": "Ctrl+U (page source) of the clean copy is read as its file text; Edge's print window is imitated"},
 ]

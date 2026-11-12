@@ -6825,6 +6825,56 @@ def test_comment_markers_and_anchors(browser):
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()
 
+def test_delete_all_comments(browser):
+    """Phase 9 (SPEC 4, step 4): the status bar counts the deck's comments (a click opens the pane); Review > Delete All
+    Comments asks first, saying how many, and removes every comment of the deck in one undo step; Save a Clean Copy says
+    the comments are left out."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    check(page.is_hidden("#status-comments"), "no comments: no count")
+    page.click("[role='tab']:has-text('Review')")
+    check(page.is_disabled("button[data-command='deleteAllComments']"), "nothing to delete")
+    add_comment(page, 0, "e4", "Um")
+    add_comment(page, 0, None, "Dois")
+    add_comment(page, 2, "e9", "Três", author="JD")
+    wait_until(page, "document.getElementById('status-comments').textContent === '3 comments'")
+    check(page.is_visible("#status-comments"), "the count shows")
+    page.click("#status-comments")
+    check(page.is_visible("#comments-pane"), "a click on the count opens the pane")
+
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='saveCleanCopy']")
+    wait_until(page, "!!document.querySelector('dialog[open] .clean-copy-dialog')")
+    note = page.inner_text("dialog[open] .clean-copy-note")
+    check("3 review comments" in note and "left out" in note, note)
+    editor.click_dialog_button("Cancel")
+
+    page.click("[role='tab']:has-text('Review')")
+    page.click("button[data-command='deleteAllComments']")
+    wait_until(page, "!!document.querySelector('dialog[open]')")
+    check("3 comments" in editor.report_dialog_text(), editor.report_dialog_text())
+    page.screenshot(path=str(OUTPUT / "124-delete-all-comments.png"))
+    editor.click_dialog_button("Cancel")
+    check(page.evaluate("App.comments.countIn(App.deck.getDocument())") == 3, "Cancel keeps them")
+    page.click("button[data-command='deleteAllComments']")
+    wait_until(page, "!!document.querySelector('dialog[open]')")
+    page.click("dialog[open] button:has-text('Delete All')")
+    wait_until(page, "!document.querySelector('dialog[open]')")
+    check(page.evaluate("App.comments.countIn(App.deck.getDocument())") == 0, "all gone")
+    check(page.is_hidden("#status-comments"), "the count goes")
+    check(page.evaluate(MARKERS) == [], "no markers")
+    check(page.evaluate("document.querySelectorAll('.thumb-comments-badge').length") == 0, "no badges")
+    check(page.query_selector_all("#comments-list .comment-card") == [], "the pane is empty")
+    check(page.is_disabled("button[data-command='deleteAllComments']"), "nothing left to delete")
+    page.keyboard.press("Control+z")
+    wait_until(page, "App.comments.countIn(App.deck.getDocument()) === 3")
+    wait_until(page, "document.getElementById('status-comments').textContent === '3 comments'")
+    check(len(page.evaluate(MARKERS)) == 2, "one Ctrl+Z brings all back")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -6919,6 +6969,7 @@ TESTS = [
     test_comments_saved_but_never_shown_or_sent,
     test_comments_pane,
     test_comment_markers_and_anchors,
+    test_delete_all_comments,
 ]
 
 

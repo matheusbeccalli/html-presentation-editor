@@ -751,6 +751,10 @@ iframe.pdf-print-frame {
     font-size: 12px; color: var(--text-muted);
 }
 #status-message { flex: 1; }
+.status-button { border: 0; background: none; padding: 0 6px; font: inherit; color: inherit; cursor: pointer; border-radius: 3px; }
+.status-button:hover { background: var(--surface); color: var(--text); }
+#status-comments::before { content: ""; display: inline-block; width: 9px; height: 8px; margin-right: 5px; vertical-align: -1px;
+    background: #F2C744; border: 1px solid #B8860B; border-radius: 2px 2px 2px 0; }
 #status-size.too-big { color: #9C5700; background: #FFEB9C; padding: 0 6px; border-radius: 3px; }
 
 @media (max-width: 900px) {
@@ -1038,6 +1042,8 @@ iframe.pdf-print-frame {
     <!-- Save state (SPEC 6.4): Saved · Saving… · Unsaved changes · AutoSave off · Draft saved 14:32 · Recovery unavailable -->
     <span id="status-save" aria-live="polite"></span>
     <span id="status-message"></span>
+    <!-- Review comments in the deck (Phase 9); a click opens the Comments pane. -->
+    <button type="button" id="status-comments" class="status-button" title="Show the comments" hidden></button>
     <!-- The deck's file size (pictures live inside it); amber above 20 MB. -->
     <span id="status-size" hidden></span>
     <!-- Zoom (canvas.js): hidden until a deck is open. -->
@@ -16864,10 +16870,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         const el = App.util.el;
         const hiddenCount = App.deck.getSlides().filter((slide) => App.slides.isHidden(slide)).length;
         const removeBox = el('input', { type: 'checkbox', id: 'clean-copy-remove-hidden', checked: true });
+        const commentCount = App.comments.countIn(App.deck.getDocument());
         const body = el('div', { class: 'clean-copy-dialog' }, [
             el('p', {}, ['A copy to send: saved under another name; the deck you are editing stays as it is.']),
             el('label', {}, [removeBox, ' Remove hidden slides (' + hiddenCount + ')']),
-            el('p', { class: 'clean-copy-note' }, ['Review comments are removed too (they arrive in Phase 9).']),
+            el('p', { class: 'clean-copy-note' }, [commentCount
+                ? 'Its ' + App.ui.commentsText(commentCount).replace('comment', 'review comment') + ' ' +
+                  (commentCount === 1 ? 'is' : 'are') + ' left out.'
+                : 'Review comments are always left out.']),
         ]);
         const go = await App.dialogs.show({
             title: 'Save a Clean Copy', body: body,
@@ -18460,6 +18470,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('commentsPane', {
             label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
+        });
+        App.commands.define('deleteAllComments', {
+            label: 'Delete All Comments', run: () => App.commentsPane.deleteAll(), isEnabled: () => App.commentsPane.hasComments(),
         });
         App.commands.define('previousComment', {
             label: 'Previous', run: () => App.commentsPane.step(-1), isEnabled: () => App.commentsPane.hasComments(),
@@ -22855,6 +22868,31 @@ App.template.newDeckHtml = function newDeckHtml() {
             () => App.comments.remove(App.deck.getDocument(), id));
     };
 
+    /*
+     * Review > Delete All Comments: before sending the deck (SPEC Phase 9). Asks
+     * first, saying how many; every slide's comments go in one undo step.
+     */
+    App.commentsPane.deleteAll = async function deleteAll() {
+        const count = App.comments.countIn(App.deck.getDocument());
+        if (!count) {
+            return;
+        }
+        const ok = await App.dialogs.confirm({
+            title: 'Delete all comments?',
+            message: 'Delete all ' + App.ui.commentsText(count) + ' in this deck? Ctrl+Z brings them back. ' +
+                '(Exports and Save a Clean Copy leave comments out anyway.)',
+            ok: 'Delete All', danger: true,
+        });
+        if (!ok) {
+            return;
+        }
+        activeId = null;
+        editingId = null;
+        draft = null;
+        App.history.change('Delete all comments', 'deck', () => App.comments.removeAll(App.deck.getDocument()));
+        App.ui.setStatus('Deleted ' + App.ui.commentsText(count));
+    };
+
     // ---------------------------------------------------------------
     // Drawing the pane
     // ---------------------------------------------------------------
@@ -26022,12 +26060,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         {
             id: 'review', label: 'Review',
             groups: [
-                { label: 'Comments', commands: [['newComment', 'newComment'], ['previousComment', 'previous'], ['nextComment', 'next']] },
+                { label: 'Comments', commands: [['newComment', 'newComment'], ['deleteAllComments', 'deleteComment'],
+                    ['previousComment', 'previous'], ['nextComment', 'next']] },
                 { label: 'Show', rows: [[{ command: 'commentsPane', icon: 'comments' }], [{ command: 'showCommentMarkers', icon: 'commentMarker' }]] },
             ],
             note: 'A comment sticks to the selected element, or to the slide when nothing is selected; a yellow marker shows ' +
                 'where (click it to read). Comments are saved with the deck for the people who review it, but never shown ' +
-                'when presenting, printing or exporting.',
+                'when presenting, printing or exporting. Before sending the deck itself: Delete All Comments, or File > Save a Clean Copy.',
         },
         {
             id: 'view', label: 'View',
@@ -26265,7 +26304,8 @@ App.template.newDeckHtml = function newDeckHtml() {
  *
  * It mostly listens to events and updates text; it never changes the deck.
  *
- * The status bar has two texts: the save state (always one of Saved ·
+ * The status bar also counts the deck's review comments (a click opens the
+ * Comments pane). It has two texts: the save state (always one of Saved ·
  * Saving… · Unsaved changes · AutoSave off, plus "Draft saved 14:32" or
  * "Recovery unavailable" when they apply, SPEC 6.4) and a message about the
  * last action ("Opened deck.html").
@@ -26297,6 +26337,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { text: text, tooBig: bytes > TOO_BIG };
     };
 
+    /* The status bar's comment count: '' (none), '1 comment', '3 comments'. */
+    App.ui.commentsText = function commentsText(count) {
+        return count ? count + (count === 1 ? ' comment' : ' comments') : '';
+    };
+
     App.ui.statusText = function statusText(state) {
         const parts = [];
         if (state.hasDeck) {
@@ -26322,7 +26367,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     App.ui.init = function init() {
-        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size',
+        ['title-file', 'title-dirty', 'status-slide', 'status-save', 'status-message', 'status-size', 'status-comments',
          'welcome', 'canvas-stage-box', 'drop-zone', 'drop-zone-text', 'busy', 'busy-text', 'quick-access'].forEach((id) => {
             nodes[id] = byId(id);
         });
@@ -26344,6 +26389,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.events.on('saved', App.ui.updateTitle);
         ['deck-loaded', 'history-changed', 'saved', 'saving', 'autosave-changed', 'drafts-changed']
             .forEach((name) => App.events.on(name, updateSaveState));
+        ['deck-loaded', 'history-changed'].forEach((name) => App.events.on(name, updateComments));
+        nodes['status-comments'].addEventListener('click', () => App.commentsPane.open());
         const sizeLater = App.util.debounce(updateSize, 1000);   // a big deck takes a moment to measure
         App.events.on('deck-loaded', updateSize);
         App.events.on('history-changed', sizeLater);
@@ -26362,6 +26409,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         node.classList.toggle('too-big', size.tooBig);
         node.title = size.tooBig ? 'Over 20 MB: the file may be too big to send by email. Pictures take most of the space.'
             : 'The deck file\'s size, pictures included';
+    }
+
+    /* How many review comments the deck holds (Phase 9): a reminder that they travel in the file. */
+    function updateComments() {
+        const count = App.state.hasDeck ? App.comments.countIn(App.deck.getDocument()) : 0;
+        nodes['status-comments'].hidden = !count;
+        nodes['status-comments'].textContent = App.ui.commentsText(count);
     }
 
     function updateSaveState() {

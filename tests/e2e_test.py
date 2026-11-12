@@ -6419,6 +6419,94 @@ def test_save_clean_copy(browser):
     editor.close()
 
 
+def test_phase8_done_when(browser):
+    """Phase 8 done when (SPEC 7): a 10-slide deck with text, a table, an image, a combo chart and a waterfall exports
+    to a PDF that matches the screen, and to a PPTX where text, tables and the combo chart are editable in PowerPoint.
+    The deck: the contract sample (text, the comps table, the logo picture, the combo chart) with its hidden slide shown
+    again, plus a waterfall slide and three more slides added with Ctrl+M; built, saved, then printed and exported."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    started = time.time()
+    # Slide 5 shown again (Slide Show > Hide Slide), so all 10 slides print.
+    page.evaluate("App.deck.goTo(4)")
+    page.click("[role='tab']:has-text('Slide Show')")
+    page.click("button[data-command='hideSlide']")
+    check(not page.evaluate("App.slides.isHidden(App.deck.getSlides()[4])"), "slide 5 shown again")
+    # Four new slides after the last one (Ctrl+M); a waterfall on the first of them.
+    page.evaluate("App.deck.goTo(5)")
+    for _ in range(4):
+        page.keyboard.press("Control+m")
+    check(editor.slide_count() == 10, f"10 slides: {editor.slide_count()}")
+    page.evaluate("""() => {
+        const doc = App.deck.getDocument();
+        const slide = App.deck.getSlides()[6];
+        const figure = App.charts.createChart(doc, {
+            version: 1, type: 'waterfall', categories: ['EBITDA 2024', 'Volume', 'Preço', 'Custos', 'EBITDA 2025E'],
+            roles: ['start', 'delta', 'delta', 'delta', 'end'],
+            series: [{ name: 'EBITDA (R$ mn)', values: [100, 30, 12, -18, null] }],
+            options: { title: 'Ponte de EBITDA', dataLabels: true, locale: 'pt-BR' } }, { left: 64, top: 200, width: 760, height: 420 }, 'w1');
+        figure.style.zIndex = '30';
+        App.history.change('Insert chart', { slideId: slide.getAttribute('data-slide-id') }, () => slide.appendChild(figure));
+    }""")
+    saved = editor.save_as_download("phase8-done-when.html")
+
+    # PDF: Ctrl+P, all slides: 10 pages of 13.333 x 7.5 in, each laid out and looking as the slide on screen.
+    page.evaluate(CATCH_PRINT)
+    page.keyboard.press("Control+p")
+    wait_until(page, "!!document.querySelector('dialog[open] .pdf-dialog')")
+    page.click("dialog[open] button:has-text('Print')")
+    wait_until(page, "window.__printed.length === 1")
+    printed = page.evaluate("window.__printed[0]")
+    check(page.evaluate(PRINTED_IDS, 0).count(",") == 9, f"10 slides printed: {page.evaluate(PRINTED_IDS, 0)}")
+    screens = saved_deck_screens(browser, saved, 10)
+    sheet = browser.new_context(viewport={"width": 1280, "height": 720})
+    sheet.route(re.compile(r"^https?://"), lambda route: route.abort())
+    print_page = sheet.new_page()
+    print_page.set_content(printed)
+    print_page.emulate_media(media="print")
+    slides = print_page.locator("section.slide")
+    check(slides.count() == 10, f"10 slides in the print: {slides.count()}")
+    for index in range(10):
+        shot = slides.nth(index).screenshot()
+        check(png_size(shot) == (1280, 720), f"page {index + 1} is one slide: {png_size(shot)}")
+        compared = page.evaluate(COMPARE_PICTURES, {"a": base64.b64encode(shot).decode(), "b": base64.b64encode(screens[index]).decode()})
+        check(compared["mean"] < 3 and compared["far"] < 0.03, f"page {index + 1} looks as the slide on screen: {compared}")
+    pdf = OUTPUT / "phase8-done-when.pdf"
+    print_page.pdf(path=str(pdf), prefer_css_page_size=True, print_background=True)
+    data = pdf.read_bytes()
+    check(len(re.findall(rb"/Type\s*/Page[^s]", data)) == 10, "a 10-page PDF")
+    box = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]", data)
+    check(box and abs(float(box.group(1)) - 960) < 1 and abs(float(box.group(2)) - 540) < 1, "13.333 x 7.5 in pages")
+    images = len(re.findall(rb"/Subtype\s*/Image", data))
+    check(b"/Font" in data and images <= 2, f"text, table and charts print as vector (fonts, {images} pictures: the logo)")
+    sheet.close()
+
+    # PowerPoint: text boxes, the table and the combo chart are native, editable objects; the waterfall too.
+    path, report = export_pptx(editor, "phase8-done-when.pptx")
+    parts = pptx_parts(path)
+    slides_xml = [parts[f"ppt/slides/slide{n}.xml"] for n in range(1, 11)]
+    check(sum(xml.count('txBox="1"') for xml in slides_xml) >= 12, "the text boxes are text boxes")
+    check("Sumário executivo" in slides_xml[1] and "<a:buChar" in slides_xml[1], "slide 2's title and bullets as text")
+    check("<a:tbl>" in slides_xml[2] and "Beta Foods" in slides_xml[2], "slide 3's table is a table")
+    [combo] = slide_charts(parts, 4)
+    check("<c:barChart>" in combo and "<c:lineChart>" in combo and len(re.findall(r"<c:valAx>", combo)) == 2,
+          "slide 4's combo chart is a chart: columns, a line, two axes")
+    import zipfile
+    with zipfile.ZipFile(path) as archive:
+        workbooks = [n for n in archive.namelist() if n.startswith("ppt/embeddings/") and n.endswith(".xlsx")]
+    check("<c:externalData" in combo and len(workbooks) >= 2, f"each chart carries its data workbook (Edit Data): {workbooks}")
+    [bridge] = slide_charts(parts, 7)
+    check('<c:grouping val="stacked"/>' in bridge and "<a:noFill/>" in bridge, "the waterfall: stacked over an invisible base")
+    check("<p:pic>" in slides_xml[0], "the logo is a picture")
+    check("came across as a picture" not in report, f"nothing came as a picture: {report}")
+    elapsed = time.time() - started
+    check(elapsed < 120, f"built, printed and exported in {elapsed:.0f} s")
+    page.screenshot(path=str(OUTPUT / "98-phase8-done-when.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -6509,6 +6597,7 @@ TESTS = [
     test_pptx_export_table,
     test_pptx_export_charts,
     test_save_clean_copy,
+    test_phase8_done_when,
 ]
 
 

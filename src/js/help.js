@@ -203,13 +203,13 @@
     // About / Licenses
     // ---------------------------------------------------------------
 
-    /* The About data build.py put in the page: { built, libraries: [...] } (empty when absent, e.g. in tests). */
+    /* The About data build.py put in the page: { libraries: [...] } (empty when absent, e.g. in tests). */
     App.help.aboutData = function aboutData(doc) {
         const node = (doc || document).getElementById('about-data');
         try {
-            return node ? JSON.parse(node.textContent) : { built: '', libraries: [] };
+            return node ? JSON.parse(node.textContent) : { libraries: [] };
         } catch (error) {
-            return { built: '', libraries: [] };
+            return { libraries: [] };
         }
     };
 
@@ -239,7 +239,7 @@
             ]),
         ]));
         const body = el('div', { class: 'about' }, [
-            el('p', {}, ['Deck Editor: edit HTML presentations on this computer.' + (data.built ? ' Built ' + data.built + '.' : '')]),
+            el('p', {}, ['Deck Editor: edit HTML presentations on this computer.']),
             el('p', { class: 'panel-hint' }, ['One file with everything inside it. The browser blocks all network access for this page ' +
                 '(Content-Security-Policy), so nothing you open or type leaves the computer.']),
             el('h2', { class: 'about-heading' }, ['Open-source code inside']),

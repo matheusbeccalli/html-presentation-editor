@@ -32,7 +32,6 @@ Usage:
 Exit code 0 = success, 1 = any check failed (the message says why).
 """
 
-import datetime
 import hashlib
 import json
 import re
@@ -202,7 +201,8 @@ def read_bundled_table():
 def about_data():
     """
     What Help > About shows (SPEC 2.2): every vendored library with its version, license,
-    source, SHA-256, full LICENSE text and the libraries bundled inside it, plus the build date.
+    source, SHA-256, full LICENSE text and the libraries bundled inside it. (No build date: it would
+    change dist/editor.html on every day it is rebuilt, with nothing else changed.)
     """
     bundled = read_bundled_table()
     libraries = []
@@ -214,7 +214,7 @@ def about_data():
             "licenseText": license_path.read_text(encoding="utf-8") if license_path.is_file() else "",
             "bundled": bundled.get(lib["name"], []),
         })
-    return {"built": datetime.date.today().isoformat(), "libraries": libraries}
+    return {"libraries": libraries}
 
 
 def build_about_block():

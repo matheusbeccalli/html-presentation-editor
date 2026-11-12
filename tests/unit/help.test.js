@@ -63,14 +63,13 @@ test('help: keys are written as on the keyboard (arrows, Esc)', () => {
 
 test('help: the About data is read from the page; a page without it (tests) gives an empty list', () => {
     const doc = parseDoc('<html><body><script type="application/json" id="about-data">' +
-        '{"built":"2026-11-11","libraries":[{"name":"PptxGenJS","version":"4.0.1","license":"MIT","url":"x","sha256":"ab",' +
+        '{"libraries":[{"name":"PptxGenJS","version":"4.0.1","license":"MIT","url":"x","sha256":"ab",' +
         '"licenseText":"Permission <\\/b>","bundled":[{"name":"JSZip","version":"3.10.1","license":"MIT"}]}]}</script></body></html>');
     const data = App.help.aboutData(doc);
-    assertEqual(data.built, '2026-11-11');
     assertEqual(data.libraries[0].licenseText, 'Permission </b>');
     assertEqual(App.help.libraryLine(data.libraries[0]), 'PptxGenJS 4.0.1 · MIT');
     assertEqual(App.help.bundledLine(data.libraries[0]), 'Includes: JSZip 3.10.1 (MIT)');
-    assertEqual(App.help.aboutData(parseDoc('<html><body></body></html>')), { built: '', libraries: [] });
+    assertEqual(App.help.aboutData(parseDoc('<html><body></body></html>')), { libraries: [] });
 });
 
 test('help: a bundled library without a version of its own is named without one', () => {

@@ -1214,7 +1214,6 @@ aside.notes, aside.comments { display: none !important; }
 </script>
 <script type="application/json" id="about-data">
 {
- "built": "2026-11-11",
  "libraries": [
   {
    "name": "PptxGenJS",
@@ -22807,6 +22806,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     // ---------------------------------------------------------------
 
     const MARKER_SIZE = 24;   // screen px at every zoom
+    const MARKER_GAP = 7;     // screen px between an element's corner and its marker (past the resize handle)
     const SLIDE_WIDTH = 1280;
     const SLIDE_HEIGHT = 720;
 
@@ -22822,10 +22822,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         const size = MARKER_SIZE / App.canvas.getZoom();   // slide px
+        const gap = MARKER_GAP / App.canvas.getZoom();
         App.comments.markersOf(slide).forEach((marker) => {
             const box = App.comments.anchorBox(slide, marker.target);
-            // An element's top right corner (half outside it), kept on the slide; the slide's own at its top left.
-            const left = box ? Math.min(Math.max(box.left + box.width - size / 2, 0), SLIDE_WIDTH - size) : size / 3;
+            // Just right of an element's top right corner, clear of its resize handle (kept on the slide: at the
+            // slide's edge it may cover the handle, which then stays on top); the slide's own at its top left.
+            const left = box ? Math.min(Math.max(box.left + box.width + gap, 0), SLIDE_WIDTH - size) : size / 3;
             const top = box ? Math.min(Math.max(box.top - size / 2, 0), SLIDE_HEIGHT - size) : size / 3;
             const comments = App.comments.listOf(slide).filter((c) => marker.ids.indexOf(c.id) !== -1);
             const button = el('button', {
@@ -23118,7 +23120,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             count: document.getElementById('comments-count'),
             markers: App.util.el('div', { class: 'comment-markers' }),
         };
-        document.getElementById('overlay').appendChild(nodes.markers);
+        // First in the overlay, so the selection box and its handles are drawn over the markers.
+        const overlay = document.getElementById('overlay');
+        overlay.insertBefore(nodes.markers, overlay.firstChild);
         document.getElementById('comments-new').addEventListener('click', () => App.commands.run('newComment'));
         document.getElementById('comments-close').addEventListener('click', () => App.commentsPane.close());
         App.events.on('deck-loaded', () => {
@@ -23347,13 +23351,13 @@ App.template.newDeckHtml = function newDeckHtml() {
     // About / Licenses
     // ---------------------------------------------------------------
 
-    /* The About data build.py put in the page: { built, libraries: [...] } (empty when absent, e.g. in tests). */
+    /* The About data build.py put in the page: { libraries: [...] } (empty when absent, e.g. in tests). */
     App.help.aboutData = function aboutData(doc) {
         const node = (doc || document).getElementById('about-data');
         try {
-            return node ? JSON.parse(node.textContent) : { built: '', libraries: [] };
+            return node ? JSON.parse(node.textContent) : { libraries: [] };
         } catch (error) {
-            return { built: '', libraries: [] };
+            return { libraries: [] };
         }
     };
 
@@ -23383,7 +23387,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             ]),
         ]));
         const body = el('div', { class: 'about' }, [
-            el('p', {}, ['Deck Editor: edit HTML presentations on this computer.' + (data.built ? ' Built ' + data.built + '.' : '')]),
+            el('p', {}, ['Deck Editor: edit HTML presentations on this computer.']),
             el('p', { class: 'panel-hint' }, ['One file with everything inside it. The browser blocks all network access for this page ' +
                 '(Content-Security-Policy), so nothing you open or type leaves the computer.']),
             el('h2', { class: 'about-heading' }, ['Open-source code inside']),

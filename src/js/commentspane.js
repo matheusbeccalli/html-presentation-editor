@@ -113,6 +113,7 @@
     // ---------------------------------------------------------------
 
     const MARKER_SIZE = 24;   // screen px at every zoom
+    const MARKER_GAP = 7;     // screen px between an element's corner and its marker (past the resize handle)
     const SLIDE_WIDTH = 1280;
     const SLIDE_HEIGHT = 720;
 
@@ -128,10 +129,12 @@
             return;
         }
         const size = MARKER_SIZE / App.canvas.getZoom();   // slide px
+        const gap = MARKER_GAP / App.canvas.getZoom();
         App.comments.markersOf(slide).forEach((marker) => {
             const box = App.comments.anchorBox(slide, marker.target);
-            // An element's top right corner (half outside it), kept on the slide; the slide's own at its top left.
-            const left = box ? Math.min(Math.max(box.left + box.width - size / 2, 0), SLIDE_WIDTH - size) : size / 3;
+            // Just right of an element's top right corner, clear of its resize handle (kept on the slide: at the
+            // slide's edge it may cover the handle, which then stays on top); the slide's own at its top left.
+            const left = box ? Math.min(Math.max(box.left + box.width + gap, 0), SLIDE_WIDTH - size) : size / 3;
             const top = box ? Math.min(Math.max(box.top - size / 2, 0), SLIDE_HEIGHT - size) : size / 3;
             const comments = App.comments.listOf(slide).filter((c) => marker.ids.indexOf(c.id) !== -1);
             const button = el('button', {
@@ -424,7 +427,9 @@
             count: document.getElementById('comments-count'),
             markers: App.util.el('div', { class: 'comment-markers' }),
         };
-        document.getElementById('overlay').appendChild(nodes.markers);
+        // First in the overlay, so the selection box and its handles are drawn over the markers.
+        const overlay = document.getElementById('overlay');
+        overlay.insertBefore(nodes.markers, overlay.firstChild);
         document.getElementById('comments-new').addEventListener('click', () => App.commands.run('newComment'));
         document.getElementById('comments-close').addEventListener('click', () => App.commentsPane.close());
         App.events.on('deck-loaded', () => {

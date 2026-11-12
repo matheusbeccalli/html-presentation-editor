@@ -6813,6 +6813,21 @@ def test_comment_markers_and_anchors(browser):
     markers = page.evaluate(MARKERS)
     check([m["target"] for m in markers] == ["e4", None], f"undo: back on the subtitle: {markers}")
 
+    # The marker never takes the place of the resize handles: the subtitle selected, its top right handle still resizes.
+    page.mouse.click(*slide_to_screen(page, 600, 410))
+    handle = page.locator(".selection-handle[data-handle='ne']").bounding_box()
+    width = lambda: page.evaluate("App.transform.readRect(App.deck.getDocument().querySelector('[data-id=e4]')).width")  # noqa: E731
+    before = width()
+    x, y = handle["x"] + handle["width"] / 2, handle["y"] + handle["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    page.mouse.move(x - 100, y + 4, steps=5)
+    page.mouse.up()
+    check(width() < before - 50, f"the corner handle resized it: {before} -> {width()}")
+    marker = page.locator("#overlay .comment-marker[data-target='e4']").bounding_box()
+    check(marker["x"] > handle["x"] - 100 + handle["width"], f"the marker moved with the corner, clear of it: {marker}")
+    page.keyboard.press("Control+z")
+
     # Duplicate Slide: the copy has the two comments, the element one on the copy of the subtitle.
     page.click("[role='tab']:has-text('Home')")
     page.click("button[data-command='duplicateSlide']")

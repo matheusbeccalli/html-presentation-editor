@@ -99,7 +99,6 @@ class AboutData(unittest.TestCase):
         for lib in data["libraries"]:
             self.assertIn("Permission is hereby granted", lib["licenseText"])
             self.assertTrue(lib["url"] and lib["sha256"])
-        self.assertRegex(data["built"], r"^\d{4}-\d{2}-\d{2}$")
 
     def test_libraries_bundled_inside_are_listed_too(self):
         pptx = build.about_data()["libraries"][0]

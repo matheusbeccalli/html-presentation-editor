@@ -17,8 +17,18 @@
  *
  * Every change (add, edit, delete) is one undo step for the slide (history.js).
  *
+ * Markers (step 3): a small yellow bubble over the slide for each thing
+ * commented on - at an element's top right corner, at the slide's top left
+ * for the slide's own comments (and those whose element was deleted). They
+ * are drawn in #overlay, never in the slide (SPEC 3.5), stay the same size on
+ * screen at every zoom, and show the number of comments when there are
+ * several. Clicking one opens the pane on its first comment. Review > Show
+ * Markers hides them (settings.showCommentMarkers). Previous / Next walk
+ * through all the deck's comments, slide by slide, wrapping round.
+ *
  * Talks to: comments.js (the model), deck.js, history.js, selection.js, text.js
- *           (the box being typed in), settings.js (initials), commands.js.
+ *           (the box being typed in), settings.js (initials, markers), commands.js,
+ *           canvas.js (zoom, for the markers' size).
  */
 
 (function () {
@@ -69,11 +79,84 @@
         if (card) {
             card.scrollIntoView({ block: 'nearest' });
         }
+        drawMarkers();
         App.events.emit('comments-active-changed', { id: id });
     };
 
     App.commentsPane.activeId = function activeIdFn() {
         return activeId;
+    };
+
+    // ---------------------------------------------------------------
+    // Previous / Next (Review tab)
+    // ---------------------------------------------------------------
+
+    App.commentsPane.hasComments = function hasComments() {
+        return App.state.hasDeck && App.comments.countIn(App.deck.getDocument()) > 0;
+    };
+
+    /* Review > Previous (-1) / Next (+1): show that comment's slide and its card. */
+    App.commentsPane.step = function step(direction) {
+        const order = App.comments.orderIn(App.deck.getSlides());
+        const to = App.comments.step(order, activeId, direction, App.deck.getCurrentIndex());
+        if (!to) {
+            return;
+        }
+        if (to.slide !== App.deck.getCurrentIndex()) {
+            App.deck.goTo(to.slide);
+        }
+        App.commentsPane.focusComment(to.id);
+    };
+
+    // ---------------------------------------------------------------
+    // Markers over the slide
+    // ---------------------------------------------------------------
+
+    const MARKER_SIZE = 24;   // screen px at every zoom
+    const SLIDE_WIDTH = 1280;
+    const SLIDE_HEIGHT = 720;
+
+    App.commentsPane.toggleMarkers = function toggleMarkers() {
+        App.settings.update({ showCommentMarkers: !App.settings.get().showCommentMarkers });
+    };
+
+    function drawMarkers() {
+        nodes.markers.replaceChildren();
+        const slide = App.state.hasDeck ? App.deck.getCurrentSlide() : null;
+        nodes.markers.hidden = !slide || !App.settings.get().showCommentMarkers;
+        if (!slide) {
+            return;
+        }
+        const size = MARKER_SIZE / App.canvas.getZoom();   // slide px
+        App.comments.markersOf(slide).forEach((marker) => {
+            const box = App.comments.anchorBox(slide, marker.target);
+            // An element's top right corner (half outside it), kept on the slide; the slide's own at its top left.
+            const left = box ? Math.min(Math.max(box.left + box.width - size / 2, 0), SLIDE_WIDTH - size) : size / 3;
+            const top = box ? Math.min(Math.max(box.top - size / 2, 0), SLIDE_HEIGHT - size) : size / 3;
+            const comments = App.comments.listOf(slide).filter((c) => marker.ids.indexOf(c.id) !== -1);
+            const button = el('button', {
+                type: 'button', class: 'comment-marker' + (marker.ids.indexOf(activeId) !== -1 ? ' active' : ''),
+                'data-target': marker.target || null,
+                title: comments.map((c) => c.author + ': ' + c.text).join('\n'),
+                'aria-label': marker.ids.length + (marker.ids.length === 1 ? ' comment' : ' comments') + ' on ' +
+                    App.comments.targetLabel(slide, marker.target),
+                style: 'left:' + left + 'px; top:' + top + 'px',
+            }, [marker.ids.length > 1 ? String(marker.ids.length) : '']);
+            // Not a press on the slide: no selecting, no dragging (selection.js listens on the overlay).
+            button.addEventListener('pointerdown', (event) => event.stopPropagation());
+            button.addEventListener('dblclick', (event) => event.stopPropagation());
+            button.addEventListener('click', (event) => {
+                event.stopPropagation();
+                App.commentsPane.focusComment(marker.ids[0]);
+            });
+            nodes.markers.appendChild(button);
+        });
+    }
+
+    App.commentsPane.drawMarkers = function drawMarkersFn() {
+        if (nodes) {
+            drawMarkers();
+        }
     };
 
     /* What New Comment points at: the element being typed in or selected (the first of several), else the slide. */
@@ -314,7 +397,9 @@
             list: document.getElementById('comments-list'),
             empty: document.getElementById('comments-empty'),
             count: document.getElementById('comments-count'),
+            markers: App.util.el('div', { class: 'comment-markers' }),
         };
+        document.getElementById('overlay').appendChild(nodes.markers);
         document.getElementById('comments-new').addEventListener('click', () => App.commands.run('newComment'));
         document.getElementById('comments-close').addEventListener('click', () => App.commentsPane.close());
         App.events.on('deck-loaded', () => {
@@ -324,10 +409,13 @@
             render();
         });
         ['slide-changed', 'history-changed'].forEach((name) => App.events.on(name, () => {
+            drawMarkers();
             if (editingId) {
                 return;   // the card being edited keeps its box until it is left
             }
             render();
         }));
+        // An element dragged, the zoom or the Show Markers setting changed: the markers move along.
+        ['deck-loaded', 'selection-dragged', 'zoom-changed', 'settings-changed'].forEach((name) => App.events.on(name, drawMarkers));
     };
 })();

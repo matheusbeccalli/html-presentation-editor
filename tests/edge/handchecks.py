@@ -98,4 +98,8 @@ HAND_CHECKS = [
      "left": "opening the file in PowerPoint and editing there (the tests read the file's XML; PowerPoint 16 was checked by hand through COM)"},
     {"key": "Clean copy: open samples/contract-deck.html", "tests": ["test_save_clean_copy"], "auto": False,
      "left": "the real Save window and its suggested name (the test uses the download fallback); moving a box by hand"},
+    # ---- Phase 9 -----------------------------------------------------
+    {"key": "Comments: open samples/contract-deck.html, click the subtitle", "auto": False,
+     "tests": ["test_comments_pane", "test_comment_markers_and_anchors", "test_comments_saved_but_never_shown_or_sent"],
+     "left": "not yet audited clause by clause (closing the file and opening it again from disk is a re-open of a download)"},
 ]

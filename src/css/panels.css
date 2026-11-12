@@ -346,6 +346,25 @@
     #comments-pane { display: none; }
 }
 
+/* Comment markers over the slide (commentspane.js): same size on screen at every zoom, like the handles. */
+.comment-markers { position: absolute; inset: 0; pointer-events: none; }
+.comment-markers[hidden] { display: none; }
+.comment-marker {
+    position: absolute; pointer-events: auto; cursor: pointer; padding: 0; box-sizing: border-box;
+    width: calc(24px * var(--inverse-zoom, 1)); height: calc(22px * var(--inverse-zoom, 1));
+    border: calc(1px * var(--inverse-zoom, 1)) solid #B8860B; border-radius: calc(4px * var(--inverse-zoom, 1));
+    border-bottom-left-radius: 0;
+    background: #F2C744; color: #3B2F00; font: 700 calc(11px * var(--inverse-zoom, 1)) "Segoe UI", Arial, sans-serif;
+    box-shadow: 0 calc(1px * var(--inverse-zoom, 1)) calc(3px * var(--inverse-zoom, 1)) rgba(0, 0, 0, 0.35);
+}
+.comment-marker:hover { background: #F7D86A; }
+.comment-marker.active { outline: calc(2px * var(--inverse-zoom, 1)) solid var(--accent); }
+.thumb-comments-badge {
+    position: absolute; left: 3px; top: 44px; min-width: 16px; height: 15px; padding: 0 3px; box-sizing: border-box;
+    border-radius: 3px 3px 3px 0; background: #F2C744; color: #3B2F00;
+    font-size: 10px; font-weight: 700; line-height: 15px; text-align: center;
+}
+
 /* ---- Status bar (bottom) ---- */
 #zoom-controls { display: flex; align-items: center; gap: 4px; }
 #zoom-slider { width: 110px; accent-color: var(--accent); }

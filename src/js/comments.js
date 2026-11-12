@@ -163,6 +163,100 @@
         return word + ': ' + (text.length > LABEL_LENGTH ? text.slice(0, LABEL_LENGTH).trim() + '…' : text);
     };
 
+    // ---------------------------------------------------------------
+    // What comments point at (Phase 9 step 3)
+    // ---------------------------------------------------------------
+
+    /*
+     * The element ids comments point at. elements.usedIds counts them as used, so
+     * an element made later never takes the id of a deleted one and with it its
+     * comments (which show on the slide meanwhile, and go back on the element
+     * if the delete is undone).
+     */
+    App.comments.targetsIn = function targetsIn(root) {
+        return new Set(nodesIn(root).map((node) => node.getAttribute('data-target')).filter(Boolean));
+    };
+
+    /* The box of the element a comment points at, in slide px (parts of groups measured from the slide); null = the slide. */
+    App.comments.anchorBox = function anchorBox(slide, target) {
+        const element = target && slide ? slide.querySelector('.el[data-id="' + CSS.escape(target) + '"]') : null;
+        if (!element) {
+            return null;
+        }
+        const px = (node, name) => parseFloat(node.style[name]) || 0;
+        let left = px(element, 'left');
+        let top = px(element, 'top');
+        for (let group = element.parentElement.closest('.el'); group && slide.contains(group); group = group.parentElement.closest('.el')) {
+            left += px(group, 'left');
+            top += px(group, 'top');
+        }
+        return { left: left, top: top, width: px(element, 'width'), height: px(element, 'height') };
+    };
+
+    /*
+     * The markers a slide shows: one per thing commented on, in the order of
+     * their first comment: [{ target (null = the slide), ids }]. A comment
+     * whose element is gone joins the slide's marker.
+     */
+    App.comments.markersOf = function markersOf(slide) {
+        const markers = [];
+        App.comments.listOf(slide).forEach((comment) => {
+            const target = comment.target && App.comments.anchorBox(slide, comment.target) ? comment.target : null;
+            let marker = markers.find((m) => m.target === target);
+            if (!marker) {
+                marker = { target: target, ids: [] };
+                markers.push(marker);
+            }
+            marker.ids.push(comment.id);
+        });
+        return markers;
+    };
+
+    /* Every comment of `slides` in order: [{ slide: index, id }] (for Previous / Next). */
+    App.comments.orderIn = function orderIn(slides) {
+        const order = [];
+        slides.forEach((slide, index) => App.comments.listOf(slide).forEach((c) => order.push({ slide: index, id: c.id })));
+        return order;
+    };
+
+    /*
+     * Previous (direction -1) / Next (+1) from comment `id` in `order`, wrapping
+     * round. With no comment chosen, Next is the first on or after slide
+     * `fromSlide` and Previous the last on or before it. null when there are none.
+     */
+    App.comments.step = function step(order, id, direction, fromSlide) {
+        if (!order.length) {
+            return null;
+        }
+        const at = order.findIndex((entry) => entry.id === id);
+        if (at !== -1) {
+            return order[(at + direction + order.length) % order.length];
+        }
+        const slide = fromSlide || 0;
+        if (direction > 0) {
+            return order.find((entry) => entry.slide >= slide) || order[0];
+        }
+        return order.slice().reverse().find((entry) => entry.slide <= slide) || order[order.length - 1];
+    };
+
+    /*
+     * Duplicate Slide: `copy` (not yet in the deck) got new element ids
+     * (`idMap` old -> new); its comments get new ids too and point at the
+     * copies of their elements.
+     */
+    App.comments.remapCopy = function remapCopy(copy, idMap, doc) {
+        const used = new Set(nodesIn(doc).map((node) => node.getAttribute('data-comment-id')));
+        copy.querySelectorAll('aside.comments > .comment[data-comment-id]').forEach((node) => {
+            node.setAttribute('data-comment-id', App.util.uniqueId('c', used));
+            const target = node.getAttribute('data-target');
+            if (target && idMap.has(target)) {
+                node.setAttribute('data-target', idMap.get(target));
+            } else if (target) {
+                node.removeAttribute('data-target');   // its element was already gone: on the slide
+            }
+        });
+    };
+
     /* Remove every comment in `root` ("Delete All Comments", a clean copy). Returns how many there were. */
     App.comments.removeAll = function removeAll(root) {
         const count = App.comments.countIn(root);

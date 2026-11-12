@@ -142,10 +142,16 @@
         App.selection.select(element);
     };
 
+    /* The element ids taken in the deck: its elements' and those review comments point at (comments.targetsIn). */
+    App.elements.usedIds = function usedIds(doc) {
+        const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+        App.comments.targetsIn(doc).forEach((id) => used.add(id));
+        return used;
+    };
+
     /* An element id not used in the deck yet. */
     App.elements.freshId = function freshId(doc) {
-        const used = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
-        return App.util.uniqueId('e', used);
+        return App.util.uniqueId('e', App.elements.usedIds(doc));
     };
 
     /* Put `element` into `slide` after its other elements, before the speaker notes and review comments in the HTML. */
@@ -276,7 +282,7 @@
             return [];
         }
         App.history.change(label, currentSlideScope(), () => {
-            const usedIds = new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+            const usedIds = App.elements.usedIds(doc);
             const others = App.transform.topLevelElements(slide);
             const taken = others.map((other) => App.transform.readRect(other));
             const first = App.transform.readRect(elements[0]);

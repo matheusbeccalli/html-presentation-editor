@@ -241,6 +241,7 @@
             App.util.el('div', { class: 'thumb-box' }, [frame]),
         ]);
         markHidden(item, slide);
+        markComments(item, slide);
         return item;
     }
 
@@ -257,6 +258,22 @@
             item.appendChild(mark);
         } else if (!hidden && badge) {
             badge.remove();
+        }
+    }
+
+    /* A slide with review comments carries a small yellow bubble with their number (Phase 9). */
+    function markComments(item, slide) {
+        const count = App.comments.listOf(slide).length;
+        let badge = item.querySelector('.thumb-comments-badge');
+        if (count && !badge) {
+            badge = App.util.el('span', { class: 'thumb-comments-badge' });
+            item.appendChild(badge);
+        } else if (!count && badge) {
+            badge.remove();
+        }
+        if (count) {
+            badge.textContent = String(count);
+            badge.title = count + (count === 1 ? ' comment' : ' comments');
         }
     }
 
@@ -333,6 +350,7 @@
             const item = rail.querySelector('.thumb[data-index="' + index + '"]');
             if (item) {
                 markHidden(item, slides[index]);
+                markComments(item, slides[index]);
             }
             pendingRefresh.add(index);
             flushRefresh();

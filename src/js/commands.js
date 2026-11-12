@@ -150,8 +150,18 @@
         // Review comments (Phase 9, commentspane.js).
         App.commands.define('newComment', { label: 'New Comment', run: () => App.commentsPane.newComment(), isEnabled: hasDeck });
         App.commands.define('commentsPane', {
-            label: 'Comments', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
+            label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
+        });
+        App.commands.define('previousComment', {
+            label: 'Previous', run: () => App.commentsPane.step(-1), isEnabled: () => App.commentsPane.hasComments(),
+        });
+        App.commands.define('nextComment', {
+            label: 'Next', run: () => App.commentsPane.step(1), isEnabled: () => App.commentsPane.hasComments(),
+        });
+        App.commands.define('showCommentMarkers', {
+            label: 'Show Markers', run: () => App.commentsPane.toggleMarkers(), isEnabled: hasDeck,
+            isChecked: () => App.settings.get().showCommentMarkers,
         });
         App.commands.define('exportPdf', { label: 'PDF', run: () => App.pdf.open(), isEnabled: hasDeck });
         // Pictures of slides (snapshot.js): the browser draws the slide itself, at 2×.

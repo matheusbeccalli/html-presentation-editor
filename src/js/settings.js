@@ -26,7 +26,8 @@
 
     const KEY = 'deck-editor-settings';
     App.settings.DEFAULTS = Object.freeze({ keepDrafts: true, retentionDays: 1, rememberRecent: false, numberLocale: null,
-        showGridlines: false, showRulers: false, pdfHintShown: false, authorInitials: '' });
+        showGridlines: false, showRulers: false, pdfHintShown: false, authorInitials: '',
+        showCommentMarkers: true });
     const NUMBER_LOCALES = ['pt-BR', 'en-US'];
 
     let store = null;   // localStorage, or a fake one in the tests
@@ -53,6 +54,7 @@
             showRulers: !!value.showRulers,
             pdfHintShown: !!value.pdfHintShown,   // Export > PDF's "Save as PDF" hint, shown the first time only (pdf.js)
             authorInitials: App.comments.cleanInitials(value.authorInitials),   // on review comments (Phase 9)
+            showCommentMarkers: value.showCommentMarkers === undefined ? true : !!value.showCommentMarkers,   // Review tab
         };
     };
 

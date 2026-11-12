@@ -77,7 +77,7 @@
     };
 
     function usedElementIds(doc) {
-        return new Set(Array.from(doc.querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+        return App.elements.usedIds(doc);   // review comments' targets count too
     }
 
     /* A font size written on the element itself, in px (0 when it has none). */
@@ -189,13 +189,22 @@
         return slide;
     };
 
-    /* A copy of `slide` (content, notes, hidden or not) with id `slideId` and new element ids. */
+    /*
+     * A copy of `slide` (content, notes, comments, hidden or not) with id `slideId` and new element ids;
+     * its review comments point at the copies of their elements (comments.remapCopy).
+     */
     App.slides.copyOf = function copyOf(slide, slideId) {
         const used = usedElementIds(slide.ownerDocument);
         const copy = slide.cloneNode(true);
         copy.setAttribute('data-slide-id', slideId);
         copy.removeAttribute('data-editor-current');
-        copy.querySelectorAll('[data-id]').forEach((node) => node.setAttribute('data-id', App.util.uniqueId('e', used)));
+        const idMap = new Map();
+        copy.querySelectorAll('[data-id]').forEach((node) => {
+            const id = App.util.uniqueId('e', used);
+            idMap.set(node.getAttribute('data-id'), id);
+            node.setAttribute('data-id', id);
+        });
+        App.comments.remapCopy(copy, idMap, slide.ownerDocument);
         return copy;
     };
 

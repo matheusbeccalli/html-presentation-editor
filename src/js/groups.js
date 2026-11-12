@@ -204,7 +204,7 @@
         const elements = App.selection.getElements();
         let made = null;
         App.history.change('Group', slideScope(), () => {
-            const used = new Set(Array.from(App.deck.getDocument().querySelectorAll('[data-id]'), (node) => node.getAttribute('data-id')));
+            const used = App.elements.usedIds(App.deck.getDocument());
             made = App.groups.makeGroup(slide, elements, App.util.uniqueId('e', used));
         });
         App.selection.select(made);

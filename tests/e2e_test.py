@@ -5471,7 +5471,8 @@ def test_settings_recent_files_and_status(browser):
     editor.click_dialog_button("OK")
     saved = page.evaluate("JSON.parse(localStorage.getItem('deck-editor-settings'))")
     check(saved == {"keepDrafts": True, "retentionDays": 30, "rememberRecent": True, "numberLocale": None,
-                     "showGridlines": False, "showRulers": False, "pdfHintShown": False, "authorInitials": ""}, f"saved settings: {saved}")
+                     "showGridlines": False, "showRulers": False, "pdfHintShown": False, "authorInitials": "",
+                     "showCommentMarkers": True}, f"saved settings: {saved}")
 
     # Recent files: an opened file is remembered; choosing it opens the Open window in its folder.
     page.evaluate("""() => App.events.emit('file-opened',
@@ -6725,6 +6726,105 @@ def test_comments_pane(browser):
     editor.close()
 
 
+MARKERS = """() => Array.from(document.querySelectorAll('#overlay .comment-marker')).map((m) => ({
+    target: m.getAttribute('data-target') || null, count: m.textContent, active: m.classList.contains('active'),
+    hidden: !m.checkVisibility(),
+    left: parseFloat(m.style.left), top: parseFloat(m.style.top) }))"""
+
+
+def add_comment(page, slide_index, target, text, author="MB"):
+    page.evaluate("""([index, target, text, author]) => {
+        const slide = App.deck.getSlides()[index];
+        App.history.change('Add comment', { slideId: slide.getAttribute('data-slide-id') }, () =>
+            App.comments.add(slide, { target: target, author: author, date: new Date().toISOString(), text: text }));
+    }""", [slide_index, target, text, author])
+
+
+def test_comment_markers_and_anchors(browser):
+    """Phase 9 (SPEC 4, step 3): each commented element shows a marker at its top right corner (the slide's own comments
+    at its top left), drawn over the slide, never in it; clicking one opens the pane on that comment; Show Markers hides
+    them; slides with comments carry a badge in the thumbnails; Previous / Next go through every comment in the deck;
+    deleting an element moves its comment to the slide (undo puts it back on the element), and a new element never takes
+    its id; Duplicate Slide copies the comments onto the copies of their elements."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    add_comment(page, 0, "e4", "Subtítulo: revisar")
+    add_comment(page, 0, None, "Slide de abertura ok?")
+    add_comment(page, 2, "e9", "Conferir múltiplos", author="JD")
+    markers = page.evaluate(MARKERS)
+    check([(m["target"], m["count"]) for m in markers] == [("e4", ""), (None, "")], f"two markers on slide 1: {markers}")
+    e4 = page.evaluate("App.transform.readRect(App.deck.getDocument().querySelector('[data-id=\"e4\"]'))")
+    check(abs(markers[0]["left"] - (e4["left"] + e4["width"])) < 30 and abs(markers[0]["top"] - e4["top"]) < 30,
+          f"the subtitle's marker is at its top right corner: {markers[0]} {e4}")
+    check(markers[1]["left"] < 40 and markers[1]["top"] < 40, f"the slide's marker is at its top left: {markers[1]}")
+    check("Subtítulo" not in page.evaluate("document.getElementById('deck-frame').contentDocument.body.innerText"),
+          "markers are not in the slide")
+    # A marker, seen on screen: its yellow is painted.
+    box = page.locator("#overlay .comment-marker").first.bounding_box()
+    colour = common_colour(page, {"left": box["x"] + 3, "top": box["y"] + 3, "right": box["x"] + box["width"] - 3,
+                                  "bottom": box["y"] + box["height"] - 3})
+    check(colour[0] > 200 and colour[1] > 160 and colour[2] < 120, f"the marker is yellow on screen: {colour}")
+    page.screenshot(path=str(OUTPUT / "123-comment-markers.png"))
+
+    # Thumbnail badges: slides 1 (2 comments) and 3 (1).
+    badges = page.evaluate("""() => Array.from(document.querySelectorAll('#thumbnail-rail .thumb')).map((item) => {
+        const badge = item.querySelector('.thumb-comments-badge'); return badge ? badge.textContent : ''; })""")
+    check(badges == ["2", "", "1", "", "", ""], f"badges: {badges}")
+
+    # Clicking a marker opens the pane on that comment (the element is not selected).
+    page.locator("#overlay .comment-marker").first.click()
+    wait_until(page, "!document.getElementById('comments-pane').hidden")
+    check(page.evaluate("document.querySelector('.comment-card.active').getAttribute('data-comment-id')") == "c1", "c1 active")
+    check(page.evaluate(MARKERS)[0]["active"], "its marker shows it is the one")
+    check(page.evaluate("App.selection.selectedId()") is None, "the marker click selects nothing")
+
+    # Next / Previous: c1 -> c2 -> c3 (slide 3) -> c1 again.
+    page.click("[role='tab']:has-text('Review')")
+    page.click("button[data-command='nextComment']")
+    check(page.evaluate("App.commentsPane.activeId()") == "c2", "next: c2")
+    page.click("button[data-command='nextComment']")
+    check(page.evaluate("App.commentsPane.activeId()") == "c3" and page.evaluate("App.deck.getCurrentIndex()") == 2,
+          "next: c3, on slide 3")
+    page.click("button[data-command='nextComment']")
+    check(page.evaluate("App.commentsPane.activeId()") == "c1" and page.evaluate("App.deck.getCurrentIndex()") == 0,
+          "after the last comes the first")
+    page.click("button[data-command='previousComment']")
+    check(page.evaluate("App.commentsPane.activeId()") == "c3", "previous from the first: the last")
+    page.evaluate("App.deck.goTo(0)")
+
+    # Show Markers off hides them, on brings them back (kept in settings).
+    page.click("button[data-command='showCommentMarkers']")
+    check(all(m["hidden"] for m in page.evaluate(MARKERS)), "markers hidden")
+    check(page.evaluate("App.settings.get().showCommentMarkers") is False, "kept in settings")
+    page.click("button[data-command='showCommentMarkers']")
+    check(not any(m["hidden"] for m in page.evaluate(MARKERS)), "markers shown again")
+
+    # Deleting the subtitle: its comment is now on the slide; a new text box does not take the id e4.
+    page.mouse.click(*slide_to_screen(page, 600, 410))
+    check(page.evaluate("App.selection.selectedId()") == "e4", "subtitle selected")
+    page.keyboard.press("Delete")
+    markers = page.evaluate(MARKERS)
+    check([(m["target"], m["count"]) for m in markers] == [(None, "2")], f"one slide marker for both: {markers}")
+    check(page.evaluate("document.querySelector('.comment-card[data-comment-id=\"c1\"] .comment-on').textContent") == "Slide",
+          "the card says it is on the slide")
+    check(page.evaluate("App.elements.freshId(App.deck.getDocument())") != "e4", "e4 is not handed out again")
+    page.keyboard.press("Control+z")
+    markers = page.evaluate(MARKERS)
+    check([m["target"] for m in markers] == ["e4", None], f"undo: back on the subtitle: {markers}")
+
+    # Duplicate Slide: the copy has the two comments, the element one on the copy of the subtitle.
+    page.click("[role='tab']:has-text('Home')")
+    page.click("button[data-command='duplicateSlide']")
+    copy = page.evaluate("""() => { const slide = App.deck.getSlides()[1];
+        const sub = Array.from(slide.querySelectorAll('.el')).find((el) => el.textContent.includes('Aquisição'));
+        return { comments: App.comments.listOf(slide), sub: sub && sub.getAttribute('data-id') }; }""")
+    check([c["text"] for c in copy["comments"]] == ["Subtítulo: revisar", "Slide de abertura ok?"] and
+          copy["comments"][0]["target"] == copy["sub"] and copy["sub"] != "e4", f"the copy: {copy}")
+    check(page.evaluate("App.comments.countIn(App.deck.getDocument())") == 5, "5 comments in the deck now")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -6818,6 +6918,7 @@ TESTS = [
     test_phase8_done_when,
     test_comments_saved_but_never_shown_or_sent,
     test_comments_pane,
+    test_comment_markers_and_anchors,
 ]
 
 

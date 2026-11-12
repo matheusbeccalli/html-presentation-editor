@@ -89,3 +89,8 @@
 
 /* Export > PowerPoint's report (pptx.js): one line per thing to check. */
 .pptx-report { white-space: pre-line; max-height: 50vh; overflow: auto; max-width: 640px; }
+
+/* File > Save a Clean Copy (fileio.js). */
+.clean-copy-dialog { display: flex; flex-direction: column; gap: 8px; max-width: 460px; }
+.clean-copy-dialog p { margin: 0; }
+.clean-copy-note { color: #605e5c; }

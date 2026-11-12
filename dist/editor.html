@@ -815,6 +815,11 @@ iframe.pdf-print-frame {
 /* Export > PowerPoint's report (pptx.js): one line per thing to check. */
 .pptx-report { white-space: pre-line; max-height: 50vh; overflow: auto; max-width: 640px; }
 
+/* File > Save a Clean Copy (fileio.js). */
+.clean-copy-dialog { display: flex; flex-direction: column; gap: 8px; max-width: 460px; }
+.clean-copy-dialog p { margin: 0; }
+.clean-copy-note { color: #605e5c; }
+
 </style>
 </head>
 <body>
@@ -11238,10 +11243,19 @@ App.template.newDeckHtml = function newDeckHtml() {
      * Return a cleaned copy of the deck's <html> element.
      * Exposed for tests; normal callers use toHtml.
      */
-    App.serialize.cleanCopy = function cleanCopy(doc) {
+    App.serialize.cleanCopy = function cleanCopy(doc, options) {
         const root = doc.documentElement.cloneNode(true);
         stripEditorMarks(root);
         root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
+        if (options && options.cleanCopy) {
+            // File > Save a Clean Copy (Phase 8): a copy to send. It is a deck of its own (no deck id: opened
+            // later, it is never taken for the original or offered the original's recovery drafts), and the
+            // hidden slides go when asked. Review comments go too, once they exist (Phase 9).
+            root.querySelectorAll('meta[name="deck-id"]').forEach((meta) => meta.remove());
+            if (options.removeHidden) {
+                root.querySelectorAll('section.slide[data-hidden="true"]').forEach((slide) => slide.remove());
+            }
+        }
         App.master.sync(root);   // the slide master's copies, numbered as the slides stand now
         // Text is saved in the text model, even if the user is still typing (SPEC: normalize before save).
         root.querySelectorAll('.el[data-type="text"]').forEach((element) => App.text.normalize(element));
@@ -11253,9 +11267,10 @@ App.template.newDeckHtml = function newDeckHtml() {
     /*
      * The complete file text to save.
      * player = { playerJs, playerCss } - the contents of src/player/*.
+     * options = { cleanCopy, removeHidden } for File > Save a Clean Copy (cleanCopy above).
      */
-    App.serialize.toHtml = function toHtml(doc, player) {
-        const root = App.serialize.cleanCopy(doc);
+    App.serialize.toHtml = function toHtml(doc, player, options) {
+        const root = App.serialize.cleanCopy(doc, options);
         const head = root.querySelector('head');
         const body = root.querySelector('body');
 
@@ -16699,6 +16714,55 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
     };
 
+    /* 'Projeto Atlas.html' → 'Projeto Atlas (clean copy).html'. */
+    App.fileio.cleanCopyName = function cleanCopyName(fileName) {
+        const name = (fileName || NEW_DECK_NAME).replace(/\.html?$/i, '');
+        return name + ' (clean copy).html';
+    };
+
+    /*
+     * File > Save a Clean Copy (SPEC 7.5): a copy to send, saved beside the deck under
+     * another name. Hidden slides go when "Remove hidden slides" is ticked (ticked by
+     * default, as decided in the Phase 8 Q&A); review comments will go too (Phase 9).
+     * The editor stays on the original: its file, its unsaved changes and its recovery
+     * drafts are left as they were.
+     */
+    App.fileio.saveCleanCopy = async function saveCleanCopy() {
+        if (!App.state.hasDeck) {
+            return;
+        }
+        const el = App.util.el;
+        const hiddenCount = App.deck.getSlides().filter((slide) => App.slides.isHidden(slide)).length;
+        const removeBox = el('input', { type: 'checkbox', id: 'clean-copy-remove-hidden', checked: true });
+        const body = el('div', { class: 'clean-copy-dialog' }, [
+            el('p', {}, ['A copy to send: saved under another name; the deck you are editing stays as it is.']),
+            el('label', {}, [removeBox, ' Remove hidden slides (' + hiddenCount + ')']),
+            el('p', { class: 'clean-copy-note' }, ['Review comments are removed too (they arrive in Phase 9).']),
+        ]);
+        const go = await App.dialogs.show({
+            title: 'Save a Clean Copy', body: body,
+            buttons: [{ label: 'Save…', value: true, primary: true }, { label: 'Cancel', value: false }],
+        });
+        if (!go) {
+            return;
+        }
+        App.text.commitTyping();
+        const html = App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource(),
+            { cleanCopy: true, removeHidden: removeBox.checked });
+        const suggestedName = App.fileio.cleanCopyName(App.state.fileName);
+        if (!window.showSaveFilePicker) {
+            download(suggestedName, html);
+            App.ui.setStatus('Saved a clean copy: ' + suggestedName + ' (your Downloads folder)');
+            return;
+        }
+        const handle = await pickSaveHandle(suggestedName, App.state.fileHandle);
+        if (!handle) {
+            return;
+        }
+        await writing(() => App.fileio.writeToHandle(handle, html));
+        App.ui.setStatus('Saved a clean copy: ' + handle.name);
+    };
+
     function download(fileName, html) {
         App.fileio.downloadBlob(fileName, new Blob([html], { type: 'text/html' }));
     }
@@ -18253,6 +18317,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('exportPdf', { label: 'PDF', run: () => App.pdf.open(), isEnabled: hasDeck });
         // Pictures of slides (snapshot.js): the browser draws the slide itself, at 2×.
         App.commands.define('exportPng', { label: 'PNG of This Slide', run: () => App.snapshot.exportCurrent(), isEnabled: hasDeck });
+        App.commands.define('saveCleanCopy', {
+            label: 'Save a Clean Copy…', run: () => App.fileio.saveCleanCopy(), isEnabled: hasDeck,
+        });
         App.commands.define('exportPptx', { label: 'PowerPoint', run: () => App.pptx.export(), isEnabled: hasDeck });
         App.commands.define('exportPngAll', {
             label: 'PNG of All Slides (ZIP)', run: () => App.snapshot.exportAll(), isEnabled: hasDeck,
@@ -25120,6 +25187,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         ['openRecent', 'recent', ''],
         ['save', 'save', 'Ctrl+S'],
         ['saveAs', 'saveAs', 'Ctrl+Shift+S'],
+        ['saveCleanCopy', 'saveAs', ''],
         ['exportPdf', 'pdf', 'Ctrl+P'],
         ['revertToOpened', 'undo', ''],
         ['settings', 'settings', ''],

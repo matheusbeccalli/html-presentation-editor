@@ -139,3 +139,8 @@ test('fileio: changedOnDisk compares the file date with the one recorded at open
     assertEqual(await App.fileio.changedOnDisk(handle, 1000), true);
     assertEqual(await App.fileio.changedOnDisk(handle, null), false, 'unknown date: nothing to compare');
 });
+
+test('fileio: a clean copy is named after the deck', () => {
+    assertEqual(App.fileio.cleanCopyName('Projeto Atlas.html'), 'Projeto Atlas (clean copy).html');
+    assertEqual(App.fileio.cleanCopyName(null), 'Untitled deck (clean copy).html');
+});

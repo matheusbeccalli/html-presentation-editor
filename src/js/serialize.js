@@ -75,10 +75,19 @@
      * Return a cleaned copy of the deck's <html> element.
      * Exposed for tests; normal callers use toHtml.
      */
-    App.serialize.cleanCopy = function cleanCopy(doc) {
+    App.serialize.cleanCopy = function cleanCopy(doc, options) {
         const root = doc.documentElement.cloneNode(true);
         stripEditorMarks(root);
         root.querySelectorAll('[data-deck-player]').forEach((node) => node.remove());
+        if (options && options.cleanCopy) {
+            // File > Save a Clean Copy (Phase 8): a copy to send. It is a deck of its own (no deck id: opened
+            // later, it is never taken for the original or offered the original's recovery drafts), and the
+            // hidden slides go when asked. Review comments go too, once they exist (Phase 9).
+            root.querySelectorAll('meta[name="deck-id"]').forEach((meta) => meta.remove());
+            if (options.removeHidden) {
+                root.querySelectorAll('section.slide[data-hidden="true"]').forEach((slide) => slide.remove());
+            }
+        }
         App.master.sync(root);   // the slide master's copies, numbered as the slides stand now
         // Text is saved in the text model, even if the user is still typing (SPEC: normalize before save).
         root.querySelectorAll('.el[data-type="text"]').forEach((element) => App.text.normalize(element));
@@ -90,9 +99,10 @@
     /*
      * The complete file text to save.
      * player = { playerJs, playerCss } - the contents of src/player/*.
+     * options = { cleanCopy, removeHidden } for File > Save a Clean Copy (cleanCopy above).
      */
-    App.serialize.toHtml = function toHtml(doc, player) {
-        const root = App.serialize.cleanCopy(doc);
+    App.serialize.toHtml = function toHtml(doc, player, options) {
+        const root = App.serialize.cleanCopy(doc, options);
         const head = root.querySelector('head');
         const body = root.querySelector('body');
 

@@ -6366,6 +6366,58 @@ def test_pptx_export_charts(browser):
     editor.close()
 
 
+def test_save_clean_copy(browser):
+    """Phase 8 (SPEC 7.5): File > Save a Clean Copy saves 'deck (clean copy).html' without the hidden slides (the box
+    is ticked by default) and without the deck id; the editor stays on the original: its name, its unsaved changes
+    and its recovery drafts are untouched. Unticked, the hidden slide stays (hidden)."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("window.showSaveFilePicker = undefined")
+    # An unsaved change, so there is something for the original's drafts.
+    page.evaluate("App.history.change('Test edit', { slideId: 's1' }, () => { App.deck.getSlides()[0].setAttribute('data-test', '1'); })")
+    title_before = editor.title()
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='saveCleanCopy']")
+    wait_until(page, "!!document.querySelector('dialog[open] .clean-copy-dialog')")
+    check(page.is_checked("#clean-copy-remove-hidden"), "Remove hidden slides is ticked by default")
+    check("(1)" in page.inner_text("dialog[open] .clean-copy-dialog"), "it says how many slides are hidden")
+    page.screenshot(path=str(OUTPUT / "97-clean-copy.png"))
+    with page.expect_download() as download_info:
+        page.click("dialog[open] button:has-text('Save')")
+    download = download_info.value
+    check(download.suggested_filename == "contract-deck (clean copy).html", download.suggested_filename)
+    target = OUTPUT / "contract-deck-clean.html"
+    download.save_as(target)
+    html = target.read_text(encoding="utf-8")
+    ids = re.findall(r'<section class="slide" data-slide-id="(s\d+)"', html)
+    check(ids == ["s1", "s2", "s3", "s4", "s6"], f"the hidden slide is gone: {ids}")
+    check('name="deck-id"' not in html and "data-editor" not in html, "no deck id, no editor marks")
+    check(page.evaluate("App.state.fileName") == "contract-deck.html" and editor.title() == title_before,
+          "the editor stays on the original")
+    check(page.evaluate("App.history.isDirty()"), "its unsaved change is still unsaved")
+    wait_until(page, "document.getElementById('status-message').textContent.includes('clean copy')")
+
+    # The saved copy opens and presents on its own: 5 slides.
+    player, errors = play_saved_deck(browser, target)
+    check(player.inner_text(".deck-player-counter") == "1 / 5" and errors == [], "the copy presents its 5 slides")
+    player.context.close()
+
+    # Unticked: the hidden slide stays, still hidden.
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='saveCleanCopy']")
+    wait_until(page, "!!document.querySelector('dialog[open] .clean-copy-dialog')")
+    page.uncheck("#clean-copy-remove-hidden")
+    with page.expect_download() as download_info:
+        page.click("dialog[open] button:has-text('Save')")
+    second = OUTPUT / "contract-deck-clean-all.html"
+    download_info.value.save_as(second)
+    kept = second.read_text(encoding="utf-8")
+    check(re.search(r'data-slide-id="s5"[^>]*data-hidden="true"|data-hidden="true"[^>]*data-slide-id="s5"', kept),
+          "unticked: slide 5 is kept, hidden")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
 
 TESTS = [
     test_editor_starts_offline_with_csp,
@@ -6456,6 +6508,7 @@ TESTS = [
     test_pptx_export_pictures_shapes_master,
     test_pptx_export_table,
     test_pptx_export_charts,
+    test_save_clean_copy,
 ]
 
 

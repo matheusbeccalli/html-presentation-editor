@@ -73,3 +73,19 @@ test('serialize: removes the class attribute when only editor classes were on it
     const html = App.serialize.toHtml(doc, PLAYER);
     assertIncludes(html, '<div data-id="x">a</div>');
 });
+
+test('serialize: a clean copy for sending leaves out hidden slides (when asked) and the deck id', () => {
+    const deck = () => parseDoc(
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="deck-id" content="d-123"><title>Deck</title></head><body>' +
+        '<section class="slide" data-slide-id="s1"></section>' +
+        '<section class="slide" data-slide-id="s2" data-hidden="true"></section>' +
+        '<section class="slide" data-slide-id="s3"></section></body></html>');
+    const ids = (html) => Array.from(parseDoc(html).querySelectorAll('section.slide')).map((s) => s.getAttribute('data-slide-id'));
+    const doc = deck();
+    const clean = App.serialize.toHtml(doc, PLAYER, { cleanCopy: true, removeHidden: true });
+    assertEqual(ids(clean), ['s1', 's3']);
+    assertNotIncludes(clean, 'deck-id');
+    assertEqual(ids(App.serialize.toHtml(deck(), PLAYER, { cleanCopy: true, removeHidden: false })), ['s1', 's2', 's3']);
+    assertIncludes(App.serialize.toHtml(deck(), PLAYER), 'name="deck-id"');
+    assertEqual(doc.querySelectorAll('section.slide').length, 3, 'the deck itself keeps every slide');
+});

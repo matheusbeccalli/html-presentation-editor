@@ -198,6 +198,7 @@
         ['openRecent', 'recent', ''],
         ['save', 'save', 'Ctrl+S'],
         ['saveAs', 'saveAs', 'Ctrl+Shift+S'],
+        ['saveCleanCopy', 'saveAs', ''],
         ['exportPdf', 'pdf', 'Ctrl+P'],
         ['revertToOpened', 'undo', ''],
         ['settings', 'settings', ''],

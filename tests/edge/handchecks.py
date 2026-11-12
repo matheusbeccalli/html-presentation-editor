@@ -96,4 +96,6 @@ HAND_CHECKS = [
     {"key": "Pictures ZIP: open samples/contract-deck.html", "tests": ["test_slide_pictures_zip"], "auto": True},
     {"key": "PowerPoint: open samples/contract-deck.html, Export > PowerPoint", "tests": ["test_pptx_export_text", "test_pptx_export_table", "test_pptx_export_charts"], "auto": False,
      "left": "opening the file in PowerPoint and editing there (the tests read the file's XML; PowerPoint 16 was checked by hand through COM)"},
+    {"key": "Clean copy: open samples/contract-deck.html", "tests": ["test_save_clean_copy"], "auto": False,
+     "left": "the real Save window and its suggested name (the test uses the download fallback); moving a box by hand"},
 ]

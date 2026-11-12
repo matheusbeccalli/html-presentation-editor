@@ -521,6 +521,55 @@
         });
     };
 
+    /* 'Projeto Atlas.html' → 'Projeto Atlas (clean copy).html'. */
+    App.fileio.cleanCopyName = function cleanCopyName(fileName) {
+        const name = (fileName || NEW_DECK_NAME).replace(/\.html?$/i, '');
+        return name + ' (clean copy).html';
+    };
+
+    /*
+     * File > Save a Clean Copy (SPEC 7.5): a copy to send, saved beside the deck under
+     * another name. Hidden slides go when "Remove hidden slides" is ticked (ticked by
+     * default, as decided in the Phase 8 Q&A); review comments will go too (Phase 9).
+     * The editor stays on the original: its file, its unsaved changes and its recovery
+     * drafts are left as they were.
+     */
+    App.fileio.saveCleanCopy = async function saveCleanCopy() {
+        if (!App.state.hasDeck) {
+            return;
+        }
+        const el = App.util.el;
+        const hiddenCount = App.deck.getSlides().filter((slide) => App.slides.isHidden(slide)).length;
+        const removeBox = el('input', { type: 'checkbox', id: 'clean-copy-remove-hidden', checked: true });
+        const body = el('div', { class: 'clean-copy-dialog' }, [
+            el('p', {}, ['A copy to send: saved under another name; the deck you are editing stays as it is.']),
+            el('label', {}, [removeBox, ' Remove hidden slides (' + hiddenCount + ')']),
+            el('p', { class: 'clean-copy-note' }, ['Review comments are removed too (they arrive in Phase 9).']),
+        ]);
+        const go = await App.dialogs.show({
+            title: 'Save a Clean Copy', body: body,
+            buttons: [{ label: 'Save…', value: true, primary: true }, { label: 'Cancel', value: false }],
+        });
+        if (!go) {
+            return;
+        }
+        App.text.commitTyping();
+        const html = App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource(),
+            { cleanCopy: true, removeHidden: removeBox.checked });
+        const suggestedName = App.fileio.cleanCopyName(App.state.fileName);
+        if (!window.showSaveFilePicker) {
+            download(suggestedName, html);
+            App.ui.setStatus('Saved a clean copy: ' + suggestedName + ' (your Downloads folder)');
+            return;
+        }
+        const handle = await pickSaveHandle(suggestedName, App.state.fileHandle);
+        if (!handle) {
+            return;
+        }
+        await writing(() => App.fileio.writeToHandle(handle, html));
+        App.ui.setStatus('Saved a clean copy: ' + handle.name);
+    };
+
     function download(fileName, html) {
         App.fileio.downloadBlob(fileName, new Blob([html], { type: 'text/html' }));
     }

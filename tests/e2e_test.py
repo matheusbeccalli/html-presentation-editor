@@ -6046,9 +6046,20 @@ def test_slide_pictures_zip(browser):
     # Each picture looks like its slide presented from the saved file.
     saved = editor.save_as_download("slide-pictures-zip.html")
     screens = saved_deck_screens(browser, saved, 5)
-    for name, picture, screen in zip(names, pictures, screens):
-        compared = page.evaluate(COMPARE_PICTURES, {"a": base64.b64encode(picture).decode(), "b": base64.b64encode(screen).decode()})
+    shots = [base64.b64encode(screen).decode() for screen in screens]
+    white = page.evaluate("""() => { const c = document.createElement('canvas'); c.width = 1280; c.height = 720;
+        const x = c.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, 1280, 720);
+        return c.toDataURL('image/png').split(',')[1]; }""")
+    for k, (name, picture) in enumerate(zip(names, pictures)):
+        data = base64.b64encode(picture).decode()
+        means = [page.evaluate(COMPARE_PICTURES, {"a": data, "b": shot})["mean"] for shot in shots]
+        compared = page.evaluate(COMPARE_PICTURES, {"a": data, "b": shots[k]})
         check(compared["mean"] < 3 and compared["far"] < 0.03, f"{name} matches its slide on screen: {compared}")
+        # Not just "mostly white": nearer its own slide than any other, and far nearer it than a blank white picture.
+        others = [m for j, m in enumerate(means) if j != k]
+        check(means[k] < 0.6 * min(others), f"{name} is nearer its own slide than the others: {means}")
+        blank = page.evaluate(COMPARE_PICTURES, {"a": data, "b": white})["mean"]
+        check(means[k] < 0.5 * blank, f"{name} is far from a blank picture: own {means[k]:.2f}, blank {blank:.2f}")
     check(page.is_hidden("#busy"), "the progress cover is gone")
     check(editor.errors == [], f"no errors: {editor.errors}")
     editor.close()

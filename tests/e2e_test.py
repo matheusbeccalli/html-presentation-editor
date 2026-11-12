@@ -6910,6 +6910,20 @@ def test_shortcut_cheat_sheet(browser):
         check(words in sheet or words in joined, f"{words} is on the sheet")
     titles = page.evaluate("Array.from(document.querySelectorAll('dialog[open] .shortcut-section h3')).map((h) => h.textContent)")
     check("Other" not in titles and "Text" in titles and "Slide show" in titles and "Mouse" in titles, f"sections: {titles}")
+    # Every section is reached by scrolling down with the mouse wheel: nothing runs off to the side.
+    overflow = page.evaluate("""() => { const l = document.querySelector('dialog[open] .shortcut-list');
+        return { wide: l.scrollWidth - l.clientWidth, tall: l.scrollHeight - l.clientHeight }; }""")
+    check(overflow["wide"] <= 1 and overflow["tall"] > 0, f"the list scrolls down, not sideways: {overflow}")
+    last_visible = """() => { const l = document.querySelector('dialog[open] .shortcut-list').getBoundingClientRect();
+        const h = Array.from(document.querySelectorAll('dialog[open] .shortcut-section h3')).pop().getBoundingClientRect();
+        return h.left >= l.left && h.right <= l.right && h.top >= l.top && h.bottom <= l.bottom; }"""
+    check(not page.evaluate(last_visible), "the last section starts out of view")
+    box = page.locator("dialog[open] .shortcut-list").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    for _ in range(40):
+        page.mouse.wheel(0, 400)
+        page.wait_for_timeout(30)
+    check(page.evaluate(last_visible), "the wheel brings the last section (Help) into view")
     page.screenshot(path=str(OUTPUT / "125-shortcut-sheet.png"))
     page.keyboard.type("comment")
     rows = page.evaluate("Array.from(document.querySelectorAll('dialog[open] .shortcut-table tr')).map((tr) => tr.textContent)")

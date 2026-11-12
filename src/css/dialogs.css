@@ -96,12 +96,13 @@
 .clean-copy-note { color: #605e5c; }
 
 /* Keyboard shortcut cheat sheet (help.js) */
-.dialog.dialog-shortcuts { width: min(900px, calc(100vw - 32px)); }
+.dialog.dialog-shortcuts { width: min(640px, calc(100vw - 32px)); }
 .dialog-shortcuts .dialog-body { max-height: none; overflow: visible; }
 .shortcut-sheet { display: flex; flex-direction: column; gap: 10px; }
 #shortcut-filter { box-sizing: border-box; width: 100%; padding: 6px 8px; font: inherit; border: 1px solid var(--border); border-radius: 4px; }
-.shortcut-list { height: 60vh; overflow-y: auto; columns: 2 340px; column-gap: 28px; }
-.shortcut-section { break-inside: avoid; margin-bottom: 12px; }
+/* One column scrolled down, the sections in order (CSS columns with a fixed height ran off to the side). */
+.shortcut-list { height: 60vh; overflow-y: auto; padding-right: 8px; }
+.shortcut-section { margin-bottom: 12px; }
 .shortcut-section h3 { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
 .shortcut-table { border-collapse: collapse; width: 100%; font-size: 13px; }
 .shortcut-table td { padding: 3px 4px; vertical-align: top; border-bottom: 1px solid var(--border); }

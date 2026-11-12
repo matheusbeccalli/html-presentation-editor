@@ -114,12 +114,24 @@ test('shortcuts: ignored while a dialog is open (keys belong to the dialog)', ()
     const ran = [];
     registry.register('Escape', 'deselect');
     const dialog = document.createElement('dialog');
+    dialog.setAttribute('open', '');
     const button = document.createElement('button');
     dialog.appendChild(button);
     const event = fakeKey('Escape', {}, button);
     registry.handle(event, (c) => ran.push(c), () => true);
     assertEqual(ran, []);
     assert(!event.wasPrevented(), 'default not prevented');
+});
+
+test('shortcuts: a dialog just closed (still on the page for a moment, its button focused) no longer takes the keys', () => {
+    const registry = App.shortcuts.createRegistry();
+    const ran = [];
+    registry.register('Ctrl+P', 'exportPdf', { whileTyping: true });
+    const dialog = document.createElement('dialog');
+    const button = document.createElement('button');
+    dialog.appendChild(button);
+    registry.handle(fakeKey('p', { ctrl: true }, button), (c) => ran.push(c), () => true);
+    assertEqual(ran, ['exportPdf']);
 });
 
 test('shortcuts: ignored during IME composition', () => {

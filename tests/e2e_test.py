@@ -6053,6 +6053,236 @@ def test_slide_pictures_zip(browser):
     editor.close()
 
 
+def export_pptx(editor, file_name):
+    """Export > PowerPoint; returns (path of the saved .pptx, the report dialog's text) and closes the report."""
+    page = editor.page
+    page.click("[role='tab']:has-text('Export')")
+    with page.expect_download(timeout=120000) as download_info:
+        page.click("button[data-command='exportPptx']")
+    download = download_info.value
+    check(download.suggested_filename.endswith(".pptx"), download.suggested_filename)
+    target = OUTPUT / file_name
+    download.save_as(target)
+    wait_until(page, "!!document.querySelector('dialog[open] .pptx-report')")
+    text = editor.report_dialog_text()
+    editor.click_dialog_button("OK")
+    return target, text
+
+
+def pptx_parts(path):
+    """The .pptx (a zip) as {part name: text} for its XML parts."""
+    import zipfile
+    with zipfile.ZipFile(path) as archive:
+        return {name: archive.read(name).decode("utf-8") for name in archive.namelist() if name.endswith((".xml", ".rels"))}
+
+
+def pptx_texts(xml):
+    """The text of every <a:t> run, joined per paragraph (<a:p>)."""
+    import html as html_module
+    paragraphs = re.findall(r"<a:p>(.*?)</a:p>", xml, flags=re.S)
+    return [html_module.unescape("".join(re.findall(r"<a:t>(.*?)</a:t>", p, flags=re.S))) for p in paragraphs]
+
+
+EMU = 9525   # one slide px in PowerPoint's units (914 400 per inch / 96)
+
+
+def test_pptx_export_text(browser):
+    """Phase 8 (SPEC 7.4) step 6: Export > PowerPoint downloads deck.pptx, 13.333 x 7.5 in; every text box is a native
+    text box in place, with every line of its text, bold runs, bullets and numbering; speaker notes; the hidden slide
+    hidden; what is not native yet comes as a picture and the report lists it."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    path, report = export_pptx(editor, "contract-deck.pptx")
+    check(path.name == "contract-deck.pptx" and path.stat().st_size > 10000, f"the file: {path}")
+    parts = pptx_parts(path)
+    size = re.search(r'<p:sldSz cx="(\d+)" cy="(\d+)"', parts["ppt/presentation.xml"])
+    check(size and size.groups() == ("12192000", "6858000"), f"13.333 x 7.5 in: {size and size.groups()}")
+    slides = sorted(name for name in parts if re.fullmatch(r"ppt/slides/slide\d+\.xml", name))
+    check(len(slides) == 6, f"6 slides: {slides}")
+    hidden = [n for n in range(1, 7) if re.search(r'<p:sld [^>]*show="0"', parts[f"ppt/slides/slide{n}.xml"])]
+    check(hidden == [5], f"only slide 5 is hidden: {hidden}")
+
+    # Every text box: a native text box (txBox) at its place, every line of its text in order.
+    boxes = page.evaluate("""() => App.deck.getSlides().map((slide) =>
+        Array.from(slide.querySelectorAll(':scope > .el[data-type="text"]')).map((el) => ({
+            left: parseFloat(el.style.left), top: parseFloat(el.style.top),
+            lines: App.text.getModel(el).map((line) => ({ text: line.text.replace(/\\n/g, ''), list: line.list })),
+        })))""")
+    for number, slide_boxes in enumerate(boxes, start=1):
+        xml = parts[f"ppt/slides/slide{number}.xml"]
+        shapes = re.findall(r"<p:sp>(.*?)</p:sp>", xml, flags=re.S)
+        native = [shape for shape in shapes if 'txBox="1"' in shape]
+        check(len(native) == len(slide_boxes), f"slide {number}: {len(slide_boxes)} text boxes, {len(native)} native")
+        for box, shape in zip(slide_boxes, native):
+            offset = re.search(r'<a:off x="(\d+)" y="(\d+)"/>', shape)
+            check(abs(int(offset.group(1)) - box["left"] * EMU) < EMU and abs(int(offset.group(2)) - box["top"] * EMU) < EMU,
+                  f"slide {number}: the box at its place {offset.groups()} / {box['left']},{box['top']}")
+            texts = [t.replace(" ", " ") for t in pptx_texts(shape)]
+            wanted = [line["text"].replace(" ", " ") for line in box["lines"]]
+            check([t.strip() for t in texts] == [w.strip() for w in wanted], f"slide {number}: every line {texts} / {wanted}")
+            paragraphs = re.findall(r"<a:p>(.*?)</a:p>", shape, flags=re.S)
+            for line, paragraph in zip(box["lines"], paragraphs):
+                marker = {"bullet": "<a:buChar", "number": "<a:buAutoNum", "none": "<a:buNone"}[line["list"]]
+                check(marker in paragraph, f"slide {number}: {line['list']} line {line['text'][:30]!r} has {marker}")
+    slide2 = parts["ppt/slides/slide2.xml"]
+    check(re.search(r'<a:rPr [^>]*b="1"[^>]*>.*?<a:t>Sumário executivo</a:t>', slide2, flags=re.S), "the bold title, bold")
+    check('<a:latin typeface="' in slide2, "fonts named")
+
+    # Notes, pictures for the rest, and the report.
+    notes = page.evaluate("App.notes.textOf(App.deck.getSlides()[0])")
+    notes_xml = next(text for name, text in parts.items() if name.startswith("ppt/notesSlides/notesSlide") and notes[:20] in text)
+    check(notes[:20] in notes_xml, "slide 1's speaker notes")
+    check("Slide 4: a chart came across as a picture" in report, f"what is not native comes as a picture, listed: {report}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+def test_pptx_export_pictures_shapes_master(browser):
+    """Phase 8 (SPEC 7.4) step 7: pictures as native pictures (the same file), every shape kind as PowerPoint's own
+    shape with its fill, outline, arrowhead, flip, turn and text; a group as its separate parts; the slide master as a
+    real PowerPoint master (logo, footer, label, the slide-number field), not on the title slide."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("""() => {
+        const doc = App.deck.getDocument();
+        const slide = App.deck.getSlides()[5];
+        const make = (kind, left, top, width, height, id, flip) => {
+            const el = App.shapes.createShape(doc, kind, { left: left, top: top, width: width, height: height }, id, flip);
+            el.style.zIndex = '50';
+            slide.appendChild(el);
+            return el;
+        };
+        const chevron = make('chevron', 100, 420, 200, 80, 'x1');
+        App.text.writeLines(App.shapes.textOf(chevron), ['Etapa 1'], { bold: true });
+        make('roundRect', 320, 420, 160, 80, 'x2');
+        make('ellipse', 500, 420, 120, 80, 'x3');
+        make('pentagon', 640, 420, 160, 80, 'x4');
+        make('callout', 820, 420, 160, 80, 'x5');
+        make('line', 100, 560, 300, 0, 'x6');
+        make('arrow', 420, 530, 200, 60, 'x7', 'y');
+        App.groups.makeGroup(slide, [make('rect', 700, 540, 80, 60, 'x8'), make('ellipse', 800, 540, 80, 60, 'x9')], 'g1');
+        make('rect', 1000, 540, 100, 60, 'x10').style.transform = 'rotate(30deg)';
+        const canvas = document.createElement('canvas');
+        canvas.width = 120; canvas.height = 40;
+        canvas.getContext('2d').fillStyle = '#cc092f';
+        canvas.getContext('2d').fillRect(0, 0, 120, 40);
+        App.master.write(doc, { logo: { src: canvas.toDataURL('image/png'), corner: 'top-right', width: 120, height: 40 },
+            footer: 'Projeto Atlas', label: 'Confidencial', numbers: 'n', skipTitle: true });
+        App.master.sync(doc);
+    }""")
+    logo_src = page.evaluate("App.deck.getSlides()[0].querySelector('img.el[data-type=\"image\"]').getAttribute('src')")
+    path, report = export_pptx(editor, "contract-deck-shapes.pptx")
+    parts = pptx_parts(path)
+
+    # The picture: native, the very same file.
+    import zipfile
+    slide1_rels = parts["ppt/slides/_rels/slide1.xml.rels"]
+    media = re.findall(r'Target="\.\./media/([^"]+)"', slide1_rels)
+    with zipfile.ZipFile(path) as archive:
+        stored = [archive.read("ppt/media/" + name) for name in media]
+    check(base64.b64decode(logo_src.split(",", 1)[1]) in stored, f"slide 1's picture is the deck's own picture file: {media}")
+
+    # The shapes on slide 6.
+    xml = parts["ppt/slides/slide6.xml"]
+    shapes = re.findall(r"<p:sp>(.*?)</p:sp>", xml, flags=re.S)
+    kinds = [re.search(r'prst="([^"]+)"', shape).group(1) for shape in shapes if 'txBox="1"' not in shape]
+    for kind in ["chevron", "roundRect", "ellipse", "homePlate", "wedgeRectCallout", "line", "rect"]:
+        check(kind in kinds, f"a native {kind}: {kinds}")
+    check(kinds.count("line") == 2, f"the line and the arrow: {kinds}")
+    at = lambda shape: tuple(int(v) for v in re.search(r'<a:off x="(\d+)" y="(\d+)"/>', shape).groups())  # noqa: E731
+    placed = {at(shape): re.search(r'prst="([^"]+)"', shape).group(1) for shape in shapes}
+    check(placed.get((700 * EMU, 540 * EMU)) == "rect" and placed.get((800 * EMU, 540 * EMU)) == "ellipse",
+          f"the group's rectangle and ellipse as separate shapes where they show: {placed}")
+    chevron = next(shape for shape in shapes if 'prst="chevron"' in shape)
+    check(re.search(r'b="1"[^>]*>.*?<a:t>Etapa 1</a:t>', chevron, flags=re.S) and 'anchor="ctr"' in chevron,
+          "the chevron holds its bold text, centred")
+    check("<a:solidFill>" in chevron, "filled")
+    arrow = next(shape for shape in shapes if 'prst="line"' in shape and "tailEnd" in shape)
+    check('type="triangle"' in arrow and 'flipV="1"' in arrow, "the arrow: its head, flipped as on the slide")
+    check(re.search(r'<a:xfrm rot="1800000"', xml), "the turned rectangle turned 30°")
+    check("Slide 6: a group came across as its separate parts" in report, report)
+    check("Slide 6: a callout's tail points where PowerPoint puts it" in report, "the callout's tail is mentioned")
+
+    # The slide master: a PowerPoint master with the logo, footer, label and the slide-number field.
+    layout_of = lambda n: re.search(r'Target="\.\./slideLayouts/(slideLayout\d+)\.xml"', parts[f"ppt/slides/_rels/slide{n}.xml.rels"]).group(1)  # noqa: E731
+    deck_layout = parts[f"ppt/slideLayouts/{layout_of(2)}.xml"]
+    for wanted in ["Projeto Atlas", "Confidencial", "<p:pic>", 'type="slidenum"']:
+        check(wanted in deck_layout, f"the master holds {wanted}")
+    check(all(layout_of(n) == layout_of(2) for n in range(2, 7)), "every slide but the title uses it")
+    check(layout_of(1) != layout_of(2), "the title slide does not (Don't show on the title slide)")
+    check("Projeto Atlas" not in parts["ppt/slides/slide2.xml"], "the footer is on the master, not typed on each slide")
+    check(len(report.splitlines()) > 3, f"one line per thing to check: {report!r}")
+    early = [line for line in report.splitlines() if re.match(r"• Slide [12]:", line) and "picture" in line]
+    check(early == [], f"slides 1-2: nothing as a picture: {early}")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+def test_pptx_export_table(browser):
+    """Phase 8 (SPEC 7.4) step 8: a table becomes PowerPoint's own table: its rows and columns at the widths and
+    heights the slide shows, every cell's text, fills, borders, alignment and bold, merged cells merged."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    # A second table with a merged cell (two cells of its first row joined), on slide 6.
+    page.evaluate("""() => {
+        const doc = App.deck.getDocument();
+        const slide = App.deck.getSlides()[5];
+        const element = App.tables.createTable(doc, 3, 3, { left: 100, top: 420, width: 600, height: 120 }, 't9');
+        element.style.zIndex = '40';
+        slide.appendChild(element);
+        const table = element.querySelector('table');
+        const cells = table.querySelectorAll('td');
+        App.text.writeLines(cells[0], ['Juntas']);
+        App.tables.mergeCells(table, { top: 0, left: 0, bottom: 0, right: 1 });
+        App.tables.fitTable(element);
+    }""")
+    shown = page.evaluate("""() => {
+        const element = App.deck.getSlides()[2].querySelector('.el[data-type="table"]');
+        const rows = Array.from(element.querySelectorAll('tr'));
+        return App.deck.withSlideShown(App.deck.getSlides()[2], () => ({
+            left: parseFloat(element.style.left), top: parseFloat(element.style.top), width: parseFloat(element.style.width),
+            cols: Array.from(element.querySelectorAll('col')).map((col) => parseFloat(getComputedStyle(col).width)),
+            heights: rows.map((row) => row.offsetHeight),
+            texts: rows.map((row) => Array.from(row.children).map((cell) => App.text.lineTexts(cell).join(' / '))),
+            headerFill: getComputedStyle(rows[0].children[0]).backgroundColor,
+            aligns: rows.map((row) => Array.from(row.children).map((cell) => App.text.exportParagraphs(cell)[0].align)),
+        }));
+    }""")
+    path, report = export_pptx(editor, "contract-deck-table.pptx")
+    parts = pptx_parts(path)
+    xml = parts["ppt/slides/slide3.xml"]
+    check("<a:tbl>" in xml and "<p:pic>" not in xml.split("<a:tbl>")[0][-400:], "slide 3's table is a native table")
+    table = re.search(r"<a:tbl>(.*?)</a:tbl>", xml, flags=re.S).group(1)
+    grid = [int(w) for w in re.findall(r'<a:gridCol w="(\d+)"', table)]
+    check(len(grid) == len(shown["cols"]) and all(abs(g - c * EMU) < EMU for g, c in zip(grid, shown["cols"])),
+          f"the column widths: {grid} / {shown['cols']}")
+    heights = [int(h) for h in re.findall(r'<a:tr h="(\d+)"', table)]
+    check(len(heights) == len(shown["heights"]) and all(abs(h - r * EMU) < EMU for h, r in zip(heights, shown["heights"])),
+          f"the row heights: {heights} / {shown['heights']}")
+    rows = re.findall(r"<a:tr [^>]*>(.*?)</a:tr>", table, flags=re.S)
+    texts = [[" / ".join(t for t in pptx_texts(cell)) for cell in re.findall(r"<a:tc>(.*?)</a:tc>", row, flags=re.S)] for row in rows]
+    check(texts == shown["texts"], f"every cell's text:\n{texts}\n{shown['texts']}")
+    fill = re.search(r"rgb\((\d+), (\d+), (\d+)\)", shown["headerFill"]).groups()
+    header_hex = "".join(f"{int(v):02X}" for v in fill)
+    first_cell = re.search(r"<a:tc>(.*?)</a:tc>", rows[0], flags=re.S).group(1)
+    check(f'<a:srgbClr val="{header_hex}"/>' in first_cell.split("<a:tcPr")[1], f"the header fill {header_hex}")
+    aligned = [[re.search(r'algn="(\w+)"', cell).group(1) for cell in re.findall(r"<a:tc>(.*?)</a:tc>", row, flags=re.S)] for row in rows]
+    wanted = [[{"left": "l", "right": "r", "center": "ctr", "justify": "just"}[a] for a in row] for row in shown["aligns"]]
+    check(aligned == wanted, f"alignment per cell: {aligned}")
+    check(re.search(r'b="1"[^>]*>.*?<a:t>Mediana</a:t>', rows[-1], flags=re.S), "Mediana stays bold")
+    check(re.search(r"<a:lnT [^>]*>", rows[-1]) and "<a:lnT" in rows[-1], "the line above Mediana")
+    # The merged cell on slide 6.
+    merged = re.search(r"<a:tbl>(.*?)</a:tbl>", parts["ppt/slides/slide6.xml"], flags=re.S).group(1)
+    check('gridSpan="2"' in merged and 'hMerge="1"' in merged, "the merged cell spans two columns")
+    check("Juntas" in merged, "with its text")
+    check("a table came across as a picture" not in report, report)
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -6138,6 +6368,9 @@ TESTS = [
     test_pdf_export,
     test_slide_pictures,
     test_slide_pictures_zip,
+    test_pptx_export_text,
+    test_pptx_export_pictures_shapes_master,
+    test_pptx_export_table,
 ]
 
 

@@ -183,6 +183,7 @@
             id: 'export', label: 'Export',
             groups: [
                 { label: 'PDF', commands: [['exportPdf', 'pdf']] },
+                { label: 'PowerPoint', commands: [['exportPptx', 'powerpoint']] },
                 { label: 'Picture', commands: [['exportPng', 'picture'], ['exportPngAll', 'pictures'], ['copySlideImage', 'copy']] },
             ],
             note: 'PDF: choose the slides, then in the print window set Destination to "Save as PDF". ' +

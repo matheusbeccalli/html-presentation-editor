@@ -951,6 +951,104 @@
         });
     };
 
+    /*
+     * The text of a container as it shows, for the PowerPoint export (Phase 8, pptx.js),
+     * so no other module reads the text model itself:
+     *   [{ list: 'bullet' | 'number' | 'none', level: 1-5, number (the number shown, or null),
+     *      marker (the bullet character shown, or ''), align, lineHeight (px, or null for normal),
+     *      fontSize (px), spaceBefore / spaceAfter (px), indent (px from the box's left to the text),
+     *      runs: [{ text, breakBefore, look }] }]
+     * look = { fontFamily, fontSize (px), color, bold, italic, underline, strike, superscript,
+     *          subscript, highlight (a colour or null), letterSpacing (px) } from the browser's
+     * computed styles, so the container must be in the page and shown (deck.withSlideShown).
+     * Spaces are collapsed as the browser shows them; a <br> starts the next run on a new line.
+     */
+    App.text.exportParagraphs = function exportParagraphs(container) {
+        const view = container.ownerDocument.defaultView;
+        const numbers = shownNumbers(textLines(container));
+        return textLines(container).map((p, index) => {
+            const style = view.getComputedStyle(p);
+            const marker = view.getComputedStyle(p, '::before').content;
+            const list = listOf(p);
+            const runs = [];
+            let breakNext = false;
+            inlineItems(p).forEach((item) => {
+                if (item.nodeType !== Node.TEXT_NODE) {
+                    breakNext = true;
+                    return;
+                }
+                // As the browser shows it: runs of ordinary spaces and line breaks are one space
+                // (a non-breaking space stays: it was typed on purpose).
+                const text = item.textContent.replace(/[ \t\n\r\f]+/g, ' ');
+                if (!text) {
+                    return;
+                }
+                runs.push({ text: text, breakBefore: breakNext, look: exportLook(item.parentElement, container, view) });
+                breakNext = false;
+            });
+            if (runs.length > 0) {
+                const first = runs[0];
+                first.text = first.breakBefore ? first.text : first.text.replace(/^ /, '');
+                const last = runs[runs.length - 1];
+                last.text = last.text.replace(/ $/, '');
+            }
+            const lineHeight = parseFloat(style.lineHeight);
+            return {
+                list: list,
+                level: levelOf(p),
+                number: numbers[index],
+                marker: list === 'bullet' && /^["'].*["']$/.test(marker) ? marker.slice(1, -1) : '',
+                align: style.textAlign === 'start' ? 'left' : style.textAlign === 'end' ? 'right' : style.textAlign,
+                lineHeight: isFinite(lineHeight) ? lineHeight : null,
+                fontSize: parseFloat(style.fontSize),
+                spaceBefore: parseFloat(style.marginTop) || 0,
+                spaceAfter: parseFloat(style.marginBottom) || 0,
+                indent: parseFloat(style.paddingLeft) || 0,
+                runs: runs,
+                emptyLook: runs.length === 0 ? exportLook(p, container, view) : null,
+            };
+        });
+    };
+
+    // The look of the text inside `element` (up to the container: underline and strike are drawn
+    // by an ancestor, vertical-align too, so they are looked for on the way up).
+    function exportLook(element, container, view) {
+        const style = view.getComputedStyle(element);
+        let underline = false;
+        let strike = false;
+        let shift = 'baseline';
+        let highlight = null;
+        for (let node = element; node; node = node.parentElement) {
+            const own = view.getComputedStyle(node);
+            underline = underline || own.textDecorationLine.indexOf('underline') !== -1;
+            strike = strike || own.textDecorationLine.indexOf('line-through') !== -1;
+            if (shift === 'baseline' && (own.verticalAlign === 'super' || own.verticalAlign === 'sub')) {
+                shift = own.verticalAlign;
+            }
+            const background = own.backgroundColor;
+            if (!highlight && node !== container && background && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(background)) {
+                highlight = background;
+            }
+            if (node === container) {
+                break;
+            }
+        }
+        return {
+            fontFamily: style.fontFamily,
+            fontSize: parseFloat(style.fontSize),
+            color: style.color,
+            bold: (parseInt(style.fontWeight, 10) || 400) >= 600,
+            italic: style.fontStyle === 'italic' || style.fontStyle === 'oblique',
+            underline: underline,
+            strike: strike,
+            superscript: shift === 'super',
+            subscript: shift === 'sub',
+            highlight: highlight,
+            letterSpacing: parseFloat(style.letterSpacing) || 0,
+            uppercase: style.textTransform === 'uppercase',
+        };
+    }
+
     // ---------------------------------------------------------------
     // Converting rendered text into the model (import, format-1 decks)
     // ---------------------------------------------------------------

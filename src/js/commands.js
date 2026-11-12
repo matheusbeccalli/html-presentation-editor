@@ -150,6 +150,7 @@
         App.commands.define('exportPdf', { label: 'PDF', run: () => App.pdf.open(), isEnabled: hasDeck });
         // Pictures of slides (snapshot.js): the browser draws the slide itself, at 2×.
         App.commands.define('exportPng', { label: 'PNG of This Slide', run: () => App.snapshot.exportCurrent(), isEnabled: hasDeck });
+        App.commands.define('exportPptx', { label: 'PowerPoint', run: () => App.pptx.export(), isEnabled: hasDeck });
         App.commands.define('exportPngAll', {
             label: 'PNG of All Slides (ZIP)', run: () => App.snapshot.exportAll(), isEnabled: hasDeck,
         });

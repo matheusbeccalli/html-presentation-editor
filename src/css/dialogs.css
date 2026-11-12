@@ -86,3 +86,6 @@
 .pdf-choice input[type="text"] { width: 140px; margin-left: 4px; }
 .pdf-error { margin: 4px 0 0; color: #a4262c; }
 .pdf-hint { margin: 6px 0 0; padding: 6px 8px; background: #fff4ce; border-radius: 3px; }
+
+/* Export > PowerPoint's report (pptx.js): one line per thing to check. */
+.pptx-report { white-space: pre-line; max-height: 50vh; overflow: auto; max-width: 640px; }

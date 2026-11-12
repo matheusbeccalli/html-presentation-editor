@@ -156,8 +156,9 @@
                 event.target.closest('button, a[href], summary, [role="menuitem"], [role="tab"]')) {
                 return false;
             }
-            // An open dialog owns the keyboard (Escape closes it, Enter presses its button).
-            if (event.target && event.target.closest && event.target.closest('dialog')) {
+            // An open dialog owns the keyboard (Escape closes it, Enter presses its button). A dialog
+            // just closed stays on the page for a moment, its button focused: it no longer does.
+            if (event.target && event.target.closest && event.target.closest('dialog[open]')) {
                 return false;
             }
             if (isEnabled && !isEnabled(entry.command)) {

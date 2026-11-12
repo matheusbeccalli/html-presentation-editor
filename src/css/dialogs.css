@@ -113,3 +113,13 @@
 }
 .shortcut-words { white-space: normal; font-weight: 600; font-size: 12px; }
 .shortcut-or { color: var(--text-muted); font-size: 12px; }
+
+/* About / Licenses (help.js) */
+.about { display: flex; flex-direction: column; gap: 8px; }
+.about-heading { margin: 8px 0 0; font-size: 13px; font-weight: 600; }
+.about-library { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.about-library h3 { margin: 0 0 4px; font-size: 14px; }
+.about-library p { margin: 2px 0; font-size: 12px; }
+.about-url, .about-library code { overflow-wrap: anywhere; font-family: Consolas, monospace; font-size: 11px; }
+.about-license summary { cursor: pointer; font-size: 12px; margin-top: 4px; }
+.about-license pre { max-height: 220px; overflow: auto; font-size: 11px; white-space: pre-wrap; background: var(--surface-alt); padding: 8px; }

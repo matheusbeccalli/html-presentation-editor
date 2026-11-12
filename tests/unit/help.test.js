@@ -60,3 +60,20 @@ test('help: keys are written as on the keyboard (arrows, Esc)', () => {
     assertEqual(App.help.keyText('Ctrl+Shift+>'), 'Ctrl+Shift+>');
     assertEqual(App.help.keyText('Ctrl+]'), 'Ctrl+]');
 });
+
+test('help: the About data is read from the page; a page without it (tests) gives an empty list', () => {
+    const doc = parseDoc('<html><body><script type="application/json" id="about-data">' +
+        '{"built":"2026-11-11","libraries":[{"name":"PptxGenJS","version":"4.0.1","license":"MIT","url":"x","sha256":"ab",' +
+        '"licenseText":"Permission <\\/b>","bundled":[{"name":"JSZip","version":"3.10.1","license":"MIT"}]}]}</script></body></html>');
+    const data = App.help.aboutData(doc);
+    assertEqual(data.built, '2026-11-11');
+    assertEqual(data.libraries[0].licenseText, 'Permission </b>');
+    assertEqual(App.help.libraryLine(data.libraries[0]), 'PptxGenJS 4.0.1 · MIT');
+    assertEqual(App.help.bundledLine(data.libraries[0]), 'Includes: JSZip 3.10.1 (MIT)');
+    assertEqual(App.help.aboutData(parseDoc('<html><body></body></html>')), { built: '', libraries: [] });
+});
+
+test('help: a bundled library without a version of its own is named without one', () => {
+    assertEqual(App.help.bundledLine({ bundled: [{ name: 'JSZip', version: '3.10.1', license: 'MIT' },
+        { name: 'pako', version: 'as in JSZip 3.10.1', license: 'MIT and zlib' }] }), 'Includes: JSZip 3.10.1 (MIT), pako (MIT and zlib)');
+});

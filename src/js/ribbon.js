@@ -203,7 +203,7 @@
         },
         {
             id: 'help', label: 'Help',
-            groups: [{ label: 'Help', commands: [['shortcuts', 'keyboard']] }],
+            groups: [{ label: 'Help', commands: [['shortcuts', 'keyboard'], ['about', 'about']] }],
             note: 'Press ? anywhere (not while typing) to see every keyboard shortcut. Nothing in this editor goes on the internet: ' +
                 'the browser blocks all network access for this page.',
         },
@@ -219,6 +219,7 @@
         ['exportPdf', 'pdf', 'Ctrl+P'],
         ['revertToOpened', 'undo', ''],
         ['settings', 'settings', ''],
+        ['about', 'about', ''],
     ];
 
     let panel = null;

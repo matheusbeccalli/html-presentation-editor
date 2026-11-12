@@ -1,6 +1,6 @@
 /*
- * help.js - the Help tab: the keyboard shortcut cheat sheet (press ?) and,
- * in step 6, the About / Licenses window (SPEC Phase 9, 2.2).
+ * help.js - the Help tab: the keyboard shortcut cheat sheet (press ?) and the
+ * About / Licenses window (SPEC Phase 9, 2.2).
  *
  * The cheat sheet is built from the shortcut table itself (shortcuts.js), so a
  * shortcut added there shows up here without anyone remembering to; every
@@ -10,6 +10,12 @@
  *
  * ? opens the sheet (also typed with AltGr, which Windows reports as Ctrl+Alt,
  * as on Brazilian keyboards); typing a ? into a text box types it.
+ *
+ * About lists every library copied into the editor (vendor/README.md), with
+ * its version, license, source, SHA-256, full license text and the libraries
+ * bundled inside it. build.py writes that list into the page as JSON
+ * (<script type="application/json" id="about-data">), so it always matches
+ * what was really built in.
  *
  * Talks to: shortcuts.js (the table), commands.js (labels), dialogs.js.
  */
@@ -191,5 +197,57 @@
         });
         filter.focus();
         return shown;
+    };
+
+    // ---------------------------------------------------------------
+    // About / Licenses
+    // ---------------------------------------------------------------
+
+    /* The About data build.py put in the page: { built, libraries: [...] } (empty when absent, e.g. in tests). */
+    App.help.aboutData = function aboutData(doc) {
+        const node = (doc || document).getElementById('about-data');
+        try {
+            return node ? JSON.parse(node.textContent) : { built: '', libraries: [] };
+        } catch (error) {
+            return { built: '', libraries: [] };
+        }
+    };
+
+    App.help.libraryLine = function libraryLine(lib) {
+        return lib.name + ' ' + lib.version + ' · ' + lib.license;
+    };
+
+    App.help.bundledLine = function bundledLine(lib) {
+        return (lib.bundled || []).length
+            // A version vendor/README.md gives as "as in JSZip 3.10.1" (not stated in the bundle) is left out here.
+            ? 'Includes: ' + lib.bundled.map((inner) => inner.name + (/^\d/.test(inner.version) ? ' ' + inner.version : '') +
+                ' (' + inner.license + ')').join(', ')
+            : '';
+    };
+
+    /* Help > About: what this editor is, that it works offline, and every library in it with its license. */
+    App.help.openAbout = function openAbout() {
+        const data = App.help.aboutData();
+        const libraries = data.libraries.map((lib) => el('section', { class: 'about-library' }, [
+            el('h3', {}, [App.help.libraryLine(lib)]),
+            App.help.bundledLine(lib) ? el('p', { class: 'about-bundled' }, [App.help.bundledLine(lib)]) : '',
+            el('p', { class: 'about-source' }, ['Source: ', el('span', { class: 'about-url' }, [lib.url])]),
+            el('p', { class: 'about-source' }, ['SHA-256: ', el('code', {}, [lib.sha256])]),
+            el('details', { class: 'about-license' }, [
+                el('summary', {}, ['License text']),
+                el('pre', {}, [lib.licenseText]),
+            ]),
+        ]));
+        const body = el('div', { class: 'about' }, [
+            el('p', {}, ['Deck Editor: edit HTML presentations on this computer.' + (data.built ? ' Built ' + data.built + '.' : '')]),
+            el('p', { class: 'panel-hint' }, ['One file with everything inside it. The browser blocks all network access for this page ' +
+                '(Content-Security-Policy), so nothing you open or type leaves the computer.']),
+            el('h2', { class: 'about-heading' }, ['Open-source code inside']),
+            libraries.length ? el('div', {}, libraries) : el('p', {}, ['None.']),
+            el('p', { class: 'panel-hint' }, ['Each library is copied into the editor with its license (MIT and similar permissive licenses only); ' +
+                'the list and the files\' SHA-256 are in vendor/README.md.']),
+        ]);
+        return App.dialogs.show({ title: 'About Deck Editor', body: body, wide: true,
+            buttons: [{ label: 'Close', value: true, primary: true }] });
     };
 })();

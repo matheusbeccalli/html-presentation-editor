@@ -905,6 +905,16 @@ iframe.pdf-print-frame {
 .shortcut-words { white-space: normal; font-weight: 600; font-size: 12px; }
 .shortcut-or { color: var(--text-muted); font-size: 12px; }
 
+/* About / Licenses (help.js) */
+.about { display: flex; flex-direction: column; gap: 8px; }
+.about-heading { margin: 8px 0 0; font-size: 13px; font-weight: 600; }
+.about-library { border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
+.about-library h3 { margin: 0 0 4px; font-size: 14px; }
+.about-library p { margin: 2px 0; font-size: 12px; }
+.about-url, .about-library code { overflow-wrap: anywhere; font-family: Consolas, monospace; font-size: 11px; }
+.about-license summary { cursor: pointer; font-size: 12px; margin-top: 4px; }
+.about-license pre { max-height: 220px; overflow: auto; font-size: 11px; white-space: pre-wrap; background: var(--surface-alt); padding: 8px; }
+
 </style>
 </head>
 <body>
@@ -1199,6 +1209,48 @@ aside.notes, aside.comments { display: none !important; }
     .deck-player-counter { display: none !important; }
 }
 
+</script>
+<script type="application/json" id="about-data">
+{
+ "built": "2026-11-11",
+ "libraries": [
+  {
+   "name": "PptxGenJS",
+   "version": "4.0.1",
+   "license": "MIT",
+   "url": "https://registry.npmjs.org/pptxgenjs/-/pptxgenjs-4.0.1.tgz (file `package/dist/pptxgen.bundle.js`; npm shasum cd0f202f62f74d950bcd217e90b766da8f73742e checked)",
+   "sha256": "4fb9eac5cfefb213e2d8743c2b7151025f31bfb3f834c73c12062916daa0f3f8",
+   "licenseText": "The MIT License (MIT)\n\nCopyright (c) 2015-2022 Brent Ely\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n\n-------------------------------------------------------------------------------\nAlso inside pptxgen.bundle.js (PptxGenJS's browser bundle includes them):\n\nJSZip 3.10.1 - https://github.com/Stuk/jszip - dual licensed \"MIT or GPLv3\";\nused here under the MIT license:\n\n  Copyright (c) 2009-2016 Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso\n\n  Permission is hereby granted, free of charge, to any person obtaining a copy\n  of this software and associated documentation files (the \"Software\"), to deal\n  in the Software without restriction, including without limitation the rights\n  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n  copies of the Software, and to permit persons to whom the Software is\n  furnished to do so, subject to the following conditions:\n\n  The above copyright notice and this permission notice shall be included in\n  all copies or substantial portions of the Software.\n\n  THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\n  THE SOFTWARE.\n\nJSZip's own dependencies, bundled with it (all permissive):\n  pako (zlib port) - MIT and zlib licenses - (C) 2014-2017 Vitaly Puzrin and Andrey Tupitsin\n  lie (promises) - MIT - Copyright (c) 2014-2018 Calvin Metcalf, Jordan Harband and contributors\n  setImmediate - MIT - Copyright (c) 2012 Barnesandnoble.com, llc, Donavon West, and Domenic Denicola\n  readable-stream - MIT - Copyright Node.js contributors, Joyent, Inc. and other Node contributors\n",
+   "bundled": [
+    {
+     "name": "JSZip",
+     "version": "3.10.1",
+     "license": "MIT (dual \"MIT or GPLv3\", used under MIT)"
+    },
+    {
+     "name": "pako",
+     "version": "as in JSZip 3.10.1",
+     "license": "MIT and zlib"
+    },
+    {
+     "name": "lie",
+     "version": "as in JSZip 3.10.1",
+     "license": "MIT"
+    },
+    {
+     "name": "setImmediate",
+     "version": "as in JSZip 3.10.1",
+     "license": "MIT"
+    },
+    {
+     "name": "readable-stream",
+     "version": "as in JSZip 3.10.1",
+     "license": "MIT"
+    }
+   ]
+  }
+ ]
+}
 </script>
 
 <script>
@@ -11565,6 +11617,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         recent: '<circle cx="10" cy="10" r="7.5"/><path d="M10 5.5V10l3 2"/>',
         settings: '<circle cx="10" cy="10" r="2.5"/><path d="M10 2.5v2.5M10 15v2.5M2.5 10H5M15 10h2.5M4.7 4.7l1.8 1.8M13.5 13.5l1.8 1.8M4.7 15.3l1.8-1.8M13.5 6.5l1.8-1.8"/>',
         commentMarker: '<path d="M4 3.5h12v9.5H9l-4 3.5V13H4z" fill="currentColor" fill-opacity="0.25"/>',
+        about: '<circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.2v.1"/>',
         keyboard: '<rect x="1.5" y="5" width="17" height="10" rx="1.5"/><path d="M4.5 8h1M7.5 8h1M10.5 8h1M13.5 8h2M4.5 11h1M14.5 11h1M7.5 12h5"/>',
         newComment: '<path d="M3 3.5h12v9H8l-3.5 3v-3H3z"/><path d="M9 5.5v5M6.5 8h5"/>',
         comments: '<path d="M2.5 3.5h11v8H7l-3 2.5v-2.5H2.5z"/><path d="M15.5 7.5h2v8h-1.5v2l-2.5-2h-5v-1.5"/>',
@@ -18495,6 +18548,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             isChecked: () => App.commentsPane.isOpen(),
         });
         App.commands.define('shortcuts', { label: 'Keyboard Shortcuts', run: () => App.help.openShortcuts() });
+        App.commands.define('about', { label: 'About / Licenses', run: () => App.help.openAbout() });
         App.commands.define('deleteAllComments', {
             label: 'Delete All Comments', run: () => App.commentsPane.deleteAll(), isEnabled: () => App.commentsPane.hasComments(),
         });
@@ -23087,8 +23141,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 <script>
 // ---- js/help.js ----
 /*
- * help.js - the Help tab: the keyboard shortcut cheat sheet (press ?) and,
- * in step 6, the About / Licenses window (SPEC Phase 9, 2.2).
+ * help.js - the Help tab: the keyboard shortcut cheat sheet (press ?) and the
+ * About / Licenses window (SPEC Phase 9, 2.2).
  *
  * The cheat sheet is built from the shortcut table itself (shortcuts.js), so a
  * shortcut added there shows up here without anyone remembering to; every
@@ -23098,6 +23152,12 @@ App.template.newDeckHtml = function newDeckHtml() {
  *
  * ? opens the sheet (also typed with AltGr, which Windows reports as Ctrl+Alt,
  * as on Brazilian keyboards); typing a ? into a text box types it.
+ *
+ * About lists every library copied into the editor (vendor/README.md), with
+ * its version, license, source, SHA-256, full license text and the libraries
+ * bundled inside it. build.py writes that list into the page as JSON
+ * (<script type="application/json" id="about-data">), so it always matches
+ * what was really built in.
  *
  * Talks to: shortcuts.js (the table), commands.js (labels), dialogs.js.
  */
@@ -23279,6 +23339,58 @@ App.template.newDeckHtml = function newDeckHtml() {
         });
         filter.focus();
         return shown;
+    };
+
+    // ---------------------------------------------------------------
+    // About / Licenses
+    // ---------------------------------------------------------------
+
+    /* The About data build.py put in the page: { built, libraries: [...] } (empty when absent, e.g. in tests). */
+    App.help.aboutData = function aboutData(doc) {
+        const node = (doc || document).getElementById('about-data');
+        try {
+            return node ? JSON.parse(node.textContent) : { built: '', libraries: [] };
+        } catch (error) {
+            return { built: '', libraries: [] };
+        }
+    };
+
+    App.help.libraryLine = function libraryLine(lib) {
+        return lib.name + ' ' + lib.version + ' · ' + lib.license;
+    };
+
+    App.help.bundledLine = function bundledLine(lib) {
+        return (lib.bundled || []).length
+            // A version vendor/README.md gives as "as in JSZip 3.10.1" (not stated in the bundle) is left out here.
+            ? 'Includes: ' + lib.bundled.map((inner) => inner.name + (/^\d/.test(inner.version) ? ' ' + inner.version : '') +
+                ' (' + inner.license + ')').join(', ')
+            : '';
+    };
+
+    /* Help > About: what this editor is, that it works offline, and every library in it with its license. */
+    App.help.openAbout = function openAbout() {
+        const data = App.help.aboutData();
+        const libraries = data.libraries.map((lib) => el('section', { class: 'about-library' }, [
+            el('h3', {}, [App.help.libraryLine(lib)]),
+            App.help.bundledLine(lib) ? el('p', { class: 'about-bundled' }, [App.help.bundledLine(lib)]) : '',
+            el('p', { class: 'about-source' }, ['Source: ', el('span', { class: 'about-url' }, [lib.url])]),
+            el('p', { class: 'about-source' }, ['SHA-256: ', el('code', {}, [lib.sha256])]),
+            el('details', { class: 'about-license' }, [
+                el('summary', {}, ['License text']),
+                el('pre', {}, [lib.licenseText]),
+            ]),
+        ]));
+        const body = el('div', { class: 'about' }, [
+            el('p', {}, ['Deck Editor: edit HTML presentations on this computer.' + (data.built ? ' Built ' + data.built + '.' : '')]),
+            el('p', { class: 'panel-hint' }, ['One file with everything inside it. The browser blocks all network access for this page ' +
+                '(Content-Security-Policy), so nothing you open or type leaves the computer.']),
+            el('h2', { class: 'about-heading' }, ['Open-source code inside']),
+            libraries.length ? el('div', {}, libraries) : el('p', {}, ['None.']),
+            el('p', { class: 'panel-hint' }, ['Each library is copied into the editor with its license (MIT and similar permissive licenses only); ' +
+                'the list and the files\' SHA-256 are in vendor/README.md.']),
+        ]);
+        return App.dialogs.show({ title: 'About Deck Editor', body: body, wide: true,
+            buttons: [{ label: 'Close', value: true, primary: true }] });
     };
 })();
 
@@ -26314,7 +26426,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         },
         {
             id: 'help', label: 'Help',
-            groups: [{ label: 'Help', commands: [['shortcuts', 'keyboard']] }],
+            groups: [{ label: 'Help', commands: [['shortcuts', 'keyboard'], ['about', 'about']] }],
             note: 'Press ? anywhere (not while typing) to see every keyboard shortcut. Nothing in this editor goes on the internet: ' +
                 'the browser blocks all network access for this page.',
         },
@@ -26330,6 +26442,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         ['exportPdf', 'pdf', 'Ctrl+P'],
         ['revertToOpened', 'undo', ''],
         ['settings', 'settings', ''],
+        ['about', 'about', ''],
     ];
 
     let panel = null;

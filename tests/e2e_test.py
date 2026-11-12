@@ -6919,6 +6919,39 @@ def test_shortcut_cheat_sheet(browser):
     editor.close()
 
 
+def test_about_and_licenses(browser):
+    """Phase 9 (SPEC 2.2, step 6): Help > About (also in the File menu) lists every vendored library of vendor/README.md
+    with its version and license, the libraries bundled inside it, its source and SHA-256, and its full license text."""
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT))
+    import build as build_module
+    table = build_module.read_vendor_table()
+    editor = Editor(browser)
+    page = editor.page
+    page.click(".ribbon-file-button")
+    page.click(".file-menu button[data-command='about']")
+    wait_until(page, "!!document.querySelector('dialog[open] .about')")
+    text = page.inner_text("dialog[open] .about")
+    for lib in table:
+        check(f"{lib['name']} {lib['version']} · {lib['license']}" in text, f"{lib['name']} listed: {text[:300]}")
+        check(lib["sha256"] in text, "its SHA-256")
+    for inner in ["JSZip 3.10.1", "pako", "lie", "setImmediate", "readable-stream"]:
+        check(inner in text, f"{inner} listed as bundled inside")
+    check("network" in text, "says it works offline")
+    check(not page.is_visible("dialog[open] .about-license pre"), "license texts start folded")
+    page.click("dialog[open] .about-license summary")
+    check("Permission is hereby granted" in page.inner_text("dialog[open] .about-license pre"), "the full license text")
+    page.screenshot(path=str(OUTPUT / "126-about.png"))
+    editor.click_dialog_button("Close")
+    page.click("[role='tab']:has-text('Help')")
+    page.click("button[data-command='about']")
+    wait_until(page, "!!document.querySelector('dialog[open] .about')")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.querySelector('dialog[open]')")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7015,6 +7048,7 @@ TESTS = [
     test_comment_markers_and_anchors,
     test_delete_all_comments,
     test_shortcut_cheat_sheet,
+    test_about_and_licenses,
 ]
 
 

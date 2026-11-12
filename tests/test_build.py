@@ -88,6 +88,38 @@ class SavedDeckHidesEditorData(unittest.TestCase):
         self.assertIn("aside.notes, aside.comments { display: none !important; }", css)
 
 
+class AboutData(unittest.TestCase):
+    """Help > About lists every vendored library with its license (SPEC 2.2, Phase 9)."""
+
+    def test_every_vendored_library_is_listed_with_its_license_text(self):
+        data = build.about_data()
+        table = build.read_vendor_table()
+        self.assertEqual([(lib["name"], lib["version"], lib["license"]) for lib in data["libraries"]],
+                         [(lib["name"], lib["version"], lib["license"]) for lib in table])
+        for lib in data["libraries"]:
+            self.assertIn("Permission is hereby granted", lib["licenseText"])
+            self.assertTrue(lib["url"] and lib["sha256"])
+        self.assertRegex(data["built"], r"^\d{4}-\d{2}-\d{2}$")
+
+    def test_libraries_bundled_inside_are_listed_too(self):
+        pptx = build.about_data()["libraries"][0]
+        self.assertEqual(pptx["name"], "PptxGenJS")
+        names = [inner["name"] for inner in pptx["bundled"]]
+        self.assertEqual(names, ["JSZip", "pako", "lie", "setImmediate", "readable-stream"])
+        self.assertEqual(pptx["bundled"][0]["version"], "3.10.1")
+        self.assertTrue(all(inner["license"].startswith("MIT") for inner in pptx["bundled"]))
+
+    def test_the_editor_carries_the_data_as_json_text(self):
+        build.build()
+        html = build.OUTPUT.read_text(encoding="utf-8")
+        start = html.index('<script type="application/json" id="about-data">')
+        end = html.index("</script>", start)
+        import json
+        data = json.loads(html[start:end].split(">", 1)[1])
+        self.assertEqual(data["libraries"][0]["name"], "PptxGenJS")
+        self.assertNotIn("INLINE-ABOUT", html)
+
+
 class FullBuild(unittest.TestCase):
     def test_build_succeeds_and_output_is_offline(self):
         size = build.build()

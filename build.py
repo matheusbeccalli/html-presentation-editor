@@ -15,6 +15,8 @@ How it works (SPEC 3.2):
          INLINE-TEXT   -> <script type="text/plain" id="..."> ... </script>
                           (code that is NOT run by the editor, only copied into
                           saved decks, e.g. the slide player)
+         INLINE-ABOUT  -> <script type="application/json" id="about-data">: the
+                          vendored libraries and their licenses, for Help > About
          INLINE-VENDOR -> every library listed in vendor/README.md, each with
                           its license as a comment. Placed before our own JS so
                           vendor code is always loaded first.
@@ -30,7 +32,9 @@ Usage:
 Exit code 0 = success, 1 = any check failed (the message says why).
 """
 
+import datetime
 import hashlib
+import json
 import re
 import sys
 from pathlib import Path
@@ -45,6 +49,7 @@ OUTPUT = DIST / "editor.html"
 # Group 1 = kind (CSS, JS, TEXT), group 2 = the rest (path and options).
 MARKER_RE = re.compile(r"<!--\s*INLINE-(CSS|JS|TEXT):\s*(.+?)\s*-->")
 VENDOR_MARKER = "<!-- INLINE-VENDOR -->"
+ABOUT_MARKER = "<!-- INLINE-ABOUT -->"
 
 # The offline guarantee (SPEC 3.2): a remote URL inside src=, href= or url(.
 REMOTE_REF_RE = re.compile(
@@ -178,6 +183,48 @@ def build_vendor_block():
     return "\n".join(blocks)
 
 
+def read_bundled_table():
+    """
+    Read vendor/README.md's second table, the libraries bundled inside a vendored one:
+      | Inside | Name | Version | License |
+    Returns {library name: [{name, version, license}]}.
+    """
+    bundled = {}
+    for line in (VENDOR / "README.md").read_text(encoding="utf-8").splitlines():
+        cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+        if len(cells) != 4 or cells[0] in ("Inside", "") or cells[0].startswith("-"):
+            continue
+        inside, name, version, license_name = cells
+        bundled.setdefault(inside, []).append({"name": name, "version": version, "license": license_name})
+    return bundled
+
+
+def about_data():
+    """
+    What Help > About shows (SPEC 2.2): every vendored library with its version, license,
+    source, SHA-256, full LICENSE text and the libraries bundled inside it, plus the build date.
+    """
+    bundled = read_bundled_table()
+    libraries = []
+    for lib in read_vendor_table():
+        license_path = (VENDOR / lib["file"]).parent / "LICENSE"
+        libraries.append({
+            "name": lib["name"], "version": lib["version"], "license": lib["license"],
+            "url": lib["url"], "sha256": lib["sha256"],
+            "licenseText": license_path.read_text(encoding="utf-8") if license_path.is_file() else "",
+            "bundled": bundled.get(lib["name"], []),
+        })
+    return {"built": datetime.date.today().isoformat(), "libraries": libraries}
+
+
+def build_about_block():
+    """The About data as JSON text in the page (never run: type application/json)."""
+    text = json.dumps(about_data(), ensure_ascii=False, indent=1)
+    # "</" would end the script element early; JSON allows "<\/" for "</".
+    text = text.replace("</", "<\\/")
+    return f'<script type="application/json" id="about-data">\n{text}\n</script>'
+
+
 def find_remote_references(html):
     """Return (line_number, snippet) for every remote URL in src=, href= or url(."""
     found = []
@@ -196,6 +243,7 @@ def build():
     # Our own markers first, so text inside vendor code is never taken for a marker.
     html = MARKER_RE.sub(replace_marker, template)
     html = html.replace(VENDOR_MARKER, build_vendor_block())
+    html = html.replace(ABOUT_MARKER, build_about_block())
 
     # ---- Offline checks (the build refuses to write an unsafe file) ----
     remote = find_remote_references(html)

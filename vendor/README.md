@@ -19,6 +19,17 @@ To compute a hash: `python -c "import hashlib,sys;print(hashlib.sha256(open(sys.
 | --- | --- | --- | --- | --- | --- |
 | PptxGenJS | 4.0.1 | MIT | https://registry.npmjs.org/pptxgenjs/-/pptxgenjs-4.0.1.tgz (file `package/dist/pptxgen.bundle.js`; npm shasum cd0f202f62f74d950bcd217e90b766da8f73742e checked) | `pptxgenjs/pptxgen.bundle.js` | `4fb9eac5cfefb213e2d8743c2b7151025f31bfb3f834c73c12062916daa0f3f8` |
 
+Bundled inside the libraries above (not separate files; their notices are in that library's `LICENSE`).
+`build.py` reads this table too, for the editor's Help > About window:
+
+| Inside | Name | Version | License |
+| --- | --- | --- | --- |
+| PptxGenJS | JSZip | 3.10.1 | MIT (dual "MIT or GPLv3", used under MIT) |
+| PptxGenJS | pako | as in JSZip 3.10.1 | MIT and zlib |
+| PptxGenJS | lie | as in JSZip 3.10.1 | MIT |
+| PptxGenJS | setImmediate | as in JSZip 3.10.1 | MIT |
+| PptxGenJS | readable-stream | as in JSZip 3.10.1 | MIT |
+
 Notes:
 
 - **PptxGenJS** (PowerPoint export, SPEC 7.4, added 2026-11-11 with the user's approval). Its browser bundle also holds

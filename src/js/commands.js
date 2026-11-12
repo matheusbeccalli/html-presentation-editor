@@ -154,6 +154,7 @@
             isChecked: () => App.commentsPane.isOpen(),
         });
         App.commands.define('shortcuts', { label: 'Keyboard Shortcuts', run: () => App.help.openShortcuts() });
+        App.commands.define('about', { label: 'About / Licenses', run: () => App.help.openAbout() });
         App.commands.define('deleteAllComments', {
             label: 'Delete All Comments', run: () => App.commentsPane.deleteAll(), isEnabled: () => App.commentsPane.hasComments(),
         });

@@ -6991,6 +6991,101 @@ def test_status_bar(browser):
     editor.close()
 
 
+def test_phase9_done_when(browser):
+    """Phase 9 done when (SPEC 4): comments can be added and removed in bulk, ? shows every shortcut, About lists every
+    vendored library with its license, and the status bar shows slide, zoom, size and save state. Comments are added
+    through the Review tab on two slides, survive Save and opening the file again, then go in one Delete All."""
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT))
+    import build as build_module
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+
+    # Three comments on two slides, typed: the subtitle, slide 1 itself, the comps table on slide 3.
+    def comment(text, click=None):
+        if click:
+            page.mouse.click(*slide_to_screen(page, *click))
+        else:
+            page.keyboard.press("Escape")
+            page.mouse.click(*slide_to_screen(page, 1250, 700))
+        page.keyboard.press("Control+Alt+m")
+        wait_until(page, "!!document.getElementById('comment-draft-text')")
+        if page.query_selector("#comment-initials"):
+            page.keyboard.type("MB")
+            page.keyboard.press("Tab")
+        page.keyboard.type(text)
+        page.keyboard.press("Control+Enter")
+        wait_until(page, "!document.getElementById('comment-draft-text')")
+    comment("Revisar o subtítulo", click=(600, 410))
+    comment("Abertura: ok?")
+    page.evaluate("App.deck.goTo(2)")
+    comment("Conferir os múltiplos", click=(640, 160))
+    stored = page.evaluate(DECK_COMMENTS)
+    check([len(c) for c in stored] == [2, 0, 1, 0, 0, 0] and stored[0][0]["target"] == "e4" and stored[2][0]["target"] == "e9",
+          f"comments: {stored}")
+    state = page.evaluate(STATUS_BAR)
+    check(state["comments"] == "3 comments", f"status: {state}")
+
+    # Saved and opened again: still there.
+    saved = editor.save_as_download("phase9-done-when.html")
+    editor.open(saved)
+    check(page.evaluate("App.comments.countIn(App.deck.getDocument())") == 3, "3 comments after opening the file again")
+
+    # Removed in bulk: Review > Delete All Comments; one undo brings them back; delete again and save.
+    page.click("[role='tab']:has-text('Review')")
+    page.click("button[data-command='deleteAllComments']")
+    wait_until(page, "!!document.querySelector('dialog[open]')")
+    check("3 comments" in editor.report_dialog_text(), editor.report_dialog_text())
+    page.click("dialog[open] button:has-text('Delete All')")
+    wait_until(page, "App.comments.countIn(App.deck.getDocument()) === 0")
+    page.keyboard.press("Control+z")
+    wait_until(page, "App.comments.countIn(App.deck.getDocument()) === 3")
+    page.click("button[data-command='deleteAllComments']")
+    wait_until(page, "!!document.querySelector('dialog[open]')")
+    page.click("dialog[open] button:has-text('Delete All')")
+    wait_until(page, "App.comments.countIn(App.deck.getDocument()) === 0")
+    clean = editor.save_as_download("phase9-done-when-sent.html").read_text(encoding="utf-8")
+    check('class="comments"' not in clean and "Conferir" not in clean, "the saved deck has no comments left")
+    check(page.is_hidden("#status-comments"), "the status bar count is gone")
+
+    # ? shows every shortcut.
+    page.keyboard.press("?")
+    wait_until(page, "!!document.querySelector('dialog[open] .shortcut-sheet')")
+    shown = " | ".join(page.evaluate("Array.from(document.querySelectorAll('dialog[open] .shortcut-keys')).map((c) => c.textContent)"))
+    registered = page.evaluate("App.shortcuts.registry.list().map((entry) => App.help.keyText(entry.combo))")
+    missing = [combo for combo in registered if combo not in shown]
+    check(missing == [] and len(registered) > 50, f"every shortcut on the sheet; missing: {missing}")
+    page.keyboard.press("Escape")
+    wait_until(page, "!document.querySelector('dialog[open]')")
+
+    # About lists every vendored library with its license.
+    page.click("[role='tab']:has-text('Help')")
+    page.click("button[data-command='about']")
+    wait_until(page, "!!document.querySelector('dialog[open] .about')")
+    about = page.inner_text("dialog[open] .about")
+    licences = page.evaluate("Array.from(document.querySelectorAll('dialog[open] .about-license pre')).map((p) => p.textContent)")
+    for index, lib in enumerate(build_module.read_vendor_table()):
+        check(f"{lib['name']} {lib['version']} · {lib['license']}" in about, f"{lib['name']} in About")
+        license_file = (ROOT / "vendor" / lib["file"]).parent / "LICENSE"
+        check(licences[index] == license_file.read_text(encoding="utf-8"), f"{lib['name']}'s full license text")
+    editor.click_dialog_button("Close")
+
+    # The status bar: slide, zoom, size and save state.
+    page.evaluate("App.deck.goTo(2)")
+    state = page.evaluate(STATUS_BAR)
+    check(state["slide"] == "Slide 3 of 6", state["slide"])
+    check(state["zoomShown"] and state["zoom"] == str(round(page.evaluate("App.canvas.getZoom()") * 100)) + "%", f"zoom: {state}")
+    size_kb = float(re.match(r"Deck (\d+) KB", state["size"]).group(1))
+    check(abs(size_kb - len(clean.encode("utf-8")) / 1024) <= 2, f"size {state['size']} vs saved {len(clean.encode('utf-8')) / 1024:.1f} KB")
+    check(state["save"] == "Saved", f"save state after Save As: {state}")
+    page.evaluate("App.history.change('Test edit', { slideId: 's3' }, () => { App.deck.getSlides()[2].setAttribute('data-test', '1'); })")
+    check(page.evaluate(STATUS_BAR)["save"].startswith("Unsaved changes"), "after an edit")
+    page.screenshot(path=str(OUTPUT / "128-phase9-done-when.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7089,6 +7184,7 @@ TESTS = [
     test_shortcut_cheat_sheet,
     test_about_and_licenses,
     test_status_bar,
+    test_phase9_done_when,
 ]
 
 

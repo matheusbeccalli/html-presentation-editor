@@ -6952,6 +6952,45 @@ def test_about_and_licenses(browser):
     editor.close()
 
 
+STATUS_BAR = """() => ({ slide: document.getElementById('status-slide').textContent,
+    save: document.getElementById('status-save').textContent, size: document.getElementById('status-size').textContent,
+    zoom: document.getElementById('zoom-percent').textContent, height: document.getElementById('statusbar').offsetHeight,
+    zoomShown: !document.getElementById('zoom-controls').hidden,
+    comments: document.getElementById('status-comments').hidden ? '' : document.getElementById('status-comments').textContent })"""
+
+
+def test_status_bar(browser):
+    """Phase 9 (SPEC 4, step 7): the status bar shows the slide (X of Y), the save state, the deck's size (close to the
+    saved file's) and the zoom; each follows the change; a long message never pushes the others off or wraps."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    bar = lambda: page.evaluate(STATUS_BAR)  # noqa: E731
+    state = bar()
+    check(state["slide"] == "Slide 1 of 6" and state["save"] == "Saved" and state["zoomShown"], f"after opening: {state}")
+    check(state["zoom"] == str(round(page.evaluate("App.canvas.getZoom()") * 100)) + "%", f"zoom: {state}")
+    shown_kb = float(re.match(r"Deck (\d+) KB", state["size"]).group(1))
+    saved_kb = len(page.evaluate("App.fileio.currentHtml()").encode("utf-8")) / 1024
+    check(abs(shown_kb - saved_kb) <= max(2, saved_kb * 0.05), f"the size is the saved file's: {shown_kb} KB vs {saved_kb:.1f} KB")
+    page.keyboard.press("PageDown")
+    page.keyboard.press("PageDown")
+    page.keyboard.press("PageDown")
+    page.keyboard.press("PageDown")
+    check(bar()["slide"] == "Slide 5 of 6 (hidden)", bar()["slide"])
+    page.click("#zoom-in")
+    check(bar()["zoom"] == str(round(page.evaluate("App.canvas.getZoom()") * 100)) + "%", f"zoom follows: {bar()}")
+    page.evaluate("App.history.change('Test edit', { slideId: 's1' }, () => { App.deck.getSlides()[0].setAttribute('data-test', '1'); })")
+    check(bar()["save"].startswith("Unsaved changes"), f"after an edit: {bar()}")
+    page.evaluate("App.ui.setStatus('Uma mensagem muito longa ' + 'que não cabe na barra de status '.repeat(12))")
+    state = bar()
+    check(state["height"] <= 26, f"one line: {state}")
+    right = page.evaluate("document.getElementById('zoom-percent').getBoundingClientRect().right")
+    check(right <= page.viewport_size["width"], f"the zoom stays in view: {right}")
+    page.screenshot(path=str(OUTPUT / "127-status-bar.png"))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7049,6 +7088,7 @@ TESTS = [
     test_delete_all_comments,
     test_shortcut_cheat_sheet,
     test_about_and_licenses,
+    test_status_bar,
 ]
 
 

@@ -109,4 +109,6 @@ HAND_CHECKS = [
      "left": "the filter word here is 'comment', not 'bold' (needs a replay of the exact line)"},
     {"key": "About: Help > About / Licenses", "auto": False, "tests": ["test_about_and_licenses"],
      "left": "not yet audited clause by clause"},
+    {"key": "Status bar: open samples/contract-deck.html", "auto": False, "tests": ["test_status_bar", "test_autosave_to_file"],
+     "left": "File Explorer's size, Ctrl+mouse wheel (the test uses +), AutoSave to a real file (file handles cannot be made in tests)"},
 ]

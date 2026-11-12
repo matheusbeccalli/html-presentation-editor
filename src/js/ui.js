@@ -96,7 +96,11 @@
         App.events.on('history-changed', sizeLater);
     };
 
-    /* The deck's size as saved, near enough: its HTML (pictures are data: URIs inside it). */
+    /*
+     * The deck's size as saved, near enough: its HTML (pictures are data: URIs inside it) plus the
+     * player Save adds. Making the real saved text would take a fifth of a second on a 25 MB deck
+     * after every edit; this is within a few KB of it.
+     */
     function updateSize() {
         const doc = App.state.hasDeck ? App.deck.getDocument() : null;
         const node = nodes['status-size'];
@@ -104,7 +108,8 @@
         if (!doc) {
             return;
         }
-        const size = App.ui.sizeText(doc.documentElement.outerHTML.length);
+        const player = App.fileio.playerSource();
+        const size = App.ui.sizeText(doc.documentElement.outerHTML.length + player.playerJs.length + player.playerCss.length);
         node.textContent = 'Deck ' + size.text;
         node.classList.toggle('too-big', size.tooBig);
         node.title = size.tooBig ? 'Over 20 MB: the file may be too big to send by email. Pictures take most of the space.'

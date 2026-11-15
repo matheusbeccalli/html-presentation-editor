@@ -140,6 +140,7 @@
     // ---------------------------------------------------------------
 
     const EDITOR_STYLES = 'style[data-deck-table], style[data-deck-groups], style[data-deck-master], style[data-deck-text]';
+    App.theme.EDITOR_STYLES = EDITOR_STYLES;   // background.js puts its rule before them too
 
     /* The values in the deck's <style data-deck-theme> ({} when it has none). */
     App.theme.readOverride = function readOverride(doc) {
@@ -291,6 +292,7 @@
         probe.remove();
         return hex || '#000000';
     }
+    App.theme.hexOf = hexOf;   // background.js: Apply to All writes a plain colour
 
     /* Every slide's text, tables and charts measured again with the new fonts (inside the Theme step). */
     function refitAll(doc) {

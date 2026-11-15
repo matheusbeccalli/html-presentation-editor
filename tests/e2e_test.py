@@ -7126,6 +7126,53 @@ def test_phase9_done_when(browser):
     editor.close()
 
 
+SLIDE_BACKGROUNDS = """() => Array.from(App.deck.getDocument().querySelectorAll('section.slide'), (slide) => {
+    const style = getComputedStyle(slide);
+    return [style.backgroundColor, style.backgroundImage];
+})"""
+
+
+def test_slide_background_imported_deck(browser):
+    """A Copilot deck: its slides carry their imported gradient inline and its CSS never uses --color-bg. Reset to Theme and
+    Apply to All still make the slides follow the theme's Background (a new slide too); one undo step brings the
+    imported backgrounds back."""
+    editor = Editor(browser)
+    editor.open(MESSY)
+    editor.close_dialog_if_open()
+    page = editor.page
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    before = page.evaluate(SLIDE_BACKGROUNDS)
+    check(any(image != "none" for _, image in before), f"the deck has its imported gradient: {before}")
+
+    page.evaluate("App.deck.goTo(0); App.background.reset()")
+    theme_bg = page.evaluate("App.theme.hexOf(App.deck.getDocument(), 'var(--color-bg)')")
+    first = page.evaluate(SLIDE_BACKGROUNDS)[0]
+    check(first[1] == "none" and page.evaluate("App.theme.toHex(getComputedStyle(App.deck.getCurrentSlide()).backgroundColor)") == theme_bg,
+          f"Reset to Theme: slide 1 in the theme's Background {theme_bg}: {first}")
+    check(theme_bg == "#0f172a", f"the deck had no theme Background: it starts as the colour behind slide 1 (the deck's navy), "
+          f"not white under its white text: {theme_bg}")
+    check(page.evaluate("App.background.ownColor(App.deck.getCurrentSlide())") is None and label() == "Reset slide background",
+          f"no own colour, one step: {label()}")
+    check(page.evaluate(SLIDE_BACKGROUNDS)[1:] == before[1:], "the other slides unchanged")
+    page.evaluate("App.history.undo()")
+    check(page.evaluate(SLIDE_BACKGROUNDS) == before, "undo: slide 1's gradient back")
+
+    page.evaluate("App.background.applyToAll('#00843D')")
+    after = page.evaluate(SLIDE_BACKGROUNDS)
+    check(all(slide == ["rgb(0, 132, 61)", "none"] for slide in after), f"Apply to All: every slide green: {after}")
+    check(label() == "Background to all slides", f"one step: {label()}")
+    check(page.evaluate("getComputedStyle(App.deck.getDocument().documentElement).getPropertyValue('--color-bg').trim()").lower() == "#00843d",
+          "the theme's Background is the colour")
+    check(page.evaluate("Array.from(App.deck.getDocument().querySelectorAll('section.slide')).every(s => App.background.ownColor(s) === null)"),
+          "no slide keeps a colour of its own")
+    page.evaluate("App.slides.add()")
+    check(page.evaluate("getComputedStyle(App.deck.getCurrentSlide()).backgroundColor") == "rgb(0, 132, 61)", "a new slide is green too")
+    page.evaluate("App.history.undo()")
+    page.evaluate("App.history.undo()")
+    check(page.evaluate(SLIDE_BACKGROUNDS) == before, "one undo step: every imported background back")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7205,6 +7252,7 @@ TESTS = [
     test_slide_master,
     test_slide_master_own_footers,
     test_theme_editor,
+    test_slide_background_imported_deck,
     test_phase7_done_when,
     test_slideshow,
     test_presenter_view,

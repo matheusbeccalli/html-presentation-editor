@@ -21,7 +21,7 @@
     const ELEMENT_ITEMS = ['cut', 'copy', 'paste', 'duplicate', 'delete', '-',
         'bringToFront', 'bringForward', 'sendBackward', 'sendToBack', '-', 'group', 'ungroup', 'lock'];
     const PICTURE_ITEMS = ELEMENT_ITEMS.concat(['-', 'changePicture']);
-    const EMPTY_SLIDE_ITEMS = ['paste'];
+    const EMPTY_SLIDE_ITEMS = ['paste', '-', 'slideBackground'];
 
     let menu = null;
 

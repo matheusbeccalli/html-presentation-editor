@@ -75,7 +75,7 @@
         });
     };
 
-    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide', '-', 'hideSlide'];
+    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide', '-', 'hideSlide', '-', 'slideBackground'];
 
     // Keys in the rail work on slides, as in PowerPoint's slide pane (the editor's own shortcuts do not run).
     const RAIL_KEYS = {

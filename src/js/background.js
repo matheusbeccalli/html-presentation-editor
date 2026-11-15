@@ -99,8 +99,8 @@
     }
 
     /*
-     * The colour a deck with no theme Background starts with, read from `slide`
-     * as it is now: its plain colour (under a picture or gradient), or the
+     * The colour `slide` shows now (what a deck with no theme Background
+     * starts with, and what Apply to All spreads): its plain colour (under a picture or gradient), or the
      * page's behind it (a Copilot deck's navy under its white text); white only
      * when there is none. Not white at once: white text would disappear.
      */
@@ -179,5 +179,45 @@
             doc.querySelectorAll('section.slide').forEach(followTheme);
             App.text.forgetTheme(doc);
         });
+    };
+
+    // ---------------------------------------------------------------
+    // The control (Design > Background) and Format Background… (right-click)
+    // ---------------------------------------------------------------
+
+    const MENU_CLASS = 'slide-background-menu';
+
+    /* Ribbon control 'slideBackground': the text colour menu, with the theme's Background first and two items of its own. */
+    App.background.create = function create(name) {
+        if (name !== 'slideBackground') {
+            return null;
+        }
+        return App.textControls.colorSplit({
+            label: 'Slide Background', icon: 'slideBackground', menuClass: MENU_CLASS, palette: 'theme',
+            themeNames: (doc) => (isDeclared(doc) ? ['--color-bg'] : []).concat(App.text.themeColorNames(doc)),
+            extras: [['Reset to Theme', 'reset'], ['Apply to All', 'all']],
+            current: () => {
+                const slide = App.deck.getCurrentSlide();
+                return slide ? App.background.ownColor(slide) || THEME_VALUE : null;
+            },
+            choose: (value) => {
+                const slide = App.deck.getCurrentSlide();
+                if (value === 'reset') {
+                    App.background.reset();
+                } else if (value === 'all') {
+                    // The colour the slide shows (a gradient-only slide: the plain colour behind it, never transparent black).
+                    App.background.applyToAll(slide ? startingColor(slide) : THEME_VALUE);
+                } else {
+                    App.background.setColor(value);
+                }
+            },
+            isEnabled: App.background.canEdit,
+        });
+    };
+
+    /* Format Background… (right-click): the Design tab, its colour menu open. */
+    App.background.openMenu = function openMenu() {
+        App.ribbon.selectTab('design');
+        App.textControls.openColorMenuFor(MENU_CLASS);
     };
 })();

@@ -292,7 +292,7 @@
             section('Highlight colors', HIGHLIGHT_COLORS);
         } else {
             const doc = App.deck.getDocument();
-            const theme = doc ? App.text.themeColorNames(doc) : [];
+            const theme = !doc ? [] : spec.themeNames ? spec.themeNames(doc) : App.text.themeColorNames(doc);
             if (theme.length > 0) {
                 section('Theme colors', theme.map((name) => [themeColorTitle(name), 'var(' + name + ')']));
             }
@@ -325,7 +325,7 @@
      * the main part opens the list too), menuClass, palette: 'theme' (theme and
      * standard colours) | 'highlight', extras: [[label, value]] listed first
      * (e.g. "No color"), current(): the colour on the bar, choose(value),
-     * isEnabled() }.
+     * isEnabled(), themeNames(doc): the theme colours listed (default: text.themeColorNames) }.
      */
     App.textControls.colorSplit = function colorSplit(spec) {
         const open = () => (menu && menu.classList.contains(spec.menuClass) ? closeMenu() : openColorMenu(main, spec));
@@ -374,6 +374,14 @@
     };
 
     App.textControls.closeMenu = closeMenu;
+
+    /* Open the colour menu of the split button with `menuClass` on the tab shown (a right-click item: background.js). */
+    App.textControls.openColorMenuFor = function openColorMenuFor(menuClass) {
+        const parts = colorButtons.find((one) => one.spec.menuClass === menuClass && one.main.isConnected);
+        if (parts && !parts.main.disabled) {
+            openColorMenu(parts.main, parts.spec);
+        }
+    };
 
     let lineSpacingButton = null;
 

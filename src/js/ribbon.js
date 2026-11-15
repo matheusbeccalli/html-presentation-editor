@@ -64,9 +64,12 @@
         },
         {
             id: 'design', label: 'Design',
-            groups: [{ label: 'Theme', commands: [['editTheme', 'theme'], ['copyTheme', 'copyTheme']] }],
-            note: 'Theme: the deck\'s colours and fonts, in one place; the slide shows each change at once. Copy Theme from Deck… ' +
-                'takes another deck\'s colours, fonts and slide master. Only what uses the theme follows.',
+            groups: [
+                { label: 'Theme', commands: [['editTheme', 'theme'], ['copyTheme', 'copyTheme']] },
+                { label: 'Background', commands: [{ control: 'slideBackground' }] },
+            ],
+            note: 'Theme: the deck\'s colours and fonts, in one place; Copy Theme from Deck… takes another deck\'s (and its ' +
+                'slide master). Slide Background: a colour for the slide shown; Apply to All makes it the theme\'s Background.',
         },
         {
             // Shown only while a table is selected (PowerPoint's Table Design tab).
@@ -255,7 +258,7 @@
 
     /* A control that shows a value or opens a picker (textcontrols.js, tablecontrols.js). */
     function createControl(name) {
-        return App.slides.create(name) || App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
+        return App.slides.create(name) || App.background.create(name) || App.tableControls.create(name) || App.tableDesign.create(name) || App.shapeControls.create(name) ||
             App.chartControls.create(name) || App.textControls.create(name);
     }
 
@@ -300,6 +303,9 @@
         });
         renderTab(TABS.find((tab) => tab.id === tabId));
     }
+
+    /* Show tab `tabId` (a right-click item that opens a ribbon control: background.js). */
+    App.ribbon.selectTab = selectTab;
 
     function buildFileMenu() {
         fileMenu = el('div', { class: 'menu file-menu', role: 'menu', hidden: true });

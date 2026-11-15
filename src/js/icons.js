@@ -39,6 +39,7 @@
         ungroup: '<rect x="2.5" y="2.5" width="7" height="6"/><rect x="10.5" y="11.5" width="7" height="6" fill="currentColor" fill-opacity="0.25"/><path d="M11 4.5l5 5M16 4.5l-5 5"/>',
         theme: '<path d="M10 2.5a7.5 7.5 0 1 0 0 15c1.2 0 1.6-.8 1.2-1.7-.5-1 .1-2.3 1.4-2.3h1.6a3.3 3.3 0 0 0 3.3-3.3C17.5 5.6 14.1 2.5 10 2.5z"/><circle cx="6.5" cy="9" r="1.1" fill="currentColor"/><circle cx="9" cy="6" r="1.1" fill="currentColor"/><circle cx="12.8" cy="6.5" r="1.1" fill="currentColor"/>',
         copyTheme: '<rect x="2.5" y="2.5" width="9" height="11"/><rect x="8.5" y="6.5" width="9" height="11" fill="currentColor" fill-opacity="0.15"/><path d="M11 12h4M13 10v4"/>',
+        slideBackground: '<rect x="2.5" y="4" width="15" height="11"/><path d="M2.5 15L17.5 7v8z" fill="currentColor" fill-opacity="0.35"/><path d="M6 17.5h8"/>',
         slideMaster: '<rect x="2.5" y="3.5" width="15" height="11"/><path d="M4.5 12.5h5M13 12.5h2.5"/><rect x="12.5" y="5" width="3.5" height="2" fill="currentColor"/><path d="M6 17.5h8"/>',
         headerFooter: '<rect x="2.5" y="3.5" width="15" height="13"/><path d="M2.5 6.5h15M2.5 13.5h15M5 15h4M13 15h2"/>',
         lock: '<rect x="4.5" y="9.5" width="11" height="8" rx="1"/><path d="M7 9.5V7a3 3 0 0 1 6 0v2.5"/><path d="M10 12.5v2"/>',

@@ -5051,10 +5051,10 @@ def test_format_pane_and_context_menu(browser):
     order = page.evaluate("App.transform.topLevelElements(App.deck.getCurrentSlide()).map(e => e.getAttribute('data-id'))")
     check(order[-1] == "e1", f"Bring to front from the menu: {order}")
 
-    # Right-click on empty slide: only Paste. Escape closes the menu but keeps nothing selected.
+    # Right-click on empty slide: Paste and Format Background…. Escape closes the menu but keeps nothing selected.
     page.mouse.click(*slide_to_screen(page, 1250, 700), button="right")
     labels = page.locator(".context-menu .menu-label").all_inner_texts()
-    check(labels == ["Paste"], f"empty-slide menu: {labels}")
+    check(labels == ["Paste", "Format Background…"], f"empty-slide menu: {labels}")
     page.keyboard.press("Escape")
     check(page.is_hidden(".context-menu"), "Escape closes the menu")
 
@@ -7170,6 +7170,115 @@ def test_slide_background_imported_deck(browser):
     page.evaluate("App.history.undo()")
     page.evaluate("App.history.undo()")
     check(page.evaluate(SLIDE_BACKGROUNDS) == before, "one undo step: every imported background back")
+
+    # From the menu on a slide whose background is only a gradient: Apply to All takes the colour it shows (the deck's
+    # navy behind it), never black from its transparent colour.
+    page.evaluate("App.deck.goTo(0)")
+    page.click(".ribbon-tab[data-tab='design']")
+    page.click("button[aria-label='Slide Background']")
+    page.click(".slide-background-menu .menu-item[title='Apply to All']")
+    after = page.evaluate(SLIDE_BACKGROUNDS)
+    check(all(slide == ["rgb(15, 23, 42)", "none"] for slide in after), f"Apply to All from a gradient slide: the navy: {after}")
+    editor.close()
+
+
+def test_slide_background(browser):
+    """Design > Slide Background: one slide gets its own colour (a theme colour stays linked to the theme), Reset to Theme
+    takes it back, Apply to All makes it the theme's Background (one undo step); the same menu from a right-click on the
+    slide or a thumbnail (Format Background…); saved, reopened and exported to PowerPoint with it."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    bg = lambda i: page.evaluate("i => getComputedStyle(App.deck.getSlides()[i]).backgroundColor", i)  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    own = lambda i: page.evaluate("i => App.background.ownColor(App.deck.getSlides()[i])", i)  # noqa: E731
+    button = "button[aria-label='Slide Background']"
+    menu = ".slide-background-menu"
+    white, accent, dark_red = "rgb(255, 255, 255)", "rgb(31, 42, 68)", "rgb(192, 0, 0)"
+
+    page.click(".ribbon-tab[data-tab='design']")
+    check(page.is_enabled(button), "Design > Background > Slide Background")
+    page.evaluate("App.deck.goTo(1)")
+    page.click(button)
+    check(page.is_visible(menu), "the button opens the colour menu")
+    text = page.inner_text(menu)
+    check("Reset to Theme" in text and "Apply to All" in text and "More colors" in text, f"its items: {text}")
+    check(page.evaluate("document.querySelector('.slide-background-menu .color-swatch').title") == "Background (theme)",
+          "the theme's Background is the first theme colour")
+    page.screenshot(path=str(OUTPUT / "slide-background-menu.png"))
+    page.click(f"{menu} .color-swatch[title='Accent (theme)']")
+    check(bg(1) == accent and bg(0) == white and bg(2) == white, f"slide 2 only: {bg(0)} {bg(1)} {bg(2)}")
+    check(own(1) == "var(--color-accent)" and label() == "Slide background", f"kept as the theme colour, one step: {own(1)} {label()}")
+    check(page.evaluate("getComputedStyle(document.querySelector(\"button[aria-label='Slide Background'] .color-bar\")).backgroundColor")
+          == accent, "the button's bar shows the slide's colour")
+    wait_until(page, """() => { const doc = document.querySelector('.thumb[data-index="1"] iframe').contentDocument;
+        const slide = doc && doc.querySelector('section.slide');
+        return !!slide && doc.defaultView.getComputedStyle(slide).backgroundColor === 'rgb(31, 42, 68)'; }""")
+
+    # The theme colour stays linked: Edit Theme > Accent changes the slide too.
+    page.click("button[data-command='editTheme']")
+    page.fill("#theme-color-accent-hex", "#0070C0")
+    page.press("#theme-color-accent-hex", "Enter")
+    editor.click_dialog_button("Apply")
+    check(bg(1) == "rgb(0, 112, 192)", f"follows the theme's Accent: {bg(1)}")
+    page.keyboard.press("Control+z")
+    check(bg(1) == accent, "undo the theme")
+    page.keyboard.press("Control+z")
+    check(bg(1) == white and own(1) is None, "undo the slide's colour")
+
+    # Reset to Theme.
+    page.click(f"{button} + .color-menu-button")
+    page.click(f"{menu} .color-swatch[title='Dark Red']")
+    check(bg(1) == dark_red, f"a standard colour: {bg(1)}")
+    page.click(f"{button} + .color-menu-button")
+    page.click(f"{menu} .menu-item[title='Reset to Theme']")
+    check(bg(1) == white and own(1) is None and label() == "Reset slide background", f"Reset to Theme: {bg(1)} {label()}")
+
+    # Apply to All: the colour becomes the theme's Background, every slide follows it; one undo step.
+    page.evaluate("App.deck.goTo(2)")
+    page.click(button)
+    page.click(f"{menu} .color-swatch[title='Dark Red']")
+    page.evaluate("App.deck.goTo(1)")
+    page.click(button)
+    page.click(f"{menu} .color-swatch[title='Accent (theme)']")
+    page.click(button)
+    page.click(f"{menu} .menu-item[title='Apply to All']")
+    count = editor.slide_count()
+    check(all(bg(i) == accent for i in range(count)) and label() == "Background to all slides", f"every slide: {[bg(i) for i in range(count)]}")
+    root_bg = lambda: page.evaluate("getComputedStyle(App.deck.getDocument().documentElement).getPropertyValue('--color-bg').trim()")  # noqa: E731
+    check(root_bg().lower() == "#1f2a44" and all(own(i) is None for i in range(count)), f"the theme's Background: {root_bg()}")
+    page.keyboard.press("Control+z")
+    check(bg(2) == dark_red and bg(1) == accent and bg(0) == white and root_bg() == "#fff", f"one undo: {bg(0)} {bg(1)} {bg(2)} {root_bg()}")
+    page.keyboard.press("Control+y")
+    check(all(bg(i) == accent for i in range(count)), "redo")
+    page.evaluate("App.deck.goTo(1)")
+    page.click(button)
+    page.click(f"{menu} .color-swatch[title='Dark Red']")
+
+    # Right-click: an empty part of the slide, a thumbnail.
+    page.evaluate("App.selection.clear()")
+    corner = page.evaluate("""() => { const rect = document.getElementById('overlay').getBoundingClientRect();
+        const zoom = App.canvas.getZoom(); return [rect.left + 8 * zoom, rect.top + 8 * zoom]; }""")
+    page.click(".ribbon-tab[data-tab='home']")
+    page.mouse.click(*corner, button="right")
+    check(page.is_visible(".context-menu .menu-item[data-command='slideBackground']"), "the slide's right-click menu has Format Background…")
+    check(page.inner_text(".context-menu .menu-item[data-command='slideBackground']").startswith("Format Background…"), "its name")
+    page.click(".context-menu .menu-item[data-command='slideBackground']")
+    check(page.evaluate("document.querySelector('.ribbon-tab.selected').getAttribute('data-tab')") == "design" and page.is_visible(menu),
+          "it shows the Design tab with the colour menu open")
+    page.keyboard.press("Escape")
+    page.click("#thumbnail-rail .thumb[data-index='0']", button="right")
+    check(page.is_visible(".context-menu .menu-item[data-command='slideBackground']"), "a thumbnail's right-click menu has it too")
+    page.keyboard.press("Escape")
+
+    # Saved and reopened; exported to PowerPoint as each slide's background.
+    saved = editor.save_as_download("slide-background.html")
+    editor.open(saved)
+    check(bg(1) == dark_red and bg(0) == accent and own(1) == "rgb(192, 0, 0)", f"reopened: {bg(0)} {bg(1)}")
+    path, _ = export_pptx(editor, "slide-background.pptx")
+    parts = pptx_parts(path)
+    background = lambda n: parts[f"ppt/slides/slide{n}.xml"].split("</p:bg>")[0]  # noqa: E731
+    check('val="C00000"' in background(2) and 'val="1F2A44"' in background(1), "PowerPoint: each slide's background colour")
     editor.close()
 
 
@@ -7253,6 +7362,7 @@ TESTS = [
     test_slide_master_own_footers,
     test_theme_editor,
     test_slide_background_imported_deck,
+    test_slide_background,
     test_phase7_done_when,
     test_slideshow,
     test_presenter_view,

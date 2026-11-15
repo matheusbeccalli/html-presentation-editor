@@ -104,4 +104,8 @@ HAND_CHECKS = [
     {"key": "About: Help > About / Licenses", "auto": True, "tests": ["test_about_and_licenses", "test_gap_p9_about"]},
     {"key": "Status bar: open samples/contract-deck.html", "auto": False, "tests": ["test_status_bar", "test_autosave_to_file"],
      "left": "File Explorer's size, Ctrl+mouse wheel (the test uses +), AutoSave to a real file (file handles cannot be made in tests)"},
+    # ---- Extras (after the SPEC phases) ------------------------------
+    {"key": "Slide background: open samples/contract-deck.html", "auto": False,
+     "tests": ["test_slide_background", "test_slide_background_imported_deck"],
+     "left": "the colours as PowerPoint shows them (the test reads the .pptx XML); Ctrl+M (the test adds the slide through App.slides.add)"},
 ]

@@ -433,6 +433,8 @@
         App.commands.define('editTheme', { label: 'Edit Theme', isEnabled: () => App.theme.canEdit(), run: () => App.theme.open() });
         App.commands.define('copyTheme', { label: 'Copy Theme from Deck…', isEnabled: () => App.theme.canEdit(),
             run: () => App.theme.open({ copy: true }) });
+        App.commands.define('slideBackground', { label: 'Format Background…', isEnabled: () => App.background.canEdit(),
+            run: () => App.background.openMenu() });
         App.commands.define('slideMaster', { label: 'Slide Master', isEnabled: () => App.master.canEdit(), run: () => App.master.open() });
         App.commands.define('headerFooter', { label: 'Header & Footer', isEnabled: () => App.master.canEdit(), run: () => App.master.open() });
         App.commands.define('lock', { label: 'Lock', isEnabled: () => App.elements.canLock(),

@@ -330,3 +330,22 @@ Nested bullets are the top priority of this phase.
 
 - [x] Slide background colour, per slide *(Design > Background > Slide Background: the text colour menu (the theme's Background first, then the other theme colours, standard colours, More colors…) for the slide shown; a theme colour stays linked, so Edit Theme changes it later; Reset to Theme puts the slide back on the theme's Background; Apply to All makes the colour the theme's Background and clears every slide's own colour, so new slides match too; one undo step each; also from a right-click on an empty part of the slide or on a thumbnail (Format Background…); a colour replaces an imported gradient or picture; on a Copilot deck with no theme Background, the first Reset or Apply to All starts from the colour the slide shows (never white under white text); saved in the file (inline on the slide), shown in the slide show, print, thumbnails and PowerPoint export; solid colours only, as decided)*
   - [ ] Slide background: open samples/contract-deck.html, go to slide 2, Design > Slide Background ▾ > Accent (theme): only slide 2 turns dark blue (its thumbnail too). Design > Edit Theme, Accent #0070C0, Apply: slide 2 turns blue; Ctrl+Z twice: white again. Slide Background ▾ > Dark Red, then Reset to Theme: white. Slide Background ▾ > a colour, then Apply to All: every slide in that colour; New Slide (Ctrl+M): the new one too; Ctrl+Z (twice): as before. Right-click a thumbnail > Format Background…: the Design tab with the colour menu open. Save, reopen: the colours are kept; Export > PowerPoint and open the file in PowerPoint: each slide's background colour is there. Open samples/copilot-messy-deck.html, slide 1 > Slide Background ▾ > Reset to Theme: the slide turns the deck's navy (not white), its white text still readable
+
+## Phase 10: PowerPoint gaps (SPEC 4, added 2026-11-15)
+
+- [ ] Deck format 5 (element names and hidden state, flips, slide links, new shapes, arrowheads); format-4 decks upgraded on open
+- [ ] Flip Horizontal / Flip Vertical for shapes and pictures (Arrange > Rotate), with rotation; PowerPoint's own flip on export
+- [ ] Text box: Align Text top / middle / bottom and inner margins; in the PowerPoint export
+- [ ] Change Case: Shift+F3 cycles; Aa menu (Sentence case, lowercase, UPPERCASE, Capitalize Each Word, tOGGLE cASE)
+- [ ] Eyedropper in every colour list (text, highlight, fill, outline, table cell, chart series, theme, slide background)
+- [ ] Shapes: triangle, right triangle, left / right brace, left / right bracket, elbow line, double arrow; PowerPoint's own shapes on export
+- [ ] Arrowheads at the start and / or end of lines; on export
+- [ ] Selection Pane (Alt+F10): elements front to back; click / Ctrl+click selects, double-click renames, the eye hides (saved; left out of show, print, pictures and PowerPoint, listed in the export report), drag reorders
+- [ ] Tab / Shift+Tab step through the slide's elements
+- [ ] Hyperlinks (Ctrl+K) on text: web, e-mail, another slide; edit, remove; Ctrl+click in the editor, click in the show and saved deck; PowerPoint and PDF keep them
+- [ ] Several slides selected in the rail (Shift+click, Ctrl+click); Delete, Duplicate, Hide and drag act on all of them
+- [ ] Copy / Cut / Paste slides (Ctrl+C / X / V in the rail; Ctrl+V on the slide with nothing selected), pasted after the current slide with notes, comments and hidden state, new ids
+- [ ] Reuse Slides (Home > New Slide ▾ > Reuse Slides…): another deck's slides, ticked, inserted after the current slide in this deck's theme
+- [ ] Elements and slides copied in one editor tab paste whole into another
+- [ ] Language of the deck (Review > Language: Portuguese / English) in `<html lang>` and the PowerPoint export; how to set Edge's own spelling languages
+- [ ] **Done when:** slides come in from another deck and by copy and paste, the slide's elements can be found, named, hidden, flipped and linked, and the PowerPoint export keeps flips, the new shapes, arrowheads, links, text alignment and the deck's language.

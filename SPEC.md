@@ -188,7 +188,7 @@ Review comments (Phase 9, deck format 4) live in each slide's hidden `<aside cla
 
 ## 4. Features by phase
 
-Nine phases, built in order; the tool is usable day to day after Phase 5, and every phase ends with a "done when" test the user can run.
+Nine phases, built in order (a tenth, PowerPoint gaps, was added after them); the tool is usable day to day after Phase 5, and every phase ends with a "done when" test the user can run.
 
 The interface follows PowerPoint: a ribbon with tabs (Home, Insert, Arrange, Slide Show, Export), a thumbnail rail on the left, the slide canvas in the center, a Format pane on the right that shows options for the selected object, and a notes area below the slide. Text in the UI is in English; decks may be in Portuguese.
 
@@ -331,6 +331,19 @@ Nested bullets are on almost every slide the user makes, so they are the top pri
 - Review comments: sticky notes attached to a slide or element, with author initials and date; never shown when presenting, printing or exporting; "Delete all comments" before sending.
 - Keyboard shortcut cheat sheet (press `?`), About / Licenses dialog (2.2).
 - Status bar: slide X of Y, zoom, file size, autosave state.
+
+**Phase 10: PowerPoint gaps** (added 2026-11-15, after the nine phases above, from a comparison with PowerPoint's ribbons)
+
+- Deck format 5 (one bump for the whole phase): element names and hidden state, flips, slide links, the new shapes and arrowheads. Format-4 decks are upgraded on open (only the version number changes).
+- Flip Horizontal / Flip Vertical for shapes and pictures (Arrange > Rotate), together with rotation; PowerPoint export uses its own flip.
+- Text boxes: Align Text top / middle / bottom, inner margins (Format pane), Change Case (Shift+F3 cycles; Aa menu: Sentence case, lowercase, UPPERCASE, Capitalize Each Word, tOGGLE cASE; the letters themselves change). All three go into the PowerPoint export.
+- Eyedropper (the browser's own `EyeDropper`, no library) in every colour list: text, highlight, fill, outline, table cell, chart series, theme.
+- Shapes: triangle, right triangle, left / right brace, left / right bracket, elbow line, double arrow; arrowheads at the start and / or end of lines. Exported as PowerPoint's own shapes. The elbow line is not glued to the boxes it joins.
+- Selection Pane (Alt+F10): the slide's elements front to back; click selects (Ctrl+click adds), double-click renames, the eye hides (saved, as in PowerPoint: a hidden element is left out of the slide show, print / PDF, pictures and PowerPoint export, and the export report lists it), dragging changes the order. Tab / Shift+Tab step through the slide's elements.
+- Hyperlinks (Ctrl+K) on text: a web address, an e-mail address or another slide of the deck; edit and remove. Ctrl+click follows a link in the editor, a click in the slide show and the saved deck; kept in the PowerPoint export and (web links) in the PDF.
+- Slides: select several thumbnails (Shift+click a range, Ctrl+click one more); Copy / Cut / Paste (Ctrl+C / X / V) slides in the rail, pasted after the current slide (Ctrl+V on the slide with nothing selected pastes slides too); Delete, Duplicate, Hide and drag act on every selected slide. A copy keeps its notes, comments and hidden state and gets new ids.
+- Reuse Slides (Home > New Slide ▾ > Reuse Slides…): pick another deck's `.html`, see its slides, tick the ones to insert after the current slide (notes, pictures, charts and comments come along; they follow this deck's theme; the other deck's slide master is not brought in). Elements and slides copied in one editor tab paste whole into another.
+- Language of the deck (Review > Language: Portuguese or English): written to `<html lang>` and to the PowerPoint export's text, so PowerPoint checks spelling in that language. Edge checks spelling in the languages turned on in its own settings (it ignores the page's language), so the editor explains where to set them.
 
 ## 5. Charts
 

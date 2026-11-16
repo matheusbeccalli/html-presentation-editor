@@ -7144,6 +7144,14 @@ def test_slide_background_imported_deck(browser):
     before = page.evaluate(SLIDE_BACKGROUNDS)
     check(any(image != "none" for _, image in before), f"the deck has its imported gradient: {before}")
 
+    # A colour the user picked is not where the theme starts: Reset to Theme must take it away (review finding).
+    page.evaluate("App.deck.goTo(1); App.background.setColor('#c00000'); App.background.reset()")
+    reset_bg = page.evaluate("App.theme.toHex(getComputedStyle(App.deck.getCurrentSlide()).backgroundColor)")
+    check(reset_bg != "#c00000" and page.evaluate("App.theme.hexOf(App.deck.getDocument(), 'var(--color-bg)')") != "#c00000",
+          f"Reset to Theme after a picked red: the deck's own colour, not the red: {reset_bg}")
+    page.evaluate("App.history.undo(); App.history.undo()")
+    check(page.evaluate(SLIDE_BACKGROUNDS) == before, "both undone")
+
     page.evaluate("App.deck.goTo(0); App.background.reset()")
     theme_bg = page.evaluate("App.theme.hexOf(App.deck.getDocument(), 'var(--color-bg)')")
     first = page.evaluate(SLIDE_BACKGROUNDS)[0]

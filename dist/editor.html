@@ -14186,8 +14186,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     /*
-     * The colour `slide` shows now (what a deck with no theme Background
-     * starts with, and what Apply to All spreads): its plain colour (under a picture or gradient), or the
+     * The colour `slide` shows now (what Apply to All spreads; on a bare copy,
+     * what a deck with no theme Background starts with): its plain colour (under a picture or gradient), or the
      * page's behind it (a Copilot deck's navy under its white text); white only
      * when there is none. Not white at once: white text would disappear.
      */
@@ -14202,10 +14202,29 @@ App.template.newDeckHtml = function newDeckHtml() {
         return '#ffffff';
     }
 
-    /* The theme's Background declared (from `slide`, see startingColor) and our rule added when the deck's CSS needs it. */
+    /*
+     * The colour the deck's own CSS gives `slide` (startingColor of a bare copy
+     * of it: same class and layout, no inline style), so a colour the user
+     * picked for the slide never becomes the theme's Background.
+     */
+    function deckColorOf(slide) {
+        const probe = slide.ownerDocument.createElement('section');
+        ['class', 'data-layout'].forEach((name) => {
+            if (slide.hasAttribute(name)) {
+                probe.setAttribute(name, slide.getAttribute(name));
+            }
+        });
+        probe.setAttribute('data-editor-only', '');
+        slide.parentNode.insertBefore(probe, slide);
+        const color = startingColor(probe);
+        probe.remove();
+        return color;
+    }
+
+    /* The theme's Background declared (from `slide`'s deck colour, see deckColorOf) and our rule added when the deck's CSS needs it. */
     App.background.ensureThemeRule = function ensureThemeRule(doc, slide) {
         if (!isDeclared(doc)) {
-            App.theme.applyValues(doc, { '--color-bg': slide ? startingColor(slide) : '#ffffff' });
+            App.theme.applyValues(doc, { '--color-bg': slide ? deckColorOf(slide) : '#ffffff' });
         }
         if (doc.head.querySelector('style[data-deck-background]') || App.background.followsThemeByCss(doc)) {
             return;
@@ -14219,7 +14238,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* `slide` back to the theme's Background (inside an undo step). */
     function followTheme(slide) {
         const doc = slide.ownerDocument;
-        App.background.ensureThemeRule(doc, slide);   // before its own colour goes: the theme may start from it
+        App.background.ensureThemeRule(doc, slide);
         App.background.clearOwn(slide);
         if (!paintsTheme(slide, themeColor(doc))) {
             App.background.writeOwn(slide, THEME_VALUE);   // a deck rule stronger than ours

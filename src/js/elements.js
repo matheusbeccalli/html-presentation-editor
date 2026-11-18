@@ -574,6 +574,51 @@
     };
 
     // ---------------------------------------------------------------
+    // Flip (Phase 10)
+    // ---------------------------------------------------------------
+
+    /* Pictures and shapes (lines too) can be flipped, unless locked; text, tables, charts and groups cannot. */
+    App.elements.canFlipElement = function canFlipElement(element) {
+        if (!element || App.elements.isLocked(element)) {
+            return false;
+        }
+        const type = element.getAttribute('data-type');
+        return type === 'image' || (type === 'shape' && !!element.getAttribute('data-shape'));
+    };
+
+    function flippableSelected() {
+        return App.selection.getElements().filter(App.elements.canFlipElement);
+    }
+
+    App.elements.canFlip = function canFlip() {
+        return !App.text.isEditing() && flippableSelected().length > 0;
+    };
+
+    /*
+     * Mirror `element` left-right (axis 'x') or upside down ('y') where it shows on
+     * the slide. A turned element turns the other way too (30° becomes 330°): the
+     * flip happens in its own box, then the turn, so this keeps it a mirror image
+     * of what was on the screen, as PowerPoint's Flip does.
+     */
+    App.elements.flipElement = function flipElement(element, axis) {
+        const angle = App.transform.rotationOf(element);
+        App.transform.setFlip(element, App.transform.toggleFlip(App.transform.flipOf(element), axis));
+        if (angle) {
+            App.transform.setRotation(element, -angle);
+        }
+    };
+
+    /* Arrange > Rotate > Flip Horizontal / Flip Vertical: each selected element in its own place; one undo step. */
+    App.elements.flip = function flip(axis) {
+        const elements = App.elements.canFlip() ? flippableSelected() : [];
+        if (elements.length) {
+            App.history.change(axis === 'x' ? 'Flip horizontal' : 'Flip vertical', currentSlideScope(), () => {
+                elements.forEach((element) => App.elements.flipElement(element, axis));
+            });
+        }
+    };
+
+    // ---------------------------------------------------------------
     // Lock (Phase 7)
     // ---------------------------------------------------------------
     //

@@ -996,7 +996,10 @@
     // Decks saved before format 2 hold their text as <h1>, <ul> …; before format 3,
     // their tables as the deck's own HTML and CSS. Format 4 only added review comments
     // (<aside class="comments">), so a format-3 deck has nothing to convert: it is
-    // simply marked format 4 (importer.js ensureDeckFormatMeta).
+    // simply marked format 4 (importer.js ensureDeckFormatMeta). Format 5 (Phase 10)
+    // only added attributes older decks never carry (data-flip on pictures and box
+    // shapes, element names, hidden elements, slide links, new shapes), so a format-4
+    // deck is likewise just marked format 5.
     const TEXT_MODEL_FORMAT = 2;
     const TABLE_MODEL_FORMAT = 3;
 

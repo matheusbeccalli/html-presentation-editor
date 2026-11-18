@@ -154,7 +154,8 @@
                     [{ command: 'alignToSlide', icon: 'alignToSlide' }]],
                 },
                 { label: 'Group', rows: [[{ command: 'group', icon: 'group' }], [{ command: 'ungroup', icon: 'ungroup' }]] },
-                { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }], [{ command: 'rotateLeft90', icon: 'rotateLeft90' }]] },
+                { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }, { command: 'flipHorizontal', icon: 'flipHorizontal' }],
+                    [{ command: 'rotateLeft90', icon: 'rotateLeft90' }, { command: 'flipVertical', icon: 'flipVertical' }]] },
                 { label: 'Lock', commands: [['lock', 'lock']] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +

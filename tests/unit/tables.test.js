@@ -92,7 +92,7 @@ test('import: a format-2 deck\'s table is converted to the table model (format 3
     assert(App.importer.reportHasChanges(result.report), 'the conversion marks the deck as changed');
 
     const doc = parseDoc(result.html);
-    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), '4', 'tables converted; the deck is now the current format');
+    assertEqual(doc.querySelector('meta[name="deck-format"]').getAttribute('content'), String(App.DECK_FORMAT), 'tables converted; the deck is now the current format');
     const element = doc.querySelector('[data-id="e2"]');
     assertEqual(element.getAttribute('style'), 'left:64px; top:140px; width:600px; height:200px; z-index:2', 'box unchanged');
     assertEqual(element.children.length, 1);

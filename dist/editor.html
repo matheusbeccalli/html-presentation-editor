@@ -1432,7 +1432,7 @@ window.App = {
     // 2 = text in the flat-paragraph model (Phase 3); 3 = tables in the table model (Phase 4);
     // 4 = review comments in <aside class="comments"> (Phase 9, comments.js).
     // Older decks are migrated on open (normalize.js).
-    DECK_FORMAT: 4,
+    DECK_FORMAT: 5,
 
     // Shared state that several modules read. Kept small on purpose.
     state: {
@@ -9232,7 +9232,9 @@ App.template.newDeckHtml = function newDeckHtml() {
  *
  * Kinds: rect, roundRect, ellipse, chevron, pentagon, callout (filled boxes);
  * line and arrow (a stroke from one corner of the box to the other: data-flip
- * "x" / "y" / "xy" says which corners). Optional data-adjust holds the
+ * "x" / "y" / "xy" says which corners). A box shape with data-flip (Phase 10)
+ * is mirrored inside its box by an SVG transform on its paths (mirrorOf); its
+ * text is not. Optional data-adjust holds the
  * yellow-handle value (Phase 5 step 8); without it the PowerPoint default is used.
  *
  * Text (step 7): a box shape holds a text area over its drawing,
@@ -9359,6 +9361,27 @@ App.template.newDeckHtml = function newDeckHtml() {
      */
     App.shapes.geometry = function geometry(kind, w, h, options) {
         const opts = options || {};
+        const parts = drawnParts(kind, w, h, opts);
+        const mirror = App.shapes.isLine(kind) ? '' : mirrorOf(opts.flip, w, h);
+        return mirror ? parts.map((part) => Object.assign(part, { transform: mirror })) : parts;
+    };
+
+    /*
+     * A flipped box shape (data-flip, Phase 10) is drawn as usual and mirrored
+     * inside its box by an SVG transform on each path: x -> w - x (left-right),
+     * y -> h - y (upside down). Its text and shadow are not mirrored. Lines are
+     * not mirrored this way: their flip says which corners they join.
+     */
+    function mirrorOf(flip, w, h) {
+        const x = (flip || '').indexOf('x') !== -1;
+        const y = (flip || '').indexOf('y') !== -1;
+        if (!x && !y) {
+            return '';
+        }
+        return 'matrix(' + (x ? -1 : 1) + ' 0 0 ' + (y ? -1 : 1) + ' ' + (x ? n(w) : 0) + ' ' + (y ? n(h) : 0) + ')';
+    }
+
+    function drawnParts(kind, w, h, opts) {
         const adjust = opts.adjust === undefined || opts.adjust === null ? DEFAULT_ADJUST[kind] : opts.adjust;
         const short = Math.min(w, h);
         switch (kind) {
@@ -9495,7 +9518,23 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     /* The yellow handle of a kind in its w x h box (box px), or null for kinds without one. */
-    App.shapes.adjustHandle = function adjustHandle(kind, w, h, adjust) {
+    App.shapes.adjustHandle = function adjustHandle(kind, w, h, adjust, flip) {
+        return mirrorPoint(unflippedHandle(kind, w, h, adjust), w, h, flip);
+    };
+
+    /* A point in a w x h box seen through the shape's flip (the same sum undoes it). */
+    function mirrorPoint(point, w, h, flip) {
+        if (!point) {
+            return point;
+        }
+        const round2 = App.util.round2;
+        return {
+            x: (flip || '').indexOf('x') !== -1 ? round2(w - point.x) : point.x,
+            y: (flip || '').indexOf('y') !== -1 ? round2(h - point.y) : point.y,
+        };
+    }
+
+    function unflippedHandle(kind, w, h, adjust) {
         const value = adjust === undefined || adjust === null ? DEFAULT_ADJUST[kind] : adjust;
         const short = Math.min(w, h);
         const round2 = App.util.round2;
@@ -9509,7 +9548,8 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     /* The adjust value for the yellow handle dragged to `point` (box px). */
-    App.shapes.adjustFrom = function adjustFrom(kind, w, h, point) {
+    App.shapes.adjustFrom = function adjustFrom(kind, w, h, dragged, flip) {
+        const point = mirrorPoint(dragged, w, h, flip);
         const short = Math.min(w, h) || 1;
         const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
         switch (kind) {
@@ -9589,6 +9629,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             path.setAttribute('class', 'shape-' + part.part);
             path.setAttribute('style', STYLES[part.part]);
             path.setAttribute('d', part.d);
+            if (part.transform) {
+                path.setAttribute('transform', part.transform);
+            }
             svg.appendChild(path);
         });
         element.appendChild(svg);
@@ -9708,6 +9751,11 @@ App.template.newDeckHtml = function newDeckHtml() {
             const path = element.querySelector('svg.shape-svg > path.shape-' + part.part);
             if (path) {
                 path.setAttribute('d', part.d);
+                if (part.transform) {
+                    path.setAttribute('transform', part.transform);
+                } else {
+                    path.removeAttribute('transform');
+                }
             }
         });
     };
@@ -11200,7 +11248,10 @@ App.template.newDeckHtml = function newDeckHtml() {
     // Decks saved before format 2 hold their text as <h1>, <ul> …; before format 3,
     // their tables as the deck's own HTML and CSS. Format 4 only added review comments
     // (<aside class="comments">), so a format-3 deck has nothing to convert: it is
-    // simply marked format 4 (importer.js ensureDeckFormatMeta).
+    // simply marked format 4 (importer.js ensureDeckFormatMeta). Format 5 (Phase 10)
+    // only added attributes older decks never carry (data-flip on pictures and box
+    // shapes, element names, hidden elements, slide links, new shapes), so a format-4
+    // deck is likewise just marked format 5.
     const TEXT_MODEL_FORMAT = 2;
     const TABLE_MODEL_FORMAT = 3;
 
@@ -11519,6 +11570,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         lock: '<rect x="4.5" y="9.5" width="11" height="8" rx="1"/><path d="M7 9.5V7a3 3 0 0 1 6 0v2.5"/><path d="M10 12.5v2"/>',
         rotateRight90: '<rect x="3.5" y="9.5" width="9" height="7"/><path d="M8 5.5a7 7 0 0 1 8.5 4.5"/><path d="M13.5 9.5l3 .8.8-3"/>',
         rotateLeft90: '<rect x="7.5" y="9.5" width="9" height="7"/><path d="M12 5.5a7 7 0 0 0-8.5 4.5"/><path d="M6.5 9.5l-3 .8-.8-3"/>',
+        // Flip: a triangle and its mirror image across a dashed axis.
+        flipHorizontal: '<path d="M10 3v14" stroke-dasharray="2 2"/><path d="M8 5L3 15h5z"/><path d="M12 5l5 10h-5z"/>',
+        flipVertical: '<path d="M3 10h14" stroke-dasharray="2 2"/><path d="M5 8L15 3v5z"/><path d="M5 12l10 5v-5z"/>',
         grid: '<rect x="3" y="3" width="14" height="14"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14"/>',
         ruler: '<rect x="2.5" y="6.5" width="15" height="7" rx="0.5"/><path d="M5.5 6.5v3M8.5 6.5v2M11.5 6.5v3M14.5 6.5v2"/>',
         alignToSlide: '<rect x="2.5" y="4" width="15" height="12" rx="1"/><rect x="7" y="8" width="6" height="4" fill="currentColor" fill-opacity="0.25"/>',
@@ -12247,7 +12301,7 @@ App.template.newDeckHtml = function newDeckHtml() {
  * The functions here only calculate; selection.js decides when to call them
  * and history.js makes the result undoable. Tested in tests/unit/transform.test.js.
  *
- * Talks to: nothing (selection.js and elements.js call it).
+ * Talks to: shapes.js (a flipped shape is drawn again); selection.js and elements.js call it.
  */
 
 (function () {
@@ -12459,13 +12513,68 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* Turn `element` to `degrees`; upright leaves no transform at all, so untouched decks stay as they were. */
     App.transform.setRotation = function setRotation(element, degrees) {
-        const angle = App.transform.normalizeAngle(degrees);
-        if (angle === 0) {
-            element.style.removeProperty('transform');
+        writeTransform(element, App.transform.normalizeAngle(degrees));
+    };
+
+    // ---- Flip (Phase 10, deck-format 5) ----
+    //
+    // data-flip="x" | "y" | "xy" says an element is mirrored left-right (x),
+    // upside down (y) or both. A picture is mirrored by its own transform, after
+    // its turn: `rotate(30deg) scale(-1, 1)` (CSS applies the right-most part
+    // first, so the picture is mirrored in its own box, then turned, as
+    // PowerPoint does). A shape is mirrored in its drawing (shapes.js), so its
+    // text still reads normally; a line's data-flip already says which corners
+    // it joins, so a flipped line simply joins the other two.
+
+    /* `flip` with `axis` ('x' or 'y') switched on or off: '', 'x', 'y' or 'xy'. */
+    App.transform.toggleFlip = function toggleFlip(flip, axis) {
+        const has = (which) => (flip || '').indexOf(which) !== -1;
+        const x = axis === 'x' ? !has('x') : has('x');
+        const y = axis === 'y' ? !has('y') : has('y');
+        return (x ? 'x' : '') + (y ? 'y' : '');
+    };
+
+    /* How `element` is mirrored: '', 'x', 'y' or 'xy'. */
+    App.transform.flipOf = function flipOf(element) {
+        return App.transform.toggleFlip(App.transform.toggleFlip(element.getAttribute('data-flip') || '', 'x'), 'x');
+    };
+
+    /* Pictures are mirrored by their transform; shapes and lines by their drawing. */
+    function mirrorsByTransform(element) {
+        return element.getAttribute('data-type') === 'image';
+    }
+
+    /* Mirror `element` as `flip` says ('' = not mirrored); a shape is drawn again. */
+    App.transform.setFlip = function setFlip(element, flip) {
+        const value = App.transform.toggleFlip(App.transform.toggleFlip(flip || '', 'x'), 'x');   // 'yx' -> 'xy'
+        if (value) {
+            element.setAttribute('data-flip', value);
         } else {
-            element.style.transform = 'rotate(' + angle + 'deg)';
+            element.removeAttribute('data-flip');
+        }
+        if (mirrorsByTransform(element)) {
+            writeTransform(element, App.transform.rotationOf(element));
+        } else if (element.getAttribute('data-type') === 'shape') {
+            App.shapes.render(element);
         }
     };
+
+    /* The inline transform from the turn and, for a picture, its flip: 'rotate(30deg) scale(-1, 1)'. */
+    function writeTransform(element, angle) {
+        const flip = mirrorsByTransform(element) ? App.transform.flipOf(element) : '';
+        const parts = [];
+        if (angle !== 0) {
+            parts.push('rotate(' + angle + 'deg)');
+        }
+        if (flip) {
+            parts.push('scale(' + (flip.indexOf('x') !== -1 ? -1 : 1) + ', ' + (flip.indexOf('y') !== -1 ? -1 : 1) + ')');
+        }
+        if (parts.length) {
+            element.style.transform = parts.join(' ');
+        } else {
+            element.style.removeProperty('transform');
+        }
+    }
 
     /* The angle of `point` seen from `center`: 0 straight up, 90 to the right. snap: to 15 degree steps (Shift). */
     App.transform.angleAt = function angleAt(center, point, snap) {
@@ -14448,7 +14557,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         const ends = line ? App.shapes.lineEnds(rect, element.getAttribute('data-flip') || '') : null;
         placeHandle('start', ends && { x: ends.start.x - rect.left, y: ends.start.y - rect.top });
         placeHandle('end', ends && { x: ends.end.x - rect.left, y: ends.end.y - rect.top });
-        placeHandle('adjust', kind && !line ? App.shapes.adjustHandle(kind, rect.width, rect.height, App.shapes.adjustOf(element)) : null);
+        placeHandle('adjust', kind && !line ? App.shapes.adjustHandle(kind, rect.width, rect.height, App.shapes.adjustOf(element),
+            App.transform.flipOf(element)) : null);
     }
 
     // ---------------------------------------------------------------
@@ -14959,7 +15069,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             } else if (kind === 'adjust') {
                 const local = App.transform.toLocal(startRect, startAngle, point);   // a turned shape: along its own sides
                 App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
-                    startRect.height, { x: local.x - startRect.left, y: local.y - startRect.top }));
+                    startRect.height, { x: local.x - startRect.left, y: local.y - startRect.top }, App.transform.flipOf(element)));
             } else if (kind === 'rotate') {
                 const center = { x: startRect.left + startRect.width / 2, y: startRect.top + startRect.height / 2 };
                 App.transform.setRotation(element, App.transform.angleAt(center, point, event.shiftKey));
@@ -15871,6 +15981,51 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         App.history.change('Rotate', currentSlideScope(), () => App.transform.setRotation(element, degrees));
+    };
+
+    // ---------------------------------------------------------------
+    // Flip (Phase 10)
+    // ---------------------------------------------------------------
+
+    /* Pictures and shapes (lines too) can be flipped, unless locked; text, tables, charts and groups cannot. */
+    App.elements.canFlipElement = function canFlipElement(element) {
+        if (!element || App.elements.isLocked(element)) {
+            return false;
+        }
+        const type = element.getAttribute('data-type');
+        return type === 'image' || (type === 'shape' && !!element.getAttribute('data-shape'));
+    };
+
+    function flippableSelected() {
+        return App.selection.getElements().filter(App.elements.canFlipElement);
+    }
+
+    App.elements.canFlip = function canFlip() {
+        return !App.text.isEditing() && flippableSelected().length > 0;
+    };
+
+    /*
+     * Mirror `element` left-right (axis 'x') or upside down ('y') where it shows on
+     * the slide. A turned element turns the other way too (30° becomes 330°): the
+     * flip happens in its own box, then the turn, so this keeps it a mirror image
+     * of what was on the screen, as PowerPoint's Flip does.
+     */
+    App.elements.flipElement = function flipElement(element, axis) {
+        const angle = App.transform.rotationOf(element);
+        App.transform.setFlip(element, App.transform.toggleFlip(App.transform.flipOf(element), axis));
+        if (angle) {
+            App.transform.setRotation(element, -angle);
+        }
+    };
+
+    /* Arrange > Rotate > Flip Horizontal / Flip Vertical: each selected element in its own place; one undo step. */
+    App.elements.flip = function flip(axis) {
+        const elements = App.elements.canFlip() ? flippableSelected() : [];
+        if (elements.length) {
+            App.history.change(axis === 'x' ? 'Flip horizontal' : 'Flip vertical', currentSlideScope(), () => {
+                elements.forEach((element) => App.elements.flipElement(element, axis));
+            });
+        }
     };
 
     // ---------------------------------------------------------------
@@ -18995,6 +19150,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('cropPicture', {
             // Not while the picture is turned (Phase 7): the crop frame and its handles are drawn upright.
             label: 'Crop', isEnabled: () => App.images.isPictureSelected() && !App.transform.rotationOf(App.selection.getElement()) &&
+                !App.transform.flipOf(App.selection.getElement()) &&
                 !App.elements.isLocked(App.selection.getElement()),
             isChecked: () => App.crop.isCropping(),
             run: () => App.crop.toggle(),
@@ -19088,6 +19244,10 @@ App.template.newDeckHtml = function newDeckHtml() {
             run: () => App.elements.rotateBy(90) });
         App.commands.define('rotateLeft90', { label: 'Rotate Left 90°', isEnabled: () => App.elements.canRotate(),
             run: () => App.elements.rotateBy(-90) });
+        App.commands.define('flipHorizontal', { label: 'Flip Horizontal', isEnabled: () => App.elements.canFlip(),
+            run: () => App.elements.flip('x') });
+        App.commands.define('flipVertical', { label: 'Flip Vertical', isEnabled: () => App.elements.canFlip(),
+            run: () => App.elements.flip('y') });
         // View tab (rulers.js): remembered in the settings.
         App.commands.define('toggleGridlines', {
             label: 'Gridlines', isEnabled: hasDeck, isChecked: () => App.settings.get().showGridlines,
@@ -25866,6 +26026,13 @@ App.template.newDeckHtml = function newDeckHtml() {
             return pictureItem(element, offset, ctx, 'a picture (SVG or another format) came across as a PNG');
         }
         const options = Object.assign({ data: source.slice(5) }, position(boxOf(element, offset), App.pptx.rotationOf(element.style.transform)));
+        const flip = element.getAttribute('data-flip') || '';   // Flip (Phase 10): PowerPoint's own flip
+        if (flip.indexOf('x') !== -1) {
+            options.flipH = true;
+        }
+        if (flip.indexOf('y') !== -1) {
+            options.flipV = true;
+        }
         const opacity = parseFloat(ctx.view.getComputedStyle(element).opacity);
         if (opacity < 1) {
             options.transparency = Math.round((1 - opacity) * 100);
@@ -25942,6 +26109,10 @@ App.template.newDeckHtml = function newDeckHtml() {
         const hasText = paragraphs.some((paragraph) => paragraph.runs.some((run) => run.text.trim()));
         if (!hasText) {
             return { kind: 'shape', shape: SHAPES[kind], options: options };
+        }
+        if (options.flipV) {
+            // PowerPoint turns a shape's text over with the shape; the editor keeps it upright.
+            ctx.report.push('a shape flipped upside down shows its text upside down in PowerPoint');
         }
         const areaStyle = view.getComputedStyle(area);
         const valign = { center: 'middle', 'flex-end': 'bottom', end: 'bottom' }[areaStyle.justifyContent] || 'top';
@@ -26643,7 +26814,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                     [{ command: 'alignToSlide', icon: 'alignToSlide' }]],
                 },
                 { label: 'Group', rows: [[{ command: 'group', icon: 'group' }], [{ command: 'ungroup', icon: 'ungroup' }]] },
-                { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }], [{ command: 'rotateLeft90', icon: 'rotateLeft90' }]] },
+                { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }, { command: 'flipHorizontal', icon: 'flipHorizontal' }],
+                    [{ command: 'rotateLeft90', icon: 'rotateLeft90' }, { command: 'flipVertical', icon: 'flipVertical' }]] },
                 { label: 'Lock', commands: [['lock', 'lock']] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +

@@ -6,7 +6,7 @@
  * The functions here only calculate; selection.js decides when to call them
  * and history.js makes the result undoable. Tested in tests/unit/transform.test.js.
  *
- * Talks to: nothing (selection.js and elements.js call it).
+ * Talks to: shapes.js (a flipped shape is drawn again); selection.js and elements.js call it.
  */
 
 (function () {
@@ -218,13 +218,68 @@
 
     /* Turn `element` to `degrees`; upright leaves no transform at all, so untouched decks stay as they were. */
     App.transform.setRotation = function setRotation(element, degrees) {
-        const angle = App.transform.normalizeAngle(degrees);
-        if (angle === 0) {
-            element.style.removeProperty('transform');
+        writeTransform(element, App.transform.normalizeAngle(degrees));
+    };
+
+    // ---- Flip (Phase 10, deck-format 5) ----
+    //
+    // data-flip="x" | "y" | "xy" says an element is mirrored left-right (x),
+    // upside down (y) or both. A picture is mirrored by its own transform, after
+    // its turn: `rotate(30deg) scale(-1, 1)` (CSS applies the right-most part
+    // first, so the picture is mirrored in its own box, then turned, as
+    // PowerPoint does). A shape is mirrored in its drawing (shapes.js), so its
+    // text still reads normally; a line's data-flip already says which corners
+    // it joins, so a flipped line simply joins the other two.
+
+    /* `flip` with `axis` ('x' or 'y') switched on or off: '', 'x', 'y' or 'xy'. */
+    App.transform.toggleFlip = function toggleFlip(flip, axis) {
+        const has = (which) => (flip || '').indexOf(which) !== -1;
+        const x = axis === 'x' ? !has('x') : has('x');
+        const y = axis === 'y' ? !has('y') : has('y');
+        return (x ? 'x' : '') + (y ? 'y' : '');
+    };
+
+    /* How `element` is mirrored: '', 'x', 'y' or 'xy'. */
+    App.transform.flipOf = function flipOf(element) {
+        return App.transform.toggleFlip(App.transform.toggleFlip(element.getAttribute('data-flip') || '', 'x'), 'x');
+    };
+
+    /* Pictures are mirrored by their transform; shapes and lines by their drawing. */
+    function mirrorsByTransform(element) {
+        return element.getAttribute('data-type') === 'image';
+    }
+
+    /* Mirror `element` as `flip` says ('' = not mirrored); a shape is drawn again. */
+    App.transform.setFlip = function setFlip(element, flip) {
+        const value = App.transform.toggleFlip(App.transform.toggleFlip(flip || '', 'x'), 'x');   // 'yx' -> 'xy'
+        if (value) {
+            element.setAttribute('data-flip', value);
         } else {
-            element.style.transform = 'rotate(' + angle + 'deg)';
+            element.removeAttribute('data-flip');
+        }
+        if (mirrorsByTransform(element)) {
+            writeTransform(element, App.transform.rotationOf(element));
+        } else if (element.getAttribute('data-type') === 'shape') {
+            App.shapes.render(element);
         }
     };
+
+    /* The inline transform from the turn and, for a picture, its flip: 'rotate(30deg) scale(-1, 1)'. */
+    function writeTransform(element, angle) {
+        const flip = mirrorsByTransform(element) ? App.transform.flipOf(element) : '';
+        const parts = [];
+        if (angle !== 0) {
+            parts.push('rotate(' + angle + 'deg)');
+        }
+        if (flip) {
+            parts.push('scale(' + (flip.indexOf('x') !== -1 ? -1 : 1) + ', ' + (flip.indexOf('y') !== -1 ? -1 : 1) + ')');
+        }
+        if (parts.length) {
+            element.style.transform = parts.join(' ');
+        } else {
+            element.style.removeProperty('transform');
+        }
+    }
 
     /* The angle of `point` seen from `center`: 0 straight up, 90 to the right. snap: to 15 degree steps (Shift). */
     App.transform.angleAt = function angleAt(center, point, snap) {

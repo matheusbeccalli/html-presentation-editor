@@ -317,6 +317,13 @@
             return pictureItem(element, offset, ctx, 'a picture (SVG or another format) came across as a PNG');
         }
         const options = Object.assign({ data: source.slice(5) }, position(boxOf(element, offset), App.pptx.rotationOf(element.style.transform)));
+        const flip = element.getAttribute('data-flip') || '';   // Flip (Phase 10): PowerPoint's own flip
+        if (flip.indexOf('x') !== -1) {
+            options.flipH = true;
+        }
+        if (flip.indexOf('y') !== -1) {
+            options.flipV = true;
+        }
         const opacity = parseFloat(ctx.view.getComputedStyle(element).opacity);
         if (opacity < 1) {
             options.transparency = Math.round((1 - opacity) * 100);
@@ -393,6 +400,10 @@
         const hasText = paragraphs.some((paragraph) => paragraph.runs.some((run) => run.text.trim()));
         if (!hasText) {
             return { kind: 'shape', shape: SHAPES[kind], options: options };
+        }
+        if (options.flipV) {
+            // PowerPoint turns a shape's text over with the shape; the editor keeps it upright.
+            ctx.report.push('a shape flipped upside down shows its text upside down in PowerPoint');
         }
         const areaStyle = view.getComputedStyle(area);
         const valign = { center: 'middle', 'flex-end': 'bottom', end: 'bottom' }[areaStyle.justifyContent] || 'top';

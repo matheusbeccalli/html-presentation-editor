@@ -115,7 +115,8 @@
         const ends = line ? App.shapes.lineEnds(rect, element.getAttribute('data-flip') || '') : null;
         placeHandle('start', ends && { x: ends.start.x - rect.left, y: ends.start.y - rect.top });
         placeHandle('end', ends && { x: ends.end.x - rect.left, y: ends.end.y - rect.top });
-        placeHandle('adjust', kind && !line ? App.shapes.adjustHandle(kind, rect.width, rect.height, App.shapes.adjustOf(element)) : null);
+        placeHandle('adjust', kind && !line ? App.shapes.adjustHandle(kind, rect.width, rect.height, App.shapes.adjustOf(element),
+            App.transform.flipOf(element)) : null);
     }
 
     // ---------------------------------------------------------------
@@ -626,7 +627,7 @@
             } else if (kind === 'adjust') {
                 const local = App.transform.toLocal(startRect, startAngle, point);   // a turned shape: along its own sides
                 App.shapes.setAdjust(element, App.shapes.adjustFrom(element.getAttribute('data-shape'), startRect.width,
-                    startRect.height, { x: local.x - startRect.left, y: local.y - startRect.top }));
+                    startRect.height, { x: local.x - startRect.left, y: local.y - startRect.top }, App.transform.flipOf(element)));
             } else if (kind === 'rotate') {
                 const center = { x: startRect.left + startRect.width / 2, y: startRect.top + startRect.height / 2 };
                 App.transform.setRotation(element, App.transform.angleAt(center, point, event.shiftKey));

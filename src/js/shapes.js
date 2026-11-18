@@ -17,7 +17,9 @@
  *
  * Kinds: rect, roundRect, ellipse, chevron, pentagon, callout (filled boxes);
  * line and arrow (a stroke from one corner of the box to the other: data-flip
- * "x" / "y" / "xy" says which corners). Optional data-adjust holds the
+ * "x" / "y" / "xy" says which corners). A box shape with data-flip (Phase 10)
+ * is mirrored inside its box by an SVG transform on its paths (mirrorOf); its
+ * text is not. Optional data-adjust holds the
  * yellow-handle value (Phase 5 step 8); without it the PowerPoint default is used.
  *
  * Text (step 7): a box shape holds a text area over its drawing,
@@ -144,6 +146,27 @@
      */
     App.shapes.geometry = function geometry(kind, w, h, options) {
         const opts = options || {};
+        const parts = drawnParts(kind, w, h, opts);
+        const mirror = App.shapes.isLine(kind) ? '' : mirrorOf(opts.flip, w, h);
+        return mirror ? parts.map((part) => Object.assign(part, { transform: mirror })) : parts;
+    };
+
+    /*
+     * A flipped box shape (data-flip, Phase 10) is drawn as usual and mirrored
+     * inside its box by an SVG transform on each path: x -> w - x (left-right),
+     * y -> h - y (upside down). Its text and shadow are not mirrored. Lines are
+     * not mirrored this way: their flip says which corners they join.
+     */
+    function mirrorOf(flip, w, h) {
+        const x = (flip || '').indexOf('x') !== -1;
+        const y = (flip || '').indexOf('y') !== -1;
+        if (!x && !y) {
+            return '';
+        }
+        return 'matrix(' + (x ? -1 : 1) + ' 0 0 ' + (y ? -1 : 1) + ' ' + (x ? n(w) : 0) + ' ' + (y ? n(h) : 0) + ')';
+    }
+
+    function drawnParts(kind, w, h, opts) {
         const adjust = opts.adjust === undefined || opts.adjust === null ? DEFAULT_ADJUST[kind] : opts.adjust;
         const short = Math.min(w, h);
         switch (kind) {
@@ -280,7 +303,23 @@
     }
 
     /* The yellow handle of a kind in its w x h box (box px), or null for kinds without one. */
-    App.shapes.adjustHandle = function adjustHandle(kind, w, h, adjust) {
+    App.shapes.adjustHandle = function adjustHandle(kind, w, h, adjust, flip) {
+        return mirrorPoint(unflippedHandle(kind, w, h, adjust), w, h, flip);
+    };
+
+    /* A point in a w x h box seen through the shape's flip (the same sum undoes it). */
+    function mirrorPoint(point, w, h, flip) {
+        if (!point) {
+            return point;
+        }
+        const round2 = App.util.round2;
+        return {
+            x: (flip || '').indexOf('x') !== -1 ? round2(w - point.x) : point.x,
+            y: (flip || '').indexOf('y') !== -1 ? round2(h - point.y) : point.y,
+        };
+    }
+
+    function unflippedHandle(kind, w, h, adjust) {
         const value = adjust === undefined || adjust === null ? DEFAULT_ADJUST[kind] : adjust;
         const short = Math.min(w, h);
         const round2 = App.util.round2;
@@ -294,7 +333,8 @@
     };
 
     /* The adjust value for the yellow handle dragged to `point` (box px). */
-    App.shapes.adjustFrom = function adjustFrom(kind, w, h, point) {
+    App.shapes.adjustFrom = function adjustFrom(kind, w, h, dragged, flip) {
+        const point = mirrorPoint(dragged, w, h, flip);
         const short = Math.min(w, h) || 1;
         const clamp = (value, low, high) => Math.min(Math.max(value, low), high);
         switch (kind) {
@@ -374,6 +414,9 @@
             path.setAttribute('class', 'shape-' + part.part);
             path.setAttribute('style', STYLES[part.part]);
             path.setAttribute('d', part.d);
+            if (part.transform) {
+                path.setAttribute('transform', part.transform);
+            }
             svg.appendChild(path);
         });
         element.appendChild(svg);
@@ -493,6 +536,11 @@
             const path = element.querySelector('svg.shape-svg > path.shape-' + part.part);
             if (path) {
                 path.setAttribute('d', part.d);
+                if (part.transform) {
+                    path.setAttribute('transform', part.transform);
+                } else {
+                    path.removeAttribute('transform');
+                }
             }
         });
     };

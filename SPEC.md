@@ -105,7 +105,7 @@ The editor works on decks in this format. Copilot is asked to produce it (Append
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
-  <meta name="deck-format" content="4">
+  <meta name="deck-format" content="5">
   <style>
     :root { --font-heading: Calibri, Arial, sans-serif; --font-body: Calibri, Arial, sans-serif;
             --color-primary: #CC092F; --color-accent: #1F2A44; --color-text: #222; --color-bg: #fff;
@@ -159,6 +159,8 @@ Tables follow the **table model** (Phase 4, deck format 3): one `<tbody>` of `<t
 Element types: `text`, `image`, `table`, `shape`, `chart`, `group`. Every element has a unique `data-id`, absolute `left/top/width/height` in px, and a `z-index`. Theme colors and fonts come from the CSS variables in `:root`, so changing a variable restyles the whole deck. Slides may carry `data-hidden="true"` and `data-layout="title|title-content|two-columns|blank"`. A deck-level `<div class="master">` holds elements repeated on every slide (logo, footer, "Confidencial", slide number).
 
 Review comments (Phase 9, deck format 4) live in each slide's hidden `<aside class="comments">`: one `<div class="comment">` per comment, plain text, with its id (`data-comment-id`, unique in the deck), the element it points at (`data-target` = that element's `data-id`; none = the slide), the author's initials and the date (ISO). They are saved with the deck but never shown, presented, printed or exported, and Save a Clean Copy leaves them out. Format 4 only added them, so opening a format-3 deck changes nothing but the number.
+
+Format 5 (Phase 10) only adds attributes, so opening a format-4 deck likewise changes nothing but the number. Flip: `data-flip="x" | "y" | "xy"` on a picture (mirrored by its transform after its turn: `transform: rotate(30deg) scale(-1, 1)`) or a box shape (mirrored in its drawing: an SVG `transform` on each path, so its text is not); on a line it already said which corners the line joins.
 
 **3.4 Importing decks that do not follow the contract**
 

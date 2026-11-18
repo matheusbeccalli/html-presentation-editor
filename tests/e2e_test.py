@@ -303,7 +303,7 @@ def test_format1_deck_text_is_converted(browser):
         return [box(parse(a)), box(parse(b))];
     }""", [CONTRACT_FORMAT1.read_text(encoding="utf-8"), saved.read_text(encoding="utf-8")])
     check(positions[0] == positions[1], "every element kept its id, position, size and stacking order")
-    check('<meta name="deck-format" content="4">' in saved.read_text(encoding="utf-8"), "saved as format 4 (the current one)")
+    check('<meta name="deck-format" content="5">' in saved.read_text(encoding="utf-8"), "saved as format 5 (the current one)")
     cells = page.evaluate("""() => Array.from(App.deck.getDocument().querySelectorAll('[data-id="e9"] td'))
         .map((cell) => App.text.getModel(cell).map((line) => line.text).join('/'))""")
     check(len(cells) == 24 and cells[:4] == ["Empresa", "EV (R$ mn)", "EV/EBITDA 2025E", "Margem EBITDA"],
@@ -6541,7 +6541,7 @@ def test_comments_saved_but_never_shown_or_sent(browser):
     # Saved: in the file, format 4; opened again it is a comment, not a text box.
     saved = editor.save_as_download("comments-saved.html")
     html = saved.read_text(encoding="utf-8")
-    check(COMMENT_SENTINEL in html and '<meta name="deck-format" content="4">' in html, "saved with the deck, format 4")
+    check(COMMENT_SENTINEL in html and '<meta name="deck-format" content="5">' in html, "saved with the deck, format 5")
     player, errors = play_saved_deck(browser, saved)
     check(COMMENT_SENTINEL not in player.inner_text("body") and errors == [], "the saved deck on its own never shows it")
     player.context.close()
@@ -7290,6 +7290,121 @@ def test_slide_background(browser):
     editor.close()
 
 
+# ---------------------------------------------------------------------------
+# Phase 10: PowerPoint gaps
+# ---------------------------------------------------------------------------
+
+FLIP_DECK_JS = """() => {   // slide 6: a picture red on the left, blue on the right (f1), and a chevron with text (f2)
+    App.deck.goTo(5);
+    const doc = App.deck.getDocument();
+    const slide = App.deck.getSlides()[5];
+    const canvas = document.createElement('canvas');
+    canvas.width = 200; canvas.height = 100;
+    const g = canvas.getContext('2d');
+    g.fillStyle = '#ff0000'; g.fillRect(0, 0, 100, 100);
+    g.fillStyle = '#0000ff'; g.fillRect(100, 0, 100, 100);
+    App.history.change('Add', { slideId: slide.getAttribute('data-slide-id') }, () => {
+        const img = doc.createElement('img');
+        img.className = 'el'; img.alt = '';
+        img.setAttribute('data-type', 'image'); img.setAttribute('data-id', 'f1');
+        img.src = canvas.toDataURL('image/png');
+        img.setAttribute('style', 'left: 100px; top: 100px; width: 200px; height: 100px; z-index: 50;');
+        slide.appendChild(img);
+        const chevron = App.shapes.createShape(doc, 'chevron', { left: 400, top: 100, width: 200, height: 80 }, 'f2');
+        chevron.style.zIndex = '51';
+        slide.appendChild(chevron);
+        App.text.writeLines(App.shapes.textOf(chevron), ['Etapa'], {});
+    });
+}"""
+
+
+def slide_colour(page, left, top, right, bottom):
+    """The commonest colour on screen in that part of the slide (slide px)."""
+    a = slide_to_screen(page, left, top)
+    b = slide_to_screen(page, right, bottom)
+    return common_colour(page, {"left": a[0], "top": a[1], "right": b[0], "bottom": b[1]})
+
+
+def test_flip(browser):
+    """Phase 10 step 1: Arrange > Flip Horizontal / Flip Vertical mirror pictures and shapes where they are (a
+    shape's text stays readable); a turned element turns the other way, as in PowerPoint; text boxes do not flip;
+    one undo step; saved (deck-format 5) and reopened it stays flipped; PowerPoint gets its own flip."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate(FLIP_DECK_JS)
+    flip_of = lambda i: page.evaluate(f"App.deck.getDocument().querySelector('[data-id=\"{i}\"]').getAttribute('data-flip')")  # noqa: E731
+    button = lambda name: "button[data-command='" + name + "']"  # noqa: E731
+    red = lambda c: c[0] > 200 and c[2] < 60  # noqa: E731
+    blue = lambda c: c[2] > 200 and c[0] < 60  # noqa: E731
+    check(red(slide_colour(page, 110, 110, 190, 190)), "the picture: red on the left")
+
+    # Both selected, Arrange > Flip Horizontal: the picture is blue on the left now, the chevron points left.
+    page.mouse.click(*slide_to_screen(page, 200, 150))
+    page.keyboard.down("Shift")
+    page.mouse.click(*slide_to_screen(page, 450, 120))
+    page.keyboard.up("Shift")
+    check(sorted(page.evaluate("App.selection.selectedIds()")) == ["f1", "f2"], "both selected")
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.click(button("flipHorizontal"))
+    check(flip_of("f1") == "x" and flip_of("f2") == "x", "both flipped")
+    check(page.evaluate("App.history.undoLabel()") == "Flip horizontal", "one step")
+    check(blue(slide_colour(page, 110, 110, 190, 190)), "the picture: blue on the left now")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"f2\"] path.shape-fill').getAttribute('transform')")
+          == "matrix(-1 0 0 1 200 0)", "the chevron drawn mirrored")
+    # The chevron's point is on the left now: its far right middle is the notch (empty), its left tip is filled.
+    check(slide_colour(page, 590, 135, 598, 145) == slide_colour(page, 620, 135, 628, 145),
+          "the right side of the chevron is its notch now (slide shows through)")
+    text_box = page.evaluate("""() => { const r = App.deck.getDocument().querySelector('[data-id="f2"] .shape-text p').getBoundingClientRect();
+        return r.width > 0; }""")
+    check(text_box, "the text is still there")
+    page.screenshot(path=str(OUTPUT / "140-flipped.png"))
+
+    page.keyboard.press("Control+z")
+    check(flip_of("f1") is None and flip_of("f2") is None, "one Ctrl+Z: both as they were")
+    check(red(slide_colour(page, 110, 110, 190, 190)), "red on the left again")
+    page.keyboard.press("Control+y")
+
+    # A turned picture: Flip Vertical turns it the other way (30° -> 330°) and mirrors it upside down.
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 200, 150))
+    page.fill("#format-rotation", "30")
+    page.press("#format-rotation", "Enter")
+    page.click(button("flipVertical"))
+    check(flip_of("f1") == "xy", f"flipped both ways: {flip_of('f1')}")
+    check(page.evaluate("App.transform.rotationOf(App.deck.getDocument().querySelector('[data-id=\"f1\"]'))") == 330,
+          "turned the other way")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"f1\"]').style.transform") ==
+          "rotate(330deg) scale(-1, -1)", "stored in its transform")
+    check(not page.evaluate("App.commands.isEnabled('cropPicture')"), "no crop while flipped")
+
+    # A text box does not flip.
+    page.evaluate("App.deck.goTo(0)")
+    page.mouse.click(*slide_to_screen(page, 600, 410))
+    check(page.evaluate("App.selection.selectedId()") == "e4", "the subtitle selected")
+    check(page.is_disabled(button("flipHorizontal")) and page.is_disabled(button("flipVertical")), "no flip for text")
+
+    # Saved and reopened: still flipped, format 5.
+    saved = editor.save_as_download("contract-deck-flipped.html")
+    html = saved.read_text(encoding="utf-8")
+    check('<meta name="deck-format" content="5">' in html and 'data-flip="xy"' in html, "saved as format 5, flipped")
+    reopened = Editor(browser)
+    reopened.open(saved)
+    check(reopened.page.evaluate("App.deck.getDocument().querySelector('[data-id=\"f2\"]').getAttribute('data-flip')") == "x",
+          "reopened: the chevron still flipped")
+    reopened.close()
+
+    # PowerPoint: its own flip on the picture and the chevron.
+    path, report = export_pptx(editor, "contract-deck-flipped.pptx")
+    xml = pptx_parts(path)["ppt/slides/slide6.xml"]
+    pictures = re.findall(r"<p:pic>(.*?)</p:pic>", xml, flags=re.S)
+    check(any('flipH="1"' in p and 'flipV="1"' in p for p in pictures), "the picture flipped both ways")
+    chevron = next(shape for shape in re.findall(r"<p:sp>(.*?)</p:sp>", xml, flags=re.S) if 'prst="chevron"' in shape)
+    check('flipH="1"' in chevron and 'flipV="1"' not in chevron, "the chevron flipped left-right")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7391,6 +7506,7 @@ TESTS = [
     test_about_and_licenses,
     test_status_bar,
     test_phase9_done_when,
+    test_flip,
 ]
 
 

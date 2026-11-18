@@ -45,6 +45,9 @@
         lock: '<rect x="4.5" y="9.5" width="11" height="8" rx="1"/><path d="M7 9.5V7a3 3 0 0 1 6 0v2.5"/><path d="M10 12.5v2"/>',
         rotateRight90: '<rect x="3.5" y="9.5" width="9" height="7"/><path d="M8 5.5a7 7 0 0 1 8.5 4.5"/><path d="M13.5 9.5l3 .8.8-3"/>',
         rotateLeft90: '<rect x="7.5" y="9.5" width="9" height="7"/><path d="M12 5.5a7 7 0 0 0-8.5 4.5"/><path d="M6.5 9.5l-3 .8-.8-3"/>',
+        // Flip: a triangle and its mirror image across a dashed axis.
+        flipHorizontal: '<path d="M10 3v14" stroke-dasharray="2 2"/><path d="M8 5L3 15h5z"/><path d="M12 5l5 10h-5z"/>',
+        flipVertical: '<path d="M3 10h14" stroke-dasharray="2 2"/><path d="M5 8L15 3v5z"/><path d="M5 12l10 5v-5z"/>',
         grid: '<rect x="3" y="3" width="14" height="14"/><path d="M3 7.7h14M3 12.3h14M7.7 3v14M12.3 3v14"/>',
         ruler: '<rect x="2.5" y="6.5" width="15" height="7" rx="0.5"/><path d="M5.5 6.5v3M8.5 6.5v2M11.5 6.5v3M14.5 6.5v2"/>',
         alignToSlide: '<rect x="2.5" y="4" width="15" height="12" rx="1"/><rect x="7" y="8" width="6" height="4" fill="currentColor" fill-opacity="0.25"/>',

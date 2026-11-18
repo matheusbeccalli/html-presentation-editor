@@ -350,6 +350,7 @@
         App.commands.define('cropPicture', {
             // Not while the picture is turned (Phase 7): the crop frame and its handles are drawn upright.
             label: 'Crop', isEnabled: () => App.images.isPictureSelected() && !App.transform.rotationOf(App.selection.getElement()) &&
+                !App.transform.flipOf(App.selection.getElement()) &&
                 !App.elements.isLocked(App.selection.getElement()),
             isChecked: () => App.crop.isCropping(),
             run: () => App.crop.toggle(),
@@ -443,6 +444,10 @@
             run: () => App.elements.rotateBy(90) });
         App.commands.define('rotateLeft90', { label: 'Rotate Left 90°', isEnabled: () => App.elements.canRotate(),
             run: () => App.elements.rotateBy(-90) });
+        App.commands.define('flipHorizontal', { label: 'Flip Horizontal', isEnabled: () => App.elements.canFlip(),
+            run: () => App.elements.flip('x') });
+        App.commands.define('flipVertical', { label: 'Flip Vertical', isEnabled: () => App.elements.canFlip(),
+            run: () => App.elements.flip('y') });
         // View tab (rulers.js): remembered in the settings.
         App.commands.define('toggleGridlines', {
             label: 'Gridlines', isEnabled: hasDeck, isChecked: () => App.settings.get().showGridlines,

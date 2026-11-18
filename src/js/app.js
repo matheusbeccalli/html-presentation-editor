@@ -17,7 +17,7 @@ window.App = {
     // 2 = text in the flat-paragraph model (Phase 3); 3 = tables in the table model (Phase 4);
     // 4 = review comments in <aside class="comments"> (Phase 9, comments.js).
     // Older decks are migrated on open (normalize.js).
-    DECK_FORMAT: 4,
+    DECK_FORMAT: 5,
 
     // Shared state that several modules read. Kept small on purpose.
     state: {

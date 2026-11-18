@@ -105,7 +105,7 @@ test('import: a saved deck\'s comments come back as comments (the slide stays a 
 test('import: a format-3 deck is upgraded to format 4 (it has no comments yet: nothing to convert or report)', async () => {
     const result = await App.importer.importDeck(FORMAT_3_WITH_COMMENTS
         .replace('content="4"', 'content="3"').replace(/<aside class="comments">.*?<\/aside>/, ''));
-    assertEqual(parseDoc(result.html).querySelector('meta[name="deck-format"]').getAttribute('content'), '4');
+    assertEqual(parseDoc(result.html).querySelector('meta[name="deck-format"]').getAttribute('content'), '5');
     assert(!App.importer.reportHasChanges(result.report), 'nothing to report');
 });
 

@@ -23,6 +23,9 @@ test('selection pane: an element\'s name is its own, else what it is (as the com
     assertEqual(e1.getAttribute('data-name').length, 60, 'at most 60 characters');
     App.elements.setName(e1, '   ');
     assertEqual([e1.hasAttribute('data-name'), App.elements.nameOf(e1)], [false, 'Text: Receita líquida'], 'empty: back to what it is');
+    const triangle = App.shapes.createShape(doc, 'triangle', { left: 0, top: 0, width: 100, height: 80 }, 'e9');
+    doc.querySelector('section').appendChild(triangle);
+    assertEqual(App.elements.nameOf(triangle), 'Triangle', 'a shape without text: its kind');
 });
 
 test('selection pane: a hidden element is marked, never picked on the slide, and the deck\'s stylesheet hides it', () => {

@@ -664,7 +664,13 @@
 
     App.elements.nameOf = function nameOf(element) {
         const own = (element.getAttribute('data-name') || '').trim();
-        return own || App.comments.targetLabel(element.closest('section.slide'), element.getAttribute('data-id'));
+        if (own) {
+            return own;
+        }
+        const label = App.comments.targetLabel(element.closest('section.slide'), element.getAttribute('data-id'));
+        // A shape without text: its kind, as the gallery names it ("Triangle", "Elbow Line").
+        const kind = label === 'Shape' && App.shapes.KINDS.find((entry) => entry.kind === element.getAttribute('data-shape'));
+        return kind ? kind.label : label;
     };
 
     App.elements.setName = function setName(element, name) {

@@ -116,7 +116,8 @@ App.createHistory = function createHistory(options) {
     function takeSnapshot(scope) {
         const doc = getDoc();
         if (scope === 'deck') {
-            return { head: doc.head.innerHTML, body: doc.body.innerHTML };
+            // The deck's language (<html lang>, Phase 10) goes with the whole deck too.
+            return { head: doc.head.innerHTML, body: doc.body.innerHTML, lang: doc.documentElement.getAttribute('lang') };
         }
         if (scope.slides) {
             return takeSlides(doc, scope.slides);
@@ -129,6 +130,11 @@ App.createHistory = function createHistory(options) {
         if (scope === 'deck') {
             doc.head.innerHTML = snapshot.head;
             doc.body.innerHTML = snapshot.body;
+            if (snapshot.lang) {
+                doc.documentElement.setAttribute('lang', snapshot.lang);
+            } else if (snapshot.lang === null) {
+                doc.documentElement.removeAttribute('lang');
+            }
             return;
         }
         if (scope.slides) {

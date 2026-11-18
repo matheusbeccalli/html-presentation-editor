@@ -504,6 +504,52 @@
         return alignTextButton;
     }
 
+    // ---- Review > Language (Phase 10) ----
+
+    let languageButton = null;
+
+    function languageLabel() {
+        const doc = App.deck.getDocument();
+        const lang = doc ? App.text.deckLanguage(doc) : 'pt-BR';
+        return App.text.LANGUAGES.find(([code]) => code === lang)[1];
+    }
+
+    function createLanguage() {
+        languageButton = el('button', {
+            type: 'button', class: 'ribbon-button small named list-button language-button',
+            title: 'The deck\'s language: PowerPoint checks the exported text in it', 'aria-haspopup': 'menu',
+            onclick: () => {
+                if (menu && menu.classList.contains('language-menu')) {
+                    closeMenu();
+                    return;
+                }
+                const doc = App.deck.getDocument();
+                const current = doc ? App.text.deckLanguage(doc) : null;
+                openMenu(languageButton, 'language-menu', App.text.LANGUAGES.map(([code, label]) => ({
+                    label: label, value: code, checked: code === current,
+                })), (value) => App.commands.run('setDeckLanguage', value));
+            },
+        }, ['Language ▾']);
+        return languageButton;
+    }
+
+    /* Review > Spelling in Edge: why the red underlines follow Edge's settings, and where to change them. */
+    App.textControls.openSpellingHelp = function openSpellingHelp() {
+        const p = (text) => el('p', {}, [text]);
+        App.dialogs.show({
+            title: 'Spelling in Edge', className: 'dialog-spelling', buttons: [{ label: 'OK', value: true, primary: true }],
+            body: el('div', {}, [
+                p('Edge underlines spelling mistakes using the languages turned on in its own settings, the same for every ' +
+                    'page; the deck\'s language (Review > Language) does not change that.'),
+                p('To check Portuguese and English at the same time: open a new Edge tab, type edge://settings/languages in the ' +
+                    'address bar, add Portuguese (Brazil) and English (United States) under Preferred languages if they are ' +
+                    'missing, and turn both on under Check spelling. A word is then accepted if it is right in either language.'),
+                p('On a work computer these settings may be locked by IT.'),
+                p('The deck\'s language goes into Export > PowerPoint: PowerPoint checks the slides\' text in that language.'),
+            ]),
+        });
+    };
+
     // ---- The paste options button (after a paste: at the end of the pasted text, or at a pasted table's corner) ----
 
     let pasteButton = null;
@@ -584,6 +630,9 @@
         if (name === 'alignText') {
             return createAlignText();
         }
+        if (name === 'deckLanguage') {
+            return createLanguage();
+        }
         if (name === 'fontColor') {
             return createColorButton('color');
         }
@@ -609,8 +658,23 @@
         }
     }
 
+    /* The Phase 10 menu buttons, on whichever tab shows them. */
+    function refreshMenuButtons() {
+        if (caseButton) {
+            caseButton.disabled = !App.commands.isEnabled('changeCase');
+        }
+        if (alignTextButton) {
+            alignTextButton.disabled = !App.commands.isEnabled('alignTextMiddle');
+        }
+        if (languageButton && languageButton.isConnected) {
+            languageButton.textContent = languageLabel() + ' ▾';
+            languageButton.disabled = !App.commands.isEnabled('setDeckLanguage');
+        }
+    }
+
     App.textControls.refresh = function refresh() {
         refreshColorButtons();
+        refreshMenuButtons();
         if (!fontButton || !fontButton.isConnected) {
             return;
         }
@@ -625,12 +689,6 @@
         }
         if (lineSpacingButton) {
             lineSpacingButton.disabled = !enabled;
-        }
-        if (caseButton) {
-            caseButton.disabled = !App.commands.isEnabled('changeCase');
-        }
-        if (alignTextButton) {
-            alignTextButton.disabled = !App.commands.isEnabled('alignTextMiddle');
         }
     };
 })();

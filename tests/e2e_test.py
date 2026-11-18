@@ -8042,6 +8042,131 @@ def test_reuse_slides_and_elements_across_tabs(browser):
     editor.close()
 
 
+def test_deck_language(browser):
+    """Phase 10 step 9: Review > Language sets the deck's language (Portuguese or English: <html lang>), one undo step,
+    saved; the PowerPoint export marks its text in that language; Spelling in Edge explains where Edge's own spelling
+    languages are set (the deck's language does not change Edge's underlines)."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    lang = lambda: page.evaluate("App.deck.getDocument().documentElement.getAttribute('lang')")  # noqa: E731
+    page.click(".ribbon-tab[data-tab='review']")
+    check(page.text_content(".language-button").startswith("Portuguese (Brazil)"), page.text_content(".language-button"))
+    page.click(".language-button")
+    page.click(".language-menu .menu-item:has-text('English (United States)')")
+    check(lang() == "en-US" and page.evaluate("App.history.undoLabel()") == "Language", lang())
+    check(page.text_content(".language-button").startswith("English (United States)"), "the button says so")
+    page.keyboard.press("Control+z")
+    check(lang() == "pt-BR", f"undone: {lang()}")
+    page.keyboard.press("Control+y")
+    check(lang() == "en-US", f"redone: {lang()}")
+
+    page.click("button[data-command='spellingHelp']")
+    wait_until(page, "!!document.querySelector('dialog[open].dialog-spelling')")
+    check("edge://settings/languages" in page.text_content("dialog[open]"), "where to set Edge's languages")
+    page.screenshot(path=str(OUTPUT / "150-spelling-help.png"))
+    editor.click_dialog_button("OK")
+
+    saved = editor.save_as_download("contract-deck-english.html")
+    check('<html lang="en-US"' in saved.read_text(encoding="utf-8"), "saved in English")
+    path, report = export_pptx(editor, "contract-deck-english.pptx")
+    slide1 = pptx_parts(path)["ppt/slides/slide1.xml"]
+    check('lang="en-US"' in slide1 and 'lang="pt-BR"' not in slide1, "PowerPoint text in English")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
+def test_phase10_done_when(browser):
+    """Phase 10 done-when, automated: slides come in from another deck (Reuse Slides) and by copy and paste in the rail;
+    the slide's elements are found, named and hidden in the Selection Pane, flipped and linked; then the PowerPoint
+    export keeps the flip, the new shapes, the arrowheads, the link, the text alignment and the deck's language."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    order = lambda: page.evaluate(SLIDE_ORDER)  # noqa: E731
+
+    # Slides from another deck: its slide 3 after our slide 1.
+    page.click(".ribbon-tab[data-tab='home']")
+    page.click(".new-slide-button")
+    page.click(".reuse-slides-item")
+    page.set_input_files("#reuse-file", str(CONTRACT_FORMAT1))
+    wait_until(page, "document.querySelectorAll('#reuse-grid input.reuse-tick').length === 6", timeout=60000)
+    page.check("#reuse-grid input.reuse-tick[data-index='2']")
+    page.click("dialog[open] .btn-primary")
+    wait_until(page, "App.deck.getSlides().length === 7")
+    # Copy and paste in the rail: slide 4 (the chart) again at the end.
+    page.click(thumb(4))
+    page.keyboard.press("Control+c")
+    page.click(thumb(6))
+    page.keyboard.press("Control+v")
+    check(len(order()) == 8, f"8 slides: {order()}")
+
+    # Slide 1: the Selection Pane finds, names and hides; the logo is flipped; a word linked to slide 3.
+    page.click(thumb(0))
+    page.mouse.click(*slide_to_screen(page, 700, 650))
+    page.keyboard.press("Alt+F10")
+    page.dblclick("#selection-list .selection-row[data-id='e1'] .selection-name")
+    page.fill("#selection-list .selection-name-input", "Logo")
+    page.press("#selection-list .selection-name-input", "Enter")
+    page.click("#selection-list .selection-row[data-id='e3'] .selection-eye")
+    page.click("#selection-list .selection-row[data-id='e1'] .selection-name")
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.click("button[data-command='flipHorizontal']")
+    page.mouse.dblclick(*slide_to_screen(page, 600, 395))
+    wait_until(page, "App.text.isEditing()")
+    page.evaluate(SELECT_TEXT_JS, ["e4", "Comitê de Investimentos"])
+    page.keyboard.press("Control+k")
+    page.check("#link-kind-slide")
+    page.select_option("#link-slide", "s3")
+    editor.click_dialog_button("OK")
+    page.keyboard.press("Escape")
+    # The subtitle at the bottom of a taller box.
+    page.check("#format-autofit input[value='off']")
+    page.fill("#format-h", "150")
+    page.press("#format-h", "Enter")
+    page.click(".ribbon-tab[data-tab='home']")
+    page.click(".align-text-button")
+    page.click(".align-text-menu .menu-item:has-text('Bottom')")
+
+    # Slide 6 (contract slide 5): a triangle and an elbow line with arrows at both ends.
+    page.evaluate("App.deck.goTo(5)")
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.shapes-button")
+    page.click(".shape-gallery-item[data-shape='triangle']")
+    drag(page, slide_to_screen(page, 100, 400), slide_to_screen(page, 240, 520))
+    page.click(".ribbon-tab[data-tab='insert']")
+    page.click(".ribbon-button.shapes-button")
+    page.click(".shape-gallery-item[data-shape='elbow']")
+    drag(page, slide_to_screen(page, 500, 400), slide_to_screen(page, 700, 520))
+    page.click(".ribbon-tab[data-tab='shape-format']")
+    page.click(".line-heads")
+    page.click(".line-heads-menu .menu-item:has-text('Arrows at both ends')")
+
+    # The deck in English.
+    page.click(".ribbon-tab[data-tab='review']")
+    page.click(".language-button")
+    page.click(".language-menu .menu-item:has-text('English (United States)')")
+    page.screenshot(path=str(OUTPUT / "151-phase10-done-when.png"))
+
+    path, report = export_pptx(editor, "contract-deck-phase10.pptx")
+    parts = pptx_parts(path)
+    slides = sorted(name for name in parts if re.match(r"ppt/slides/slide\d+\.xml$", name))
+    check(len(slides) == 8, f"8 slides in PowerPoint: {slides}")
+    slide1 = parts["ppt/slides/slide1.xml"]
+    check(any('flipH="1"' in pic for pic in re.findall(r"<p:pic>(.*?)</p:pic>", slide1, flags=re.S)), "the logo flipped")
+    subtitle = next(sp for sp in re.findall(r"<p:sp>(.*?)</p:sp>", slide1, flags=re.S) if "Aquisição" in sp)
+    check('anchor="b"' in subtitle and "<a:hlinkClick" in subtitle and 'lang="en-US"' in subtitle,
+          "the subtitle: at the bottom, linked, in English")
+    number = order().index("s3") + 1   # the reused slide came in before it
+    check(f'Target="slide{number}.xml"' in parts["ppt/slides/_rels/slide1.xml.rels"], f"the link goes to s3, now slide {number}")
+    check("Slide 1: an element hidden in the Selection Pane was left out" in report, report)
+    slide6 = parts["ppt/slides/slide6.xml"]
+    elbow = next(sp for sp in re.findall(r"<p:sp>(.*?)</p:sp>", slide6, flags=re.S) if 'prst="bentConnector3"' in sp)
+    check('prst="triangle"' in slide6 and "headEnd" in elbow and "tailEnd" in elbow, "the triangle and the elbow's two heads")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -8151,6 +8276,8 @@ TESTS = [
     test_hyperlinks,
     test_slide_picks_and_clipboard,
     test_reuse_slides_and_elements_across_tabs,
+    test_deck_language,
+    test_phase10_done_when,
 ]
 
 

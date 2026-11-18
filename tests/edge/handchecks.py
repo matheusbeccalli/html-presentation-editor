@@ -125,6 +125,8 @@ HAND_CHECKS = [
      "left": "the second tab is a page of the same test browser (Edge's own clipboard between real tabs is not seen); Ctrl+D and Delete: the test checks them after Shift+click, not each Ctrl+Z separately"},
     {"key": "Reuse Slides: open samples/contract-deck.html", "tests": ["test_reuse_slides_and_elements_across_tabs"], "auto": False,
      "left": "the file is set without Edge's file window; the second tab is a page of the same test browser"},
+    {"key": "Language: open samples/contract-deck.html", "tests": ["test_deck_language"], "auto": False,
+     "left": "Edge's own language settings and PowerPoint's Review > Language are outside the test (it reads the .pptx XML)"},
     {"key": "Change Case: click the subtitle", "tests": ["test_text_layout_and_change_case"], "auto": False,
      "left": "the test selects \"Atlas\" directly, not with the mouse"},
 ]

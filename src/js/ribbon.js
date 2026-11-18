@@ -182,6 +182,7 @@
                 { label: 'Comments', commands: [['newComment', 'newComment'], ['deleteAllComments', 'deleteComment'],
                     ['previousComment', 'previous'], ['nextComment', 'next']] },
                 { label: 'Show', rows: [[{ command: 'commentsPane', icon: 'comments' }], [{ command: 'showCommentMarkers', icon: 'commentMarker' }]] },
+                { label: 'Language', rows: [[{ control: 'deckLanguage' }], [{ command: 'spellingHelp', icon: 'spelling' }]] },
             ],
             note: 'A comment sticks to the selected element, or to the slide when nothing is selected; a yellow marker shows ' +
                 'where (click it to read). Comments are saved with the deck for the people who review it, but never shown ' +

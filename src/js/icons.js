@@ -134,6 +134,7 @@
         eyeOpen: '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.2"/>',
         eyeClosed: '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><path d="M3.5 16.5l13-13"/>',
         link: '<path d="M8.5 11.5l3-3M7 9l-2 2a2.8 2.8 0 0 0 4 4l2-2M13 11l2-2a2.8 2.8 0 0 0-4-4L9 7"/>',
+        spelling: '<path d="M3 11l2.5-7 2.5 7M3.8 9h3.4M10 4.5v6.5M10 7.5a2 2 0 1 1 0 3.5M11 15l2.5 2.5L18 12"/>',
         eyedropper: '<path d="M13.5 3.5l3 3-2 2-3-3z"/><path d="M12.5 7.5l-7 7-1 3 3-1 7-7"/>',
         changeCase: '<path d="M2.5 15.5l4-11 4 11M4 11.5h5"/><path d="M16.5 10v5.5M16.5 12.25a2.75 2.75 0 1 0 0 1.5"/>',
         alignTextMiddle: '<rect x="3.5" y="3.5" width="13" height="13"/><path d="M6.5 8.5h7M6.5 11.5h7"/>',

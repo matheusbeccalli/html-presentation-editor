@@ -146,3 +146,6 @@
 .dialog-reuse .reuse-hidden .thumb-box { opacity: 0.5; }
 .dialog-reuse .reuse-number { font-size: 12px; }
 .dialog-reuse .panel-hint { margin: 0; font-size: 12px; }
+
+/* Review > Spelling in Edge (Phase 10). */
+.dialog-spelling .dialog-body p { margin: 0 0 8px; max-width: 460px; line-height: 1.45; }

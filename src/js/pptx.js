@@ -197,7 +197,7 @@
         return number ? { slide: number } : null;
     }
 
-    App.pptx.textRuns = function textRuns(paragraphs, schemes, slideNumbers) {
+    App.pptx.textRuns = function textRuns(paragraphs, schemes, slideNumbers, lang) {
         const runs = [];
         paragraphs.forEach((paragraph, index) => {
             const shared = paragraphOptions(paragraph, schemes || {});
@@ -207,6 +207,9 @@
                 const options = Object.assign(runOptions(piece.look), shared);
                 if (piece.breakBefore) {
                     options.softBreakBefore = true;
+                }
+                if (lang) {
+                    options.lang = lang;   // the deck's language (Phase 10): PowerPoint checks spelling in it
                 }
                 const link = linkOf(piece.href, slideNumbers || {});
                 if (link) {
@@ -326,7 +329,7 @@
         if (border) {
             options.line = { color: border.hex, width: App.pptx.points(borderWidth) };
         }
-        return { kind: 'text', runs: App.pptx.textRuns(App.text.exportParagraphs(element), ctx.schemes, ctx.slideNumbers), options: options };
+        return { kind: 'text', runs: App.pptx.textRuns(App.text.exportParagraphs(element), ctx.schemes, ctx.slideNumbers, ctx.lang), options: options };
     }
 
     // A picture: native when PowerPoint reads its format (PNG, JPEG, GIF); else a picture of how it shows.
@@ -438,7 +441,7 @@
             shape: SHAPES[kind], valign: valign, wrap: true,
             margin: TEXT_MARGIN_ORDER.map((side) => App.pptx.points(parseFloat(areaStyle[side]) || 0)),
         });
-        return { kind: 'text', runs: App.pptx.textRuns(paragraphs, ctx.schemes, ctx.slideNumbers), options: options };
+        return { kind: 'text', runs: App.pptx.textRuns(paragraphs, ctx.schemes, ctx.slideNumbers, ctx.lang), options: options };
     }
 
     // A cell border side as PptxGenJS wants it ({ type, pt, color }); 'none' when nothing shows.
@@ -487,7 +490,7 @@
             if (rowspan > 1) {
                 options.rowspan = rowspan;
             }
-            return { text: App.pptx.textRuns(App.text.exportParagraphs(cell), ctx.schemes, ctx.slideNumbers), options: options };
+            return { text: App.pptx.textRuns(App.text.exportParagraphs(cell), ctx.schemes, ctx.slideNumbers, ctx.lang), options: options };
         }));
         const options = Object.assign(position(box, 0), {
             rowH: rows.map((row) => App.pptx.inches(row.offsetHeight)),   // as laid out (zoom never changes it)
@@ -767,7 +770,7 @@
      */
     function readSlide(slide, view, schemes, master, slideNumbers) {
         const style = view.getComputedStyle(slide);
-        const ctx = { view: view, schemes: schemes, slideNumbers: slideNumbers, report: [], masterNative: !!master, numberAsText: !!(master && master.numberAsText),
+        const ctx = { view: view, schemes: schemes, slideNumbers: slideNumbers, lang: App.text.deckLanguage(slide.ownerDocument), report: [], masterNative: !!master, numberAsText: !!(master && master.numberAsText),
             bodyFont: App.pptx.fontFace(view.getComputedStyle(slide.ownerDocument.documentElement).getPropertyValue('--font-body') || 'Calibri'),
             extra: [] };
         const items = [];

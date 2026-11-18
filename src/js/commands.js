@@ -171,6 +171,17 @@
         App.commands.define('pasteSlides', {
             label: 'Paste', isEnabled: () => hasDeck() && App.slides.hasCopiedSlides(), run: () => App.slides.paste(),
         });
+        // The deck's language and how Edge checks spelling (Phase 10).
+        App.commands.define('setDeckLanguage', {
+            label: 'Language', isEnabled: hasDeck,
+            run: (lang) => {
+                const doc = App.deck.getDocument();
+                if (App.text.deckLanguage(doc) !== lang) {
+                    App.history.change('Language', 'deck', () => App.text.setDeckLanguage(doc, lang));
+                }
+            },
+        });
+        App.commands.define('spellingHelp', { label: 'Spelling in Edge', run: () => App.textControls.openSpellingHelp() });
         // Slides from another deck (Phase 10).
         App.commands.define('reuseSlides', { label: 'Reuse Slides…', isEnabled: hasDeck, run: () => App.reuse.open() });
         // Hyperlinks (Phase 10).

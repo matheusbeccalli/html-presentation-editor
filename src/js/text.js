@@ -2597,6 +2597,28 @@
     };
 
     // ---------------------------------------------------------------
+    // The deck's language (Phase 10): Review > Language
+    // ---------------------------------------------------------------
+    //
+    // <html lang>: Portuguese (pt-BR, the default) or English (en-US). Edge checks
+    // spelling in every language turned on in its own settings, whatever the page
+    // says (Chromium does not use lang for that), so this mostly tells PowerPoint
+    // (pptx.js puts it on every text run) and screen readers what the text is.
+
+    App.text.LANGUAGES = [['pt-BR', 'Portuguese (Brazil)'], ['en-US', 'English (United States)']];
+
+    App.text.deckLanguage = function deckLanguage(doc) {
+        const lang = (doc.documentElement.getAttribute('lang') || '').toLowerCase();
+        return lang === 'en' || lang.indexOf('en-') === 0 ? 'en-US' : 'pt-BR';
+    };
+
+    App.text.setDeckLanguage = function setDeckLanguage(doc, lang) {
+        if (App.text.LANGUAGES.some(([code]) => code === lang)) {
+            doc.documentElement.setAttribute('lang', lang);
+        }
+    };
+
+    // ---------------------------------------------------------------
     // Hyperlinks (Phase 10, Ctrl+K)
     // ---------------------------------------------------------------
     //

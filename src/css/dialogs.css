@@ -78,6 +78,8 @@
 .theme-row input[type="color"] { width: 36px; height: 26px; padding: 0 2px; border: 1px solid var(--border); background: var(--surface); }
 .theme-row input[type="text"] { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px;
     font: inherit; background: var(--surface); color: var(--text); }
+.theme-row .theme-eyedropper { min-width: 0; flex: none; width: 30px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.theme-row .theme-eyedropper svg { width: 16px; height: 16px; }
 .theme-copy-note:empty { display: none; }
 
 /* Export > PDF (pdf.js): which slides to print. */

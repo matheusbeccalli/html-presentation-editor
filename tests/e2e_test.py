@@ -7505,6 +7505,76 @@ def test_text_layout_and_change_case(browser):
     editor.close()
 
 
+FAKE_EYEDROPPER = """() => { window.__eyedropperOpened = 0;
+    window.EyeDropper = class { open() { window.__eyedropperOpened++;
+        return window.__eyedropperCancel ? Promise.reject(new DOMException('cancelled', 'AbortError'))
+            : Promise.resolve({ sRGBHex: '#123456' }); } }; }"""
+
+
+def test_eyedropper(browser):
+    """Phase 10 step 3: every colour list has Eyedropper (the browser's own, which picks a colour anywhere on the
+    screen): font colour, shape fill, slide background, the theme editor's colours; the picked colour applies as
+    one undo step; Esc in the eyedropper changes nothing; a browser without it shows no such item. The real
+    eyedropper cannot be driven by a test: a stand-in returns #123456."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate(FAKE_EYEDROPPER)
+    sub = "App.deck.getDocument().querySelector('[data-id=\"e4\"]')"
+
+    # Font colour of the selected subtitle.
+    page.mouse.click(*slide_to_screen(page, 600, 410))
+    page.click(".ribbon-tab[data-tab='home']")
+    page.click(".font-color-menu-button")
+    check(page.is_visible(".font-color-menu .menu-item:has-text('Eyedropper')"), "the font colour list has Eyedropper")
+    page.screenshot(path=str(OUTPUT / "142-eyedropper-item.png"))
+    page.click(".font-color-menu .menu-item:has-text('Eyedropper')")
+    wait_until(page, f"getComputedStyle({sub}.querySelector('p span, p')).color === 'rgb(18, 52, 86)'")
+    check(page.evaluate("App.history.undoLabel()") == "Font color", page.evaluate("App.history.undoLabel()"))
+    page.keyboard.press("Control+z")
+    check(page.evaluate(f"getComputedStyle({sub}.querySelector('p span, p')).color") != "rgb(18, 52, 86)", "undone")
+
+    # Esc in the eyedropper: nothing happens, no error.
+    page.evaluate("window.__eyedropperCancel = true")
+    page.click(".font-color-menu-button")
+    page.click(".font-color-menu .menu-item:has-text('Eyedropper')")
+    wait_until(page, "window.__eyedropperOpened === 2")
+    check(page.evaluate("App.history.undoLabel()") != "Font color", "cancelled: no change")
+    page.evaluate("window.__eyedropperCancel = false")
+
+    # Shape fill.
+    page.evaluate(FLIP_DECK_JS)
+    page.mouse.click(*slide_to_screen(page, 450, 120))
+    page.click(".ribbon-tab[data-tab='shape-format']")
+    page.click(".shape-fill-menu-button")
+    page.click(".shape-fill-menu .menu-item:has-text('Eyedropper')")
+    wait_until(page, "App.shapes.lookOf(App.deck.getDocument().querySelector('[data-id=\"f2\"]')).fill === '#123456'")
+
+    # Slide background.
+    page.click(".ribbon-tab[data-tab='design']")
+    page.click(".slide-background-menu-button")
+    page.click(".slide-background-menu .menu-item:has-text('Eyedropper')")
+    wait_until(page, "getComputedStyle(App.deck.getCurrentSlide()).backgroundColor === 'rgb(18, 52, 86)'")
+
+    # The theme editor: the eyedropper beside Accent fills its colour (Apply makes it the theme's).
+    page.click("button[data-command='editTheme']")
+    page.screenshot(path=str(OUTPUT / "143-theme-eyedropper.png"))
+    page.click("button.theme-eyedropper[data-for='--color-accent']")
+    wait_until(page, "document.getElementById('theme-color-accent').value === '#123456'")
+    check(page.input_value("#theme-color-accent-hex") == "#123456", "its text too")
+    editor.click_dialog_button("Apply")
+    check(page.evaluate("getComputedStyle(App.deck.getDocument().documentElement).getPropertyValue('--color-accent').trim()")
+          .lower() == "#123456", "the theme's Accent")
+
+    # No eyedropper in the browser: no item, no button.
+    page.evaluate("delete window.EyeDropper")
+    page.click(".slide-background-menu-button")
+    check(not page.is_visible(".slide-background-menu .menu-item:has-text('Eyedropper')"), "no item without the browser's eyedropper")
+    page.keyboard.press("Escape")
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7608,6 +7678,7 @@ TESTS = [
     test_phase9_done_when,
     test_flip,
     test_text_layout_and_change_case,
+    test_eyedropper,
 ]
 
 

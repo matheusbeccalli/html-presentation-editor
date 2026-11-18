@@ -314,7 +314,40 @@
                 picker.click();
             },
         }, [el('span', { class: 'menu-label' }, ['More colors…'])]));
+        if (App.textControls.canPickScreenColor()) {
+            list.appendChild(el('button', {
+                type: 'button', class: 'menu-item', title: 'Pick a colour anywhere on the screen (Esc cancels)',
+                onmousedown: (event) => event.preventDefault(),
+                onclick: () => {
+                    closeMenu();
+                    App.textControls.pickScreenColor().then((color) => {
+                        if (color) {
+                            choose(spec, color);
+                        }
+                        App.text.refocus();
+                    });
+                },
+            }, [el('span', { class: 'menu-label' }, ['Eyedropper'])]));
+        }
         showMenu(anchor, list);
+    }
+
+    /*
+     * Eyedropper (Phase 10): the browser's own EyeDropper (Edge and Chrome; no
+     * library) lets the user click any pixel on the screen, a logo in another
+     * window too. It needs a click to start it; Esc cancels (null).
+     */
+    App.textControls.canPickScreenColor = function canPickScreenColor() {
+        return typeof window.EyeDropper === 'function';
+    };
+
+    /* The colour picked on the screen as '#rrggbb', or null (cancelled or not available). */
+    App.textControls.pickScreenColor = function pickScreenColor() {
+        if (!App.textControls.canPickScreenColor()) {
+            return Promise.resolve(null);
+        }
+        return new window.EyeDropper().open().then((result) => (result && result.sRGBHex ? result.sRGBHex.toLowerCase() : null),
+            () => null);
     }
 
     const colorButtons = [];   // [{ main, arrow, bar, spec }]

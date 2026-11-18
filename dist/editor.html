@@ -871,6 +871,8 @@ iframe.pdf-print-frame {
 .theme-row input[type="color"] { width: 36px; height: 26px; padding: 0 2px; border: 1px solid var(--border); background: var(--surface); }
 .theme-row input[type="text"] { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 3px;
     font: inherit; background: var(--surface); color: var(--text); }
+.theme-row .theme-eyedropper { min-width: 0; flex: none; width: 30px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.theme-row .theme-eyedropper svg { width: 16px; height: 16px; }
 .theme-copy-note:empty { display: none; }
 
 /* Export > PDF (pdf.js): which slides to print. */
@@ -11937,6 +11939,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         cellMargins: '<rect x="2.5" y="2.5" width="15" height="15"/><rect x="6" y="6" width="8" height="8" stroke-dasharray="1.5 1.5"/>',
         lineSpacing: '<path d="M9 4.5h8.5M9 8.5h8.5M9 12.5h8.5M9 16.5h8.5"/><path d="M2.5 6L4.5 3.5 6.5 6M2.5 14l2 2.5 2-2.5M4.5 3.5v13"/>',
         // Change Case: "Aa"; Align Text: lines in the middle of a box (Phase 10).
+        eyedropper: '<path d="M13.5 3.5l3 3-2 2-3-3z"/><path d="M12.5 7.5l-7 7-1 3 3-1 7-7"/>',
         changeCase: '<path d="M2.5 15.5l4-11 4 11M4 11.5h5"/><path d="M16.5 10v5.5M16.5 12.25a2.75 2.75 0 1 0 0 1.5"/>',
         alignTextMiddle: '<rect x="3.5" y="3.5" width="13" height="13"/><path d="M6.5 8.5h7M6.5 11.5h7"/>',
         bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
@@ -14412,7 +14415,24 @@ App.template.newDeckHtml = function newDeckHtml() {
                 }
             });
             fields[name] = { set: (value) => { text.value = value; picker.value = hexOf(doc, value); } };
-            return el('div', { class: 'theme-row' }, [label, picker, text]);
+            const row = [label, picker, text];
+            if (App.textControls.canPickScreenColor()) {
+                // Eyedropper (Phase 10): a colour from anywhere on the screen, e.g. the client's logo.
+                const dropper = el('button', { type: 'button', class: 'btn theme-eyedropper', 'data-for': name,
+                    title: 'Eyedropper: pick ' + App.theme.labelOf(name) + ' anywhere on the screen (Esc cancels)',
+                    'aria-label': 'Eyedropper for ' + App.theme.labelOf(name) });
+                dropper.innerHTML = App.icons.get('eyedropper');
+                dropper.addEventListener('click', () => App.textControls.pickScreenColor().then((color) => {
+                    if (color) {
+                        text.value = color;
+                        picker.value = color;
+                        touched[name] = color;
+                        showPreview();
+                    }
+                }));
+                row.push(dropper);
+            }
+            return el('div', { class: 'theme-row' }, row);
         });
 
         const note = el('p', { class: 'panel-hint theme-copy-note' });
@@ -19968,7 +19988,40 @@ App.template.newDeckHtml = function newDeckHtml() {
                 picker.click();
             },
         }, [el('span', { class: 'menu-label' }, ['More colors…'])]));
+        if (App.textControls.canPickScreenColor()) {
+            list.appendChild(el('button', {
+                type: 'button', class: 'menu-item', title: 'Pick a colour anywhere on the screen (Esc cancels)',
+                onmousedown: (event) => event.preventDefault(),
+                onclick: () => {
+                    closeMenu();
+                    App.textControls.pickScreenColor().then((color) => {
+                        if (color) {
+                            choose(spec, color);
+                        }
+                        App.text.refocus();
+                    });
+                },
+            }, [el('span', { class: 'menu-label' }, ['Eyedropper'])]));
+        }
         showMenu(anchor, list);
+    }
+
+    /*
+     * Eyedropper (Phase 10): the browser's own EyeDropper (Edge and Chrome; no
+     * library) lets the user click any pixel on the screen, a logo in another
+     * window too. It needs a click to start it; Esc cancels (null).
+     */
+    App.textControls.canPickScreenColor = function canPickScreenColor() {
+        return typeof window.EyeDropper === 'function';
+    };
+
+    /* The colour picked on the screen as '#rrggbb', or null (cancelled or not available). */
+    App.textControls.pickScreenColor = function pickScreenColor() {
+        if (!App.textControls.canPickScreenColor()) {
+            return Promise.resolve(null);
+        }
+        return new window.EyeDropper().open().then((result) => (result && result.sRGBHex ? result.sRGBHex.toLowerCase() : null),
+            () => null);
     }
 
     const colorButtons = [];   // [{ main, arrow, bar, spec }]

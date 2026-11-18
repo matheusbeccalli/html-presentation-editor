@@ -370,7 +370,24 @@
                 }
             });
             fields[name] = { set: (value) => { text.value = value; picker.value = hexOf(doc, value); } };
-            return el('div', { class: 'theme-row' }, [label, picker, text]);
+            const row = [label, picker, text];
+            if (App.textControls.canPickScreenColor()) {
+                // Eyedropper (Phase 10): a colour from anywhere on the screen, e.g. the client's logo.
+                const dropper = el('button', { type: 'button', class: 'btn theme-eyedropper', 'data-for': name,
+                    title: 'Eyedropper: pick ' + App.theme.labelOf(name) + ' anywhere on the screen (Esc cancels)',
+                    'aria-label': 'Eyedropper for ' + App.theme.labelOf(name) });
+                dropper.innerHTML = App.icons.get('eyedropper');
+                dropper.addEventListener('click', () => App.textControls.pickScreenColor().then((color) => {
+                    if (color) {
+                        text.value = color;
+                        picker.value = color;
+                        touched[name] = color;
+                        showPreview();
+                    }
+                }));
+                row.push(dropper);
+            }
+            return el('div', { class: 'theme-row' }, row);
         });
 
         const note = el('p', { class: 'panel-hint theme-copy-note' });

@@ -583,8 +583,11 @@
         return copied !== null;
     };
 
-    /* Paste slides from clipboard HTML (none: the last copied here) after the picked slides; false if it holds none. */
-    App.slides.paste = function paste(html) {
+    /*
+     * Paste slides from clipboard HTML (none: the last copied here) after the picked slides; false if it holds none.
+     * label: the undo step's name (Reuse Slides gives its own).
+     */
+    App.slides.paste = function paste(html, label) {
         const doc = App.deck.getDocument();
         const slides = doc ? App.slides.slidesFromClipboard(html || copied, doc) : null;
         if (!slides || !slides.length) {
@@ -598,7 +601,7 @@
         if (layer) {
             slides.forEach((slide) => slide.insertBefore(layer.cloneNode(true), slide.firstChild));
         }
-        insertAfter(slides.length > 1 ? 'Paste slides' : 'Paste slide', after, slides);
+        insertAfter(label || (slides.length > 1 ? 'Paste slides' : 'Paste slide'), after, slides);
         return true;
     };
 
@@ -685,7 +688,12 @@
                     galleryButton.focus();
                 }
             },
-        }, [el('div', { class: 'table-grid-label' }, ['Layouts']), el('div', { class: 'slide-layout-grid' }, items)]);
+        }, [el('div', { class: 'table-grid-label' }, ['Layouts']), el('div', { class: 'slide-layout-grid' }, items),
+            // Phase 10: slides from another deck.
+            el('button', { type: 'button', class: 'menu-item reuse-slides-item', onclick: () => {
+                closeGallery();
+                App.commands.run('reuseSlides');
+            } }, [el('span', { class: 'menu-label' }, ['Reuse Slides…'])])]);
         const rect = galleryButton.getBoundingClientRect();
         gallery.style.left = rect.left + 'px';
         gallery.style.top = rect.bottom + 'px';

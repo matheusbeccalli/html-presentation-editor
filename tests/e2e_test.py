@@ -7987,6 +7987,61 @@ def test_slide_picks_and_clipboard(browser):
     editor.close()
 
 
+def test_reuse_slides_and_elements_across_tabs(browser):
+    """Phase 10 step 8: Home > New Slide ▾ > Reuse Slides… reads another deck (not opening it), shows its slides with
+    tick boxes, and Insert puts the ticked ones after the slide shown (one undo step, new ids, notes along, this deck's
+    theme); elements copied in one editor tab paste whole in another."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    order = lambda: page.evaluate(SLIDE_ORDER)  # noqa: E731
+    page.evaluate("App.deck.goTo(1)")
+    page.click(".ribbon-tab[data-tab='home']")
+    page.click(".new-slide-button")
+    page.click(".reuse-slides-item")
+    wait_until(page, "!!document.querySelector('dialog[open] #reuse-grid')")
+    check(page.is_disabled("dialog[open] .btn-primary"), "Insert waits for a tick")
+    page.set_input_files("#reuse-file", str(CONTRACT_FORMAT1))
+    wait_until(page, "document.querySelectorAll('#reuse-grid input.reuse-tick').length > 0", timeout=60000)
+    count = page.locator("#reuse-grid input.reuse-tick").count()
+    check(count == 6 and "6 slides" in page.text_content(".reuse-name"), f"its slides: {count} {page.text_content('.reuse-name')}")
+    wait_until(page, "Array.from(document.querySelectorAll('#reuse-grid .thumb-box')).every((b) => b.getAttribute('data-drawn') === 'true')")
+    page.check("#reuse-grid input.reuse-tick[data-index='2']")
+    page.check("#reuse-grid input.reuse-tick[data-index='3']")
+    check(page.text_content("dialog[open] .btn-primary") == "Insert 2 slides", page.text_content("dialog[open] .btn-primary"))
+    page.screenshot(path=str(OUTPUT / "149-reuse-slides.png"))
+    page.click("dialog[open] .btn-primary")
+    wait_until(page, "App.deck.getSlides().length === 8")
+    check(page.evaluate("App.history.undoLabel()") == "Reuse slides", page.evaluate("App.history.undoLabel()"))
+    titles = page.evaluate(TITLES)
+    check(titles[2:4] == ["Comparáveis de mercado", "Receita e margem EBITDA"], f"after slide 2: {titles}")
+    check(len(set(order())) == 8 and page.evaluate("App.deck.getCurrentIndex()") == 2, f"new ids, the first shown: {order()}")
+    check("inserted from contract-deck-format1.html" in page.text_content("#status-message"), page.text_content("#status-message"))
+    check(page.evaluate("App.deck.getSlides()[2].querySelectorAll('table').length") == 1, "the table came along")
+    page.keyboard.press("Control+z")
+    check(len(order()) == 6, "one Ctrl+Z")
+
+    # Elements across tabs: the logo copied here, pasted in another editor tab.
+    page.evaluate("App.deck.goTo(0)")
+    page.mouse.click(*slide_to_screen(page, 124, 76))
+    check(page.evaluate("App.selection.selectedIds()") == ["e1"], "the logo selected")
+    page.keyboard.press("Control+c")
+    other = Editor(browser, editor.context)
+    other.open(MESSY)
+    other.close_dialog_if_open()
+    before = other.page.evaluate("App.deck.getSlides()[0].querySelectorAll('img.el').length")
+    other.page.mouse.click(*slide_to_screen(other.page, 640, 700))
+    other.page.keyboard.press("Escape")
+    other.page.keyboard.press("Control+v")
+    check(other.page.evaluate("App.deck.getSlides()[0].querySelectorAll('img.el').length") == before + 1, "the logo pasted there")
+    logo_src = page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').getAttribute('src')")
+    pasted_src = other.page.evaluate("App.selection.getElement() && App.selection.getElement().getAttribute('src')")
+    check(pasted_src == logo_src and other.page.evaluate("App.history.undoLabel()") == "Paste", "the same picture, one step")
+    check(editor.errors == [] and other.errors == [], f"no errors: {editor.errors} {other.errors}")
+    other.page.close()
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -8095,6 +8150,7 @@ TESTS = [
     test_selection_pane,
     test_hyperlinks,
     test_slide_picks_and_clipboard,
+    test_reuse_slides_and_elements_across_tabs,
 ]
 
 

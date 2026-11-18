@@ -135,3 +135,14 @@
 .dialog-link input[type="text"], .dialog-link select { padding: 4px 6px; font: inherit; border: 1px solid var(--border); border-radius: 3px; }
 .dialog-link input:disabled, .dialog-link select:disabled { opacity: 0.55; }
 .dialog-link .panel-hint { margin: 6px 0 0; font-size: 12px; }
+
+/* Reuse Slides (reuse.js, Phase 10): another deck's slides with a tick box each. */
+.dialog-reuse .reuse-form { display: flex; flex-direction: column; gap: 8px; }
+.dialog-reuse .reuse-head { display: flex; align-items: center; gap: 10px; }
+.dialog-reuse .reuse-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 10px;
+    max-height: 50vh; overflow-y: auto; padding: 2px; }
+.dialog-reuse .reuse-item { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+.dialog-reuse .reuse-item:has(input:checked) .thumb-box { outline: 2px solid var(--accent); }
+.dialog-reuse .reuse-hidden .thumb-box { opacity: 0.5; }
+.dialog-reuse .reuse-number { font-size: 12px; }
+.dialog-reuse .panel-hint { margin: 0; font-size: 12px; }

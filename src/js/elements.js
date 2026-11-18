@@ -307,14 +307,73 @@
     let copyMark = null;            // the mark our newest copy put on the system clipboard
     let inClipboardEvent = false;   // a copy / cut event is writing the clipboard itself
 
-    /* The mark as clipboard HTML, with the element's text (for a paste into another program). */
+    /* The mark as clipboard HTML, with the element's text (for a paste into another program) and the elements. */
     function markData(text) {
+        return App.elements.clipboardData(clipboardHtml || [], text, copyMark);
+    }
+
+    /* UTF-8 text as base64 and back (btoa alone only takes Latin-1). */
+    function toBase64(text) {
+        const bytes = new TextEncoder().encode(text);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(binary);
+    }
+
+    function fromBase64(code) {
+        const binary = atob(code);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return new TextDecoder().decode(bytes);
+    }
+
+    /*
+     * The clipboard HTML of copied elements (pure): a <div data-deck-editor="element"
+     * data-copy="mark"> holding their text, for other programs, and (Phase 10) the
+     * elements themselves encoded in data-elements, so another editor tab can paste
+     * them whole. Returns { html, text }.
+     */
+    App.elements.clipboardData = function clipboardData(htmlList, text, mark) {
         const holder = document.createElement('div');
         holder.setAttribute('data-deck-editor', 'element');
-        holder.setAttribute('data-copy', copyMark);
+        holder.setAttribute('data-copy', mark || '');
+        if (htmlList.length) {
+            holder.setAttribute('data-elements', toBase64(JSON.stringify(htmlList)));
+        }
         holder.textContent = text;
         return { html: holder.outerHTML, text: text };
-    }
+    };
+
+    /*
+     * The elements in clipboard HTML another editor tab wrote: their HTML (back to
+     * front), cleaned as an opened deck is (no scripts, handlers or frames); null
+     * when it holds none. They get new ids when pasted (insertCopy).
+     */
+    App.elements.elementsFromClipboard = function elementsFromClipboard(html) {
+        if (!html || html.indexOf('data-elements') === -1) {
+            return null;
+        }
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        const holder = parsed.querySelector('[data-deck-editor="element"][data-elements]');
+        let list = null;
+        try {
+            list = holder ? JSON.parse(fromBase64(holder.getAttribute('data-elements'))) : null;
+        } catch (error) {
+            return null;   // not ours after all
+        }
+        if (!Array.isArray(list) || !list.length) {
+            return null;
+        }
+        const doc = new DOMParser().parseFromString('<!DOCTYPE html><html><head></head><body></body></html>', 'text/html');
+        doc.body.innerHTML = list.filter((item) => typeof item === 'string').join('');
+        App.importer.sanitize(doc);
+        const elements = Array.from(doc.body.children).filter((child) => child.classList.contains('el'));
+        return elements.length ? elements.map((element) => element.outerHTML) : null;
+    };
 
     function textOf(element) {
         return (element.innerText || element.textContent || '').trim();
@@ -392,6 +451,9 @@
         const pictures = App.images.picturesIn(event.clipboardData);
         if (!ours && App.chartData.pasteOnChart(clipboard)) {
             event.preventDefault();   // cells pasted on a selected chart become its data, not a new table
+        } else if (!ours && App.elements.elementsFromClipboard(clipboard.html)) {
+            event.preventDefault();   // elements copied in another editor tab (Phase 10): pasted whole
+            insertCopy(App.elements.elementsFromClipboard(clipboard.html), 'Paste');
         } else if (!ours && App.tablePaste.paste(clipboard)) {
             event.preventDefault();
         } else if (!ours && pictures.length > 0) {

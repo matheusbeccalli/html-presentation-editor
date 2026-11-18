@@ -171,6 +171,8 @@
         App.commands.define('pasteSlides', {
             label: 'Paste', isEnabled: () => hasDeck() && App.slides.hasCopiedSlides(), run: () => App.slides.paste(),
         });
+        // Slides from another deck (Phase 10).
+        App.commands.define('reuseSlides', { label: 'Reuse Slides…', isEnabled: hasDeck, run: () => App.reuse.open() });
         // Hyperlinks (Phase 10).
         App.commands.define('insertLink', {
             label: 'Link', keepsEdit: true, isEnabled: () => App.links.canLink(), run: () => App.links.openDialog(),

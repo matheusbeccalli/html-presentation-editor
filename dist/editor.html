@@ -957,6 +957,17 @@ iframe.pdf-print-frame {
 .dialog-link input:disabled, .dialog-link select:disabled { opacity: 0.55; }
 .dialog-link .panel-hint { margin: 6px 0 0; font-size: 12px; }
 
+/* Reuse Slides (reuse.js, Phase 10): another deck's slides with a tick box each. */
+.dialog-reuse .reuse-form { display: flex; flex-direction: column; gap: 8px; }
+.dialog-reuse .reuse-head { display: flex; align-items: center; gap: 10px; }
+.dialog-reuse .reuse-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 10px;
+    max-height: 50vh; overflow-y: auto; padding: 2px; }
+.dialog-reuse .reuse-item { display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+.dialog-reuse .reuse-item:has(input:checked) .thumb-box { outline: 2px solid var(--accent); }
+.dialog-reuse .reuse-hidden .thumb-box { opacity: 0.5; }
+.dialog-reuse .reuse-number { font-size: 12px; }
+.dialog-reuse .panel-hint { margin: 0; font-size: 12px; }
+
 </style>
 </head>
 <body>
@@ -16460,14 +16471,73 @@ App.template.newDeckHtml = function newDeckHtml() {
     let copyMark = null;            // the mark our newest copy put on the system clipboard
     let inClipboardEvent = false;   // a copy / cut event is writing the clipboard itself
 
-    /* The mark as clipboard HTML, with the element's text (for a paste into another program). */
+    /* The mark as clipboard HTML, with the element's text (for a paste into another program) and the elements. */
     function markData(text) {
+        return App.elements.clipboardData(clipboardHtml || [], text, copyMark);
+    }
+
+    /* UTF-8 text as base64 and back (btoa alone only takes Latin-1). */
+    function toBase64(text) {
+        const bytes = new TextEncoder().encode(text);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(binary);
+    }
+
+    function fromBase64(code) {
+        const binary = atob(code);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        return new TextDecoder().decode(bytes);
+    }
+
+    /*
+     * The clipboard HTML of copied elements (pure): a <div data-deck-editor="element"
+     * data-copy="mark"> holding their text, for other programs, and (Phase 10) the
+     * elements themselves encoded in data-elements, so another editor tab can paste
+     * them whole. Returns { html, text }.
+     */
+    App.elements.clipboardData = function clipboardData(htmlList, text, mark) {
         const holder = document.createElement('div');
         holder.setAttribute('data-deck-editor', 'element');
-        holder.setAttribute('data-copy', copyMark);
+        holder.setAttribute('data-copy', mark || '');
+        if (htmlList.length) {
+            holder.setAttribute('data-elements', toBase64(JSON.stringify(htmlList)));
+        }
         holder.textContent = text;
         return { html: holder.outerHTML, text: text };
-    }
+    };
+
+    /*
+     * The elements in clipboard HTML another editor tab wrote: their HTML (back to
+     * front), cleaned as an opened deck is (no scripts, handlers or frames); null
+     * when it holds none. They get new ids when pasted (insertCopy).
+     */
+    App.elements.elementsFromClipboard = function elementsFromClipboard(html) {
+        if (!html || html.indexOf('data-elements') === -1) {
+            return null;
+        }
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        const holder = parsed.querySelector('[data-deck-editor="element"][data-elements]');
+        let list = null;
+        try {
+            list = holder ? JSON.parse(fromBase64(holder.getAttribute('data-elements'))) : null;
+        } catch (error) {
+            return null;   // not ours after all
+        }
+        if (!Array.isArray(list) || !list.length) {
+            return null;
+        }
+        const doc = new DOMParser().parseFromString('<!DOCTYPE html><html><head></head><body></body></html>', 'text/html');
+        doc.body.innerHTML = list.filter((item) => typeof item === 'string').join('');
+        App.importer.sanitize(doc);
+        const elements = Array.from(doc.body.children).filter((child) => child.classList.contains('el'));
+        return elements.length ? elements.map((element) => element.outerHTML) : null;
+    };
 
     function textOf(element) {
         return (element.innerText || element.textContent || '').trim();
@@ -16545,6 +16615,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         const pictures = App.images.picturesIn(event.clipboardData);
         if (!ours && App.chartData.pasteOnChart(clipboard)) {
             event.preventDefault();   // cells pasted on a selected chart become its data, not a new table
+        } else if (!ours && App.elements.elementsFromClipboard(clipboard.html)) {
+            event.preventDefault();   // elements copied in another editor tab (Phase 10): pasted whole
+            insertCopy(App.elements.elementsFromClipboard(clipboard.html), 'Paste');
         } else if (!ours && App.tablePaste.paste(clipboard)) {
             event.preventDefault();
         } else if (!ours && pictures.length > 0) {
@@ -19867,6 +19940,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('pasteSlides', {
             label: 'Paste', isEnabled: () => hasDeck() && App.slides.hasCopiedSlides(), run: () => App.slides.paste(),
         });
+        // Slides from another deck (Phase 10).
+        App.commands.define('reuseSlides', { label: 'Reuse Slides…', isEnabled: hasDeck, run: () => App.reuse.open() });
         // Hyperlinks (Phase 10).
         App.commands.define('insertLink', {
             label: 'Link', keepsEdit: true, isEnabled: () => App.links.canLink(), run: () => App.links.openDialog(),
@@ -25077,6 +25152,116 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/reuse.js ----
+/*
+ * reuse.js - Reuse Slides (Phase 10): slides from another deck into this one.
+ *
+ * Home > New Slide ▾ > Reuse Slides… opens a window: Browse… picks another
+ * deck's .html, which is read the way File > Open reads a deck (importer.js:
+ * cleaned, a Copilot deck laid out as slides) but is not opened; its slides
+ * show as small pictures with a tick box each. Insert puts the ticked ones
+ * after the slide shown, as one undo step, through the same path as pasting
+ * copied slides (slides.js): new ids, notes and comments come along, pictures
+ * and charts too, this deck's slide master on them. Their text uses this
+ * deck's theme where it was theme-linked; the other deck's master is not
+ * brought in.
+ *
+ * Talks to: importer.js (importDeck), slides.js (clipboardHtml, paste),
+ * thumbnails.js (miniature), dialogs.js, ui.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.reuse = {};
+
+    const el = (tag, attrs, children) => App.util.el(tag, attrs, children);
+    const MINIATURE_WIDTH = 168;
+
+    /* Read another deck's file as the editor would open it; resolves { doc, slides, name } (not opened). */
+    App.reuse.readDeck = async function readDeck(file) {
+        const text = await file.text();
+        const result = await App.importer.importDeck(text);
+        const doc = new DOMParser().parseFromString(result.html, 'text/html');
+        return { doc: doc, slides: Array.from(doc.querySelectorAll('section.slide')), name: file.name };
+    };
+
+    /* The ticked slides of the window, in their deck's order. */
+    function tickedSlides(state, list) {
+        return Array.from(list.querySelectorAll('input.reuse-tick'))
+            .filter((box) => box.checked)
+            .map((box) => state.slides[Number(box.getAttribute('data-index'))]);
+    }
+
+    App.reuse.open = async function open() {
+        const state = { doc: null, slides: [], name: '' };
+        const file = el('input', { id: 'reuse-file', type: 'file', accept: '.html,.htm,text/html', hidden: true });
+        const browse = el('button', { type: 'button', class: 'btn', onclick: () => file.click() }, ['Browse…']);
+        const name = el('span', { class: 'panel-hint reuse-name' }, ['Pick another deck (.html).']);
+        const all = el('input', { type: 'checkbox', id: 'reuse-all', disabled: true });
+        const list = el('div', { class: 'reuse-grid', id: 'reuse-grid' });
+        const body = el('div', { class: 'reuse-form' }, [
+            el('div', { class: 'reuse-head' }, [browse, file, name]),
+            el('label', { class: 'reuse-all' }, [all, ' Select all']),
+            list,
+            el('p', { class: 'panel-hint' }, ['The slides come in after the slide shown, with their notes, pictures and charts. ' +
+                'Text that follows the theme takes this deck\'s colours and fonts; the other deck\'s slide master stays behind.']),
+        ]);
+        const shown = App.dialogs.show({ title: 'Reuse Slides', body: body, wide: true, className: 'dialog-reuse',
+            buttons: [{ label: 'Cancel', value: null }, { label: 'Insert', value: 'insert', primary: true }] });
+        const insertButton = body.closest('dialog').querySelector('.btn-primary');
+        const refresh = () => {
+            const count = tickedSlides(state, list).length;
+            insertButton.disabled = count === 0;
+            insertButton.textContent = count > 1 ? 'Insert ' + count + ' slides' : 'Insert';
+            all.checked = count > 0 && count === state.slides.length;
+        };
+        all.addEventListener('change', () => {
+            list.querySelectorAll('input.reuse-tick').forEach((box) => { box.checked = all.checked; });
+            refresh();
+        });
+        file.addEventListener('change', async () => {
+            const picked = file.files && file.files[0];
+            if (!picked) {
+                return;
+            }
+            name.textContent = 'Reading ' + picked.name + '…';
+            list.replaceChildren();
+            try {
+                Object.assign(state, await App.reuse.readDeck(picked));
+            } catch (error) {
+                name.textContent = 'Could not read ' + picked.name + ': ' + error.message;
+                return;
+            }
+            name.textContent = picked.name + ': ' + state.slides.length + ' slide' + (state.slides.length === 1 ? '' : 's') +
+                '. Tick the ones to insert.';
+            all.disabled = state.slides.length === 0;
+            list.replaceChildren(...state.slides.map((slide, index) => {
+                const tick = el('input', { type: 'checkbox', class: 'reuse-tick', 'data-index': String(index),
+                    'aria-label': 'Slide ' + (index + 1) });
+                tick.addEventListener('change', refresh);
+                return el('label', { class: 'reuse-item' + (App.slides.isHidden(slide) ? ' reuse-hidden' : ''),
+                    title: 'Slide ' + (index + 1) + (App.slides.isHidden(slide) ? ' (hidden)' : '') }, [
+                    App.thumbnails.miniature(state.doc, slide, MINIATURE_WIDTH),
+                    el('span', { class: 'reuse-number' }, [tick, ' ' + (index + 1)]),
+                ]);
+            }));
+            refresh();
+        });
+        refresh();
+        const choice = await shown;
+        const chosen = tickedSlides(state, list);
+        if (choice !== 'insert' || !chosen.length) {
+            return;
+        }
+        if (App.slides.paste(App.slides.clipboardHtml(chosen), chosen.length > 1 ? 'Reuse slides' : 'Reuse slide')) {
+            App.ui.setStatus(chosen.length + ' slide' + (chosen.length === 1 ? '' : 's') + ' inserted from ' + state.name);
+        }
+    };
+})();
+
+</script>
+<script>
 // ---- js/help.js ----
 /*
  * help.js - the Help tab: the keyboard shortcut cheat sheet (press ?) and the
@@ -25922,8 +26107,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         return copied !== null;
     };
 
-    /* Paste slides from clipboard HTML (none: the last copied here) after the picked slides; false if it holds none. */
-    App.slides.paste = function paste(html) {
+    /*
+     * Paste slides from clipboard HTML (none: the last copied here) after the picked slides; false if it holds none.
+     * label: the undo step's name (Reuse Slides gives its own).
+     */
+    App.slides.paste = function paste(html, label) {
         const doc = App.deck.getDocument();
         const slides = doc ? App.slides.slidesFromClipboard(html || copied, doc) : null;
         if (!slides || !slides.length) {
@@ -25937,7 +26125,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (layer) {
             slides.forEach((slide) => slide.insertBefore(layer.cloneNode(true), slide.firstChild));
         }
-        insertAfter(slides.length > 1 ? 'Paste slides' : 'Paste slide', after, slides);
+        insertAfter(label || (slides.length > 1 ? 'Paste slides' : 'Paste slide'), after, slides);
         return true;
     };
 
@@ -26024,7 +26212,12 @@ App.template.newDeckHtml = function newDeckHtml() {
                     galleryButton.focus();
                 }
             },
-        }, [el('div', { class: 'table-grid-label' }, ['Layouts']), el('div', { class: 'slide-layout-grid' }, items)]);
+        }, [el('div', { class: 'table-grid-label' }, ['Layouts']), el('div', { class: 'slide-layout-grid' }, items),
+            // Phase 10: slides from another deck.
+            el('button', { type: 'button', class: 'menu-item reuse-slides-item', onclick: () => {
+                closeGallery();
+                App.commands.run('reuseSlides');
+            } }, [el('span', { class: 'menu-label' }, ['Reuse Slides…'])])]);
         const rect = galleryButton.getBoundingClientRect();
         gallery.style.left = rect.left + 'px';
         gallery.style.top = rect.bottom + 'px';

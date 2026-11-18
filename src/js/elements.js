@@ -335,6 +335,10 @@
         }
     }
 
+    function inRail(event) {
+        return !!(event.target && event.target.closest && event.target.closest('#thumbnail-rail'));
+    }
+
     /* A clipboard event the slide handles: not typing (text.js has those), not in a field or a dialog. */
     function forTheSlide(event) {
         const target = event.target;
@@ -344,6 +348,11 @@
 
     /* Ctrl+C / Ctrl+X with elements selected: our copy, and its mark on the system clipboard. */
     function onCopyEvent(event) {
+        // In the slide rail: the picked slides are copied (Phase 10, slides.js).
+        if (inRail(event) && App.state.hasDeck && !App.text.isEditing()) {
+            App.slides.onCopyEvent(event);
+            return;
+        }
         const elements = selectedBackToFront();
         if (!forTheSlide(event) || !elements.length) {
             return;
@@ -371,6 +380,10 @@
      * copied cells on the clipboard too, so the table is looked for first.
      */
     function onPasteEvent(event) {
+        // Copied slides (this tab's or another editor tab's) paste as slides, in the rail or on the slide (Phase 10).
+        if ((inRail(event) || forTheSlide(event)) && !App.text.isEditing() && App.state.hasDeck && App.slides.onPasteEvent(event)) {
+            return;
+        }
         if (!forTheSlide(event)) {
             return;
         }

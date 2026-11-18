@@ -29,6 +29,9 @@
 .thumb:hover .thumb-box { outline-color: #a19f9d; }
 .thumb-current .thumb-box { border-color: var(--accent); outline-color: var(--accent); }
 .thumb-current .thumb-number { color: var(--accent); font-weight: 600; }
+/* Several slides picked (Shift / Ctrl+click, Phase 10): each one framed, the one shown in full colour. */
+.thumb-picked .thumb-box { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 1px; }
+.thumb-picked:not(.thumb-current) .thumb-box { opacity: 0.85; }
 .thumb-frame {
     position: absolute; left: 0; top: 0;
     width: 1280px; height: 720px; border: 0;

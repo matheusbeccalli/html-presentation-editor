@@ -191,10 +191,11 @@
 
     /*
      * A copy of `slide` (content, notes, comments, hidden or not) with id `slideId` and new element ids;
-     * its review comments point at the copies of their elements (comments.remapCopy).
+     * its review comments point at the copies of their elements (comments.remapCopy). taken (several
+     * copies made before any goes into the deck): { elements: Set, comments: Set } of ids given out so far.
      */
-    App.slides.copyOf = function copyOf(slide, slideId) {
-        const used = usedElementIds(slide.ownerDocument);
+    App.slides.copyOf = function copyOf(slide, slideId, taken) {
+        const used = taken ? taken.elements : usedElementIds(slide.ownerDocument);
         const copy = slide.cloneNode(true);
         copy.setAttribute('data-slide-id', slideId);
         copy.removeAttribute('data-editor-current');
@@ -204,7 +205,7 @@
             idMap.set(node.getAttribute('data-id'), id);
             node.setAttribute('data-id', id);
         });
-        App.comments.remapCopy(copy, idMap, slide.ownerDocument);
+        App.comments.remapCopy(copy, idMap, slide.ownerDocument, taken ? taken.comments : null);
         return copy;
     };
 
@@ -230,6 +231,96 @@
             slides[gap].before(slide);
         }
         return true;
+    };
+
+    // ---------------------------------------------------------------
+    // Several slides at once, and slides on the clipboard (Phase 10, pure)
+    // ---------------------------------------------------------------
+
+    /* Shift+click: the ids from `fromId` to `toId` (either way round) in `ids`; just toId without an anchor. */
+    App.slides.rangeIds = function rangeIds(ids, fromId, toId) {
+        const a = ids.indexOf(fromId);
+        const b = ids.indexOf(toId);
+        if (b === -1) {
+            return [];
+        }
+        if (a === -1) {
+            return [toId];
+        }
+        return ids.slice(Math.min(a, b), Math.max(a, b) + 1);
+    };
+
+    /*
+     * Move the slides `ids` (kept in deck order, together) into gap `gap` of
+     * the order before the move (0: before the first ... n: after the last).
+     * False when they would end up where they are; dryRun: only say whether they would move.
+     */
+    App.slides.moveBlock = function moveBlock(doc, ids, gap, dryRun) {
+        const slides = Array.from(doc.querySelectorAll('section.slide'));
+        const moving = slides.filter((slide) => ids.indexOf(slide.getAttribute('data-slide-id')) !== -1);
+        if (!moving.length || gap < 0 || gap > slides.length) {
+            return false;
+        }
+        const staying = slides.filter((slide) => moving.indexOf(slide) === -1);
+        const before = slides.slice(0, gap).filter((slide) => moving.indexOf(slide) === -1).length;
+        const order = staying.slice(0, before).concat(moving, staying.slice(before));
+        if (order.every((slide, index) => slide === slides[index])) {
+            return false;
+        }
+        if (dryRun) {
+            return true;
+        }
+        const anchor = slides[slides.length - 1].nextSibling;
+        const parent = slides[0].parentNode;
+        order.forEach((slide) => parent.insertBefore(slide, anchor));
+        return true;
+    };
+
+    const CLIPBOARD_MARK = 'data-deck-editor-slides';
+
+    /*
+     * Copied slides as they go on the clipboard (text/html): a <div> marked
+     * data-deck-editor-slides holding the slides as they are (notes and
+     * comments too), so another editor tab can paste them whole.
+     */
+    App.slides.clipboardHtml = function clipboardHtml(slides) {
+        const box = slides[0].ownerDocument.createElement('div');
+        box.setAttribute(CLIPBOARD_MARK, '1');
+        slides.forEach((slide) => {
+            const copy = slide.cloneNode(true);
+            copy.removeAttribute('data-editor-current');
+            box.appendChild(copy);
+        });
+        return box.outerHTML;
+    };
+
+    /*
+     * The slides in clipboard HTML, ready to go into deck `doc`: cleaned as an
+     * opened deck is (no scripts, handlers or frames), their slide-master copy
+     * dropped (this deck's master is put on them), new slide and element ids
+     * (comments follow their elements). null when the HTML holds no copied slides.
+     */
+    App.slides.slidesFromClipboard = function slidesFromClipboard(html, doc) {
+        if (!html || html.indexOf(CLIPBOARD_MARK) === -1) {
+            return null;
+        }
+        const parsed = new DOMParser().parseFromString(html, 'text/html');
+        const box = parsed.querySelector('[' + CLIPBOARD_MARK + ']');
+        const found = box ? Array.from(box.querySelectorAll(':scope > section.slide')) : [];
+        if (!found.length) {
+            return null;
+        }
+        App.importer.sanitize(parsed);
+        const slideIds = new Set(Array.from(doc.querySelectorAll('section.slide'), (slide) => slide.getAttribute('data-slide-id')));
+        const taken = {
+            elements: usedElementIds(doc),
+            comments: new Set(Array.from(doc.querySelectorAll('.comment[data-comment-id]'), (node) => node.getAttribute('data-comment-id'))),
+        };
+        return found.map((slide) => {
+            slide.querySelectorAll(':scope > .master-layer').forEach((layer) => layer.remove());
+            slide.removeAttribute('data-editor-current');
+            return App.slides.copyOf(doc.importNode(slide, true), App.util.uniqueId('s', slideIds), taken);
+        });
     };
 
     /* A hidden slide is skipped when presenting (the player, Phase 8); the editor shows it dimmed. */
@@ -296,65 +387,244 @@
         insert('New slide', App.slides.buildSlide(doc, chosen, App.slides.freshSlideId(doc)));
     };
 
-    App.slides.duplicate = function duplicate() {
-        finishWork();
+    // ---- Several slides picked in the rail (Phase 10) ----
+    //
+    // Shift+click picks a range, Ctrl+click one more (or one fewer); the slide
+    // shown is always one of them. With nothing more picked, the slide actions
+    // act on the slide shown, as before. Moving to a slide any other way (a
+    // click, Page Down, a new slide) picks just that one again.
+
+    let picked = [];        // ids of the picked slides (deck order), or [] for just the slide shown
+    let anchorId = null;    // where a Shift+click range starts
+    let picking = false;    // true while pick() moves to a slide, so that move keeps the picks
+
+    function setPicked(ids) {
+        const order = App.deck.getSlides().map(idOf);
+        const kept = order.filter((id) => ids.indexOf(id) !== -1);
+        picked = kept.length > 1 ? kept : [];
+        App.events.emit('slide-picks-changed', { ids: picked.slice() });
+    }
+
+    /* The slides the slide actions act on: the picked ones in deck order, else the slide shown. */
+    App.slides.selectedSlides = function selectedSlides() {
+        const slides = App.deck.getSlides();
+        if (picked.length) {
+            return slides.filter((slide) => picked.indexOf(idOf(slide)) !== -1);
+        }
         const current = App.deck.getCurrentSlide();
-        if (current) {
-            insert('Duplicate slide', App.slides.copyOf(current, App.slides.freshSlideId(current.ownerDocument)));
+        return current ? [current] : [];
+    };
+
+    App.slides.pickedIds = function pickedIds() {
+        return picked.slice();
+    };
+
+    /* A click on thumbnail `index`: how = 'single' (just it), 'toggle' (Ctrl: in or out) or 'range' (Shift). */
+    App.slides.pick = function pick(index, how) {
+        const slides = App.deck.getSlides();
+        const slide = slides[index];
+        if (!slide) {
+            return;
+        }
+        const id = idOf(slide);
+        const current = idOf(App.deck.getCurrentSlide());
+        let show = index;
+        if (how === 'range') {
+            setPicked(App.slides.rangeIds(slides.map(idOf), anchorId || current, id));
+        } else if (how === 'toggle') {
+            const base = picked.length ? picked.slice() : [current];
+            const next = base.indexOf(id) === -1 ? base.concat([id]) : base.filter((one) => one !== id);
+            if (!next.length) {
+                next.push(id);
+            }
+            anchorId = id;
+            setPicked(next);
+            if (next.indexOf(id) === -1) {
+                show = slides.findIndex((one) => idOf(one) === next[next.length - 1]);   // taken out: show a picked one
+            }
+        } else {
+            anchorId = id;
+            setPicked([]);
+        }
+        picking = true;
+        try {
+            App.deck.goTo(show);
+        } finally {
+            picking = false;
         }
     };
 
-    /* A deck keeps at least one slide. */
-    App.slides.canRemove = function canRemove() {
-        return App.deck.getSlides().length > 1;
+    App.slides.duplicate = function duplicate() {
+        finishWork();
+        const targets = App.slides.selectedSlides();
+        if (!targets.length) {
+            return;
+        }
+        const doc = targets[0].ownerDocument;
+        const slideIds = new Set(App.deck.getSlides().map(idOf));
+        const taken = { elements: usedElementIds(doc), comments: new Set(Array.from(doc.querySelectorAll('.comment[data-comment-id]'),
+            (node) => node.getAttribute('data-comment-id'))) };
+        const copies = targets.map((slide) => App.slides.copyOf(slide, App.util.uniqueId('s', slideIds), taken));
+        insertAfter(targets.length > 1 ? 'Duplicate slides' : 'Duplicate slide', targets[targets.length - 1], copies);
     };
 
-    /* Delete the slide shown; the next one (the previous one, after the last) is shown. */
+    /*
+     * Put `slides` (not in the deck yet) after `after` as one undo step called
+     * `label`, show the first; several stay picked.
+     */
+    function insertAfter(label, after, slides) {
+        const ids = slides.map(idOf);
+        App.history.change(label, { slides: ids }, () => {
+            let previous = after;
+            slides.forEach((slide) => {
+                if (previous) {
+                    previous.after(slide);
+                } else {
+                    App.deck.getDocument().body.appendChild(slide);
+                }
+                previous = slide;
+            });
+        }, { meta: { slides: { undo: idOf(App.deck.getCurrentSlide()), redo: ids[0] } } });
+        show(ids[0]);
+        setPicked(ids);
+    }
+
+    /* A deck keeps at least one slide: the picked slides can go if one stays. */
+    App.slides.canRemove = function canRemove() {
+        return App.deck.getSlides().length > App.slides.selectedSlides().length;
+    };
+
+    /* Delete the picked slides (or the slide shown); the next one (the previous one, after the last) is shown. */
     App.slides.remove = function remove() {
         if (!App.slides.canRemove()) {
             return;
         }
         finishWork();
         const slides = App.deck.getSlides();
-        const index = App.deck.getCurrentIndex();
-        const current = slides[index];
-        const neighbour = slides[index + 1] || slides[index - 1];
-        App.history.change('Delete slide', { slides: [idOf(current)] }, () => current.remove(),
-            { meta: { slides: { undo: idOf(current), redo: idOf(neighbour) } } });
+        const targets = App.slides.selectedSlides();
+        const last = slides.indexOf(targets[targets.length - 1]);
+        const first = slides.indexOf(targets[0]);
+        const neighbour = slides.slice(last + 1).find((slide) => targets.indexOf(slide) === -1) ||
+            slides.slice(0, first).reverse().find((slide) => targets.indexOf(slide) === -1);
+        App.history.change(targets.length > 1 ? 'Delete slides' : 'Delete slide', { slides: targets.map(idOf) },
+            () => targets.forEach((slide) => slide.remove()),
+            { meta: { slides: { undo: idOf(targets[0]), redo: idOf(neighbour) } } });
+        setPicked([]);
         show(idOf(neighbour));
     };
 
-    /* Move slide number `from` into gap `gap` as one undo step; the moved slide is shown (after undo too). */
+    /*
+     * Move slide number `from` into gap `gap` as one undo step; the moved slide is shown (after undo too).
+     * A picked slide takes the other picked ones with it.
+     */
     App.slides.move = function move(from, gap) {
         const slide = App.deck.getSlides()[from];
         const doc = App.deck.getDocument();
-        if (!slide || gap === from || gap === from + 1) {
-            return;
-        }
-        finishWork();
-        App.history.change('Move slide', { slides: [] }, () => App.slides.moveSlide(doc, from, gap),
-            { meta: { slides: { undo: idOf(slide), redo: idOf(slide) } } });
-        show(idOf(slide));
-    };
-
-    /* Ctrl+Up / Ctrl+Down in the slide rail: the slide shown one place up (-1) or down (+1). */
-    App.slides.moveBy = function moveBy(delta) {
-        const index = App.deck.getCurrentIndex();
-        const target = index + delta;
-        if (target >= 0 && target < App.deck.getSlides().length) {
-            App.slides.move(index, delta < 0 ? target : target + 1);
-        }
-    };
-
-    /* Hide Slide: on / off for the slide shown, one undo step. */
-    App.slides.toggleHidden = function toggleHidden() {
-        const slide = App.deck.getCurrentSlide();
         if (!slide) {
             return;
         }
-        const hide = !App.slides.isHidden(slide);
-        App.history.change(hide ? 'Hide slide' : 'Unhide slide', { slideId: idOf(slide) },
-            () => App.slides.setHidden(slide, hide));
+        const ids = picked.indexOf(idOf(slide)) !== -1 ? picked.slice() : [idOf(slide)];
+        if (!App.slides.moveBlock(doc, ids, gap, true)) {   // it would not move: no empty undo step
+            return;
+        }
+        finishWork();
+        App.history.change(ids.length > 1 ? 'Move slides' : 'Move slide', { slides: [] }, () => App.slides.moveBlock(doc, ids, gap),
+            { meta: { slides: { undo: idOf(slide), redo: idOf(slide) } } });
+        picking = true;
+        try {
+            show(idOf(slide));
+        } finally {
+            picking = false;
+        }
+    };
+
+    /* Ctrl+Up / Ctrl+Down in the slide rail: the slide shown (the picked slides) one place up (-1) or down (+1). */
+    App.slides.moveBy = function moveBy(delta) {
+        const slides = App.deck.getSlides();
+        const targets = App.slides.selectedSlides();
+        const first = slides.indexOf(targets[0]);
+        const last = slides.indexOf(targets[targets.length - 1]);
+        const gap = delta < 0 ? first - 1 : last + 2;
+        if (gap >= 0 && gap <= slides.length && targets.length) {
+            App.slides.move(slides.indexOf(App.deck.getCurrentSlide()), gap);
+        }
+    };
+
+    /* Hide Slide: on / off for the picked slides (hidden if any of them shows), one undo step. */
+    App.slides.toggleHidden = function toggleHidden() {
+        const targets = App.slides.selectedSlides();
+        if (!targets.length) {
+            return;
+        }
+        const hide = targets.some((slide) => !App.slides.isHidden(slide));
+        const label = (hide ? 'Hide slide' : 'Unhide slide') + (targets.length > 1 ? 's' : '');
+        App.history.change(label, targets.length > 1 ? { slides: targets.map(idOf) } : { slideId: idOf(targets[0]) },
+            () => targets.forEach((slide) => App.slides.setHidden(slide, hide)));
+    };
+
+    // ---- Copy, Cut and Paste slides (Phase 10) ----
+
+    let copied = null;   // the last slides copied in this tab, as clipboard HTML (for the Paste command)
+
+    /* Copy (cut: and delete) the picked slides; returns their clipboard HTML. */
+    App.slides.copySlides = function copySlides(cut) {
+        const targets = App.slides.selectedSlides();
+        if (!targets.length || (cut && !App.slides.canRemove())) {
+            return null;
+        }
+        copied = App.slides.clipboardHtml(targets);
+        if (cut) {
+            App.slides.remove();
+        }
+        return copied;
+    };
+
+    App.slides.hasCopiedSlides = function hasCopiedSlides() {
+        return copied !== null;
+    };
+
+    /* Paste slides from clipboard HTML (none: the last copied here) after the picked slides; false if it holds none. */
+    App.slides.paste = function paste(html) {
+        const doc = App.deck.getDocument();
+        const slides = doc ? App.slides.slidesFromClipboard(html || copied, doc) : null;
+        if (!slides || !slides.length) {
+            return false;
+        }
+        finishWork();
+        const targets = App.slides.selectedSlides();
+        const after = targets[targets.length - 1] || null;
+        // This deck's slide-master copy, as the slide they follow shows it (numbers are set again on save).
+        const layer = after && after.querySelector(':scope > .master-layer');
+        if (layer) {
+            slides.forEach((slide) => slide.insertBefore(layer.cloneNode(true), slide.firstChild));
+        }
+        insertAfter(slides.length > 1 ? 'Paste slides' : 'Paste slide', after, slides);
+        return true;
+    };
+
+    /* A copy or cut event in the slide rail: the picked slides go on the system clipboard. */
+    App.slides.onCopyEvent = function onCopyEvent(event) {
+        const titles = App.slides.selectedSlides().map((slide) => {
+            const title = App.slides.titleOf(slide);
+            return title ? title.textContent.replace(/\s+/g, ' ').trim() : '';
+        }).filter(Boolean).join('\n');
+        const html = App.slides.copySlides(event.type === 'cut');
+        if (!html) {
+            return;
+        }
+        event.preventDefault();
+        event.clipboardData.setData('text/html', html);
+        event.clipboardData.setData('text/plain', titles);   // pasted into an e-mail: the slides' titles
+    };
+
+    /* A paste event holding copied slides (this tab's or another editor tab's): pasted. True if it did. */
+    App.slides.onPasteEvent = function onPasteEvent(event) {
+        const html = event.clipboardData && event.clipboardData.getData('text/html');
+        if (!html || html.indexOf('data-deck-editor-slides') === -1) {
+            return false;
+        }
+        event.preventDefault();
+        return App.slides.paste(html);
     };
 
     // ---------------------------------------------------------------
@@ -451,6 +721,21 @@
 
     /* Wiring, called once from App.start() (after deck.js, whose own history listener goes first). */
     App.slides.init = function init() {
+        // Moving to a slide any other way than a Shift / Ctrl+click picks just that one (Phase 10).
+        App.events.on('slide-changed', () => {
+            if (!picking && picked.length && picked.indexOf(idOf(App.deck.getCurrentSlide())) === -1) {
+                setPicked([]);
+            }
+        });
+        App.events.on('deck-loaded', () => {
+            anchorId = null;
+            setPicked([]);
+        });
+        App.events.on('history-changed', (info) => {
+            if (info && (info.action === 'undo' || info.action === 'redo')) {
+                setPicked([]);
+            }
+        });
         // Undo / redo of a slide step show the slide it was about (the deleted one back, the new one again).
         App.events.on('history-changed', (info) => {
             if (info && (info.action === 'undo' || info.action === 'redo') && info.meta && info.meta.slides) {

@@ -121,6 +121,8 @@ HAND_CHECKS = [
     {"key": "Tab: click an empty part of a slide", "tests": ["test_selection_pane"], "auto": True},
     {"key": "Links: open samples/contract-deck.html", "tests": ["test_hyperlinks"], "auto": False,
      "left": "the test selects words directly, stands in for window.open, and checks the PDF's page ids and the .pptx XML rather than a real PDF reader and PowerPoint"},
+    {"key": "Several slides: open samples/contract-deck.html", "tests": ["test_slide_picks_and_clipboard"], "auto": False,
+     "left": "the second tab is a page of the same test browser (Edge's own clipboard between real tabs is not seen); Ctrl+D and Delete: the test checks them after Shift+click, not each Ctrl+Z separately"},
     {"key": "Change Case: click the subtitle", "tests": ["test_text_layout_and_change_case"], "auto": False,
      "left": "the test selects \"Atlas\" directly, not with the mouse"},
 ]

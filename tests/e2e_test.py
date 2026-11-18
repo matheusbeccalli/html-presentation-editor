@@ -7882,6 +7882,111 @@ def test_hyperlinks(browser):
     editor.close()
 
 
+SLIDE_ORDER = "App.deck.getSlides().map((s) => s.getAttribute('data-slide-id'))"
+TITLES = "App.deck.getSlides().map((s) => { const t = App.slides.titleOf(s); return t ? t.textContent.trim() : ''; })"
+
+
+def thumb(i):
+    return f"#thumbnail-rail .thumb[data-index='{i}']"
+
+
+def test_slide_picks_and_clipboard(browser):
+    """Phase 10 step 7: Shift+click picks a range of thumbnails, Ctrl+click one more or one fewer; Delete, Duplicate,
+    Hide and dragging act on all of them; Ctrl+C / Ctrl+X / Ctrl+V in the rail copy, cut and paste slides (after the
+    slide shown, new ids, notes and comments along), Ctrl+V on the slide with nothing selected too; another editor tab
+    pastes them whole; each one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    order = lambda: page.evaluate(SLIDE_ORDER)  # noqa: E731
+    picked = lambda: page.evaluate("App.slides.pickedIds()")  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    titles0 = page.evaluate(TITLES)
+
+    # Click slide 2, Shift+click slide 4: three picked, framed; Ctrl+click slide 3: out again.
+    page.click(thumb(1))
+    page.click(thumb(3), modifiers=["Shift"])
+    check(picked() == ["s2", "s3", "s4"] and page.locator("#thumbnail-rail .thumb-picked").count() == 3, f"range: {picked()}")
+    page.screenshot(path=str(OUTPUT / "148-slides-picked.png"))
+    page.click(thumb(2), modifiers=["Control"])
+    check(picked() == ["s2", "s4"], f"Ctrl+click takes one out: {picked()}")
+
+    # Ctrl+C, then click slide 6 and Ctrl+V: copies of slides 2 and 4 after it, with new ids.
+    page.keyboard.press("Control+c")
+    page.click(thumb(5))
+    check(picked() == [], "a plain click: just that slide")
+    page.keyboard.press("Control+v")
+    check(len(order()) == 8 and label() == "Paste slides", f"pasted: {order()} {label()}")
+    new_ids = order()[6:]
+    check(new_ids[0] not in ["s2", "s4"] and new_ids[1] not in ["s2", "s4"], f"new ids: {new_ids}")
+    check(page.evaluate(TITLES)[6:] == [titles0[1], titles0[3]], "copies of slides 2 and 4")
+    check(page.evaluate("App.deck.getCurrentIndex()") == 6 and picked() == new_ids, "the pasted slides are shown and picked")
+    page.keyboard.press("Control+z")
+    check(len(order()) == 6, "one Ctrl+Z: gone")
+
+    # Ctrl+V on the slide with nothing selected: pasted after the slide shown.
+    page.evaluate("App.deck.goTo(0)")
+    page.mouse.click(*slide_to_screen(page, 700, 650))
+    page.keyboard.press("Escape")
+    page.keyboard.press("Control+v")
+    check(len(order()) == 8 and page.evaluate(TITLES)[1:3] == [titles0[1], titles0[3]], f"after slide 1: {page.evaluate(TITLES)}")
+    page.keyboard.press("Control+z")
+
+    # Cut slides 2-3 (Ctrl+X in the rail): gone; Ctrl+V after the last slide puts them there.
+    page.click(thumb(1))
+    page.click(thumb(2), modifiers=["Shift"])
+    page.keyboard.press("Control+x")
+    check(order() == ["s1", "s4", "s5", "s6"] and label() == "Delete slides", f"cut: {order()} {label()}")
+    page.click(thumb(3))
+    page.keyboard.press("Control+v")
+    check(page.evaluate(TITLES) == [titles0[0], titles0[3], titles0[4], titles0[5], titles0[1], titles0[2]], page.evaluate(TITLES))
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(order() == ["s1", "s2", "s3", "s4", "s5", "s6"], f"undone: {order()}")
+
+    # Several picked: Duplicate (Ctrl+D), Hide, Delete, drag.
+    page.click(thumb(1))
+    page.click(thumb(2), modifiers=["Shift"])
+    page.keyboard.press("Control+d")
+    check(len(order()) == 8 and label() == "Duplicate slides" and page.evaluate(TITLES)[3:5] == [titles0[1], titles0[2]],
+          f"duplicated after the block: {page.evaluate(TITLES)}")
+    page.keyboard.press("Control+z")
+    page.click(thumb(1))
+    page.click(thumb(2), modifiers=["Shift"])
+    page.click(".ribbon-tab[data-tab='slideshow']")
+    page.click("button[data-command='hideSlide']")
+    check(page.evaluate("App.deck.getSlides().slice(1, 3).every(App.slides.isHidden)") and label() == "Hide slides", label())
+    page.keyboard.press("Control+z")
+    page.click(thumb(1))
+    page.click(thumb(2), modifiers=["Shift"])
+    box = page.locator(thumb(1)).bounding_box()
+    last = page.locator(thumb(5)).bounding_box()
+    drag(page, [box["x"] + 60, box["y"] + 40], [last["x"] + 60, last["y"] + last["height"] - 5], steps=10)
+    check(order() == ["s1", "s4", "s5", "s6", "s2", "s3"] and label() == "Move slides", f"dragged together: {order()} {label()}")
+    page.keyboard.press("Control+z")
+    page.click(thumb(1))
+    page.click(thumb(2), modifiers=["Shift"])
+    page.keyboard.press("Delete")
+    check(order() == ["s1", "s4", "s5", "s6"], f"deleted both: {order()}")
+    page.keyboard.press("Control+z")
+
+    # Another editor tab (the same browser): Ctrl+V there pastes the copied slides whole.
+    page.click(thumb(2))
+    page.keyboard.press("Control+c")
+    other = Editor(browser, editor.context)
+    other.open(MESSY)
+    other.close_dialog_if_open()   # the import report
+    count = other.page.evaluate("App.deck.getSlides().length")
+    other.page.click(thumb(0))
+    other.page.keyboard.press("Control+v")
+    check(other.page.evaluate("App.deck.getSlides().length") == count + 1, "pasted into the other tab")
+    pasted = other.page.evaluate("App.deck.getSlides()[1].querySelectorAll('table').length")
+    check(pasted == 1, f"slide 3's table came along: {pasted}")
+    check(editor.errors == [] and other.errors == [], f"no errors: {editor.errors} {other.errors}")
+    other.page.close()
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7989,6 +8094,7 @@ TESTS = [
     test_more_shapes_and_arrowheads,
     test_selection_pane,
     test_hyperlinks,
+    test_slide_picks_and_clipboard,
 ]
 
 

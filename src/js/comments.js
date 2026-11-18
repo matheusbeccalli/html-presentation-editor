@@ -244,8 +244,9 @@
      * (`idMap` old -> new); its comments get new ids too and point at the
      * copies of their elements.
      */
-    App.comments.remapCopy = function remapCopy(copy, idMap, doc) {
-        const used = new Set(nodesIn(doc).map((node) => node.getAttribute('data-comment-id')));
+    App.comments.remapCopy = function remapCopy(copy, idMap, doc, takenIds) {
+        // takenIds: ids already given out to other copies not in the deck yet (several slides pasted at once).
+        const used = takenIds || new Set(nodesIn(doc).map((node) => node.getAttribute('data-comment-id')));
         copy.querySelectorAll('aside.comments > .comment[data-comment-id]').forEach((node) => {
             node.setAttribute('data-comment-id', App.util.uniqueId('c', used));
             const target = node.getAttribute('data-target');

@@ -77,6 +77,13 @@
 
     const hasDeck = () => App.state.hasDeck;
 
+    /* Copied slides on the system clipboard too (best effort: the browser may refuse outside a key press). */
+    function writeSlidesToClipboard(html) {
+        if (html && navigator.clipboard && window.ClipboardItem) {
+            navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }) })]).catch(() => {});
+        }
+    }
+
     App.commands.init = function init() {
         App.commands.define('newDeck', { label: 'New', run: () => App.fileio.newDeck() });
         App.commands.define('open', { label: 'Open…', run: () => App.fileio.open() });
@@ -152,6 +159,17 @@
         App.commands.define('commentsPane', {
             label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
+        });
+        // Copy, cut and paste slides (Phase 10; Ctrl+C / X / V in the slide rail are clipboard events: elements.js).
+        App.commands.define('copySlides', {
+            label: 'Copy', isEnabled: hasDeck, run: () => writeSlidesToClipboard(App.slides.copySlides(false)),
+        });
+        App.commands.define('cutSlides', {
+            label: 'Cut', isEnabled: () => hasDeck() && App.slides.canRemove(),
+            run: () => writeSlidesToClipboard(App.slides.copySlides(true)),
+        });
+        App.commands.define('pasteSlides', {
+            label: 'Paste', isEnabled: () => hasDeck() && App.slides.hasCopiedSlides(), run: () => App.slides.paste(),
         });
         // Hyperlinks (Phase 10).
         App.commands.define('insertLink', {

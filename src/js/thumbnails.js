@@ -36,6 +36,7 @@
 
         App.events.on('deck-loaded', rebuild);
         App.events.on('slide-changed', highlightCurrent);
+        App.events.on('slide-picks-changed', highlightCurrent);
         App.events.on('history-changed', onHistoryChanged);
 
         // Working in the rail means working on slides, not on an element (as in PowerPoint):
@@ -68,14 +69,20 @@
             event.preventDefault();
             const item = event.target.closest('.thumb');
             if (item) {
-                App.deck.goTo(Number(item.getAttribute('data-index')));
+                const index = Number(item.getAttribute('data-index'));
+                const id = App.deck.getSlides()[index].getAttribute('data-slide-id');
+                if (App.slides.pickedIds().indexOf(id) === -1) {
+                    App.slides.pick(index, 'single');   // a slide outside the picked ones: just that one
+                } else {
+                    App.deck.goTo(index);
+                }
                 item.focus();
             }
             App.contextMenu.openWith(item ? SLIDE_ITEMS : ['newSlide'], event.clientX, event.clientY);
         });
     };
 
-    const SLIDE_ITEMS = ['newSlide', 'duplicateSlide', 'deleteSlide', '-', 'hideSlide', '-', 'slideBackground'];
+    const SLIDE_ITEMS = ['cutSlides', 'copySlides', 'pasteSlides', '-', 'newSlide', 'duplicateSlide', 'deleteSlide', '-', 'hideSlide', '-', 'slideBackground'];
 
     // Keys in the rail work on slides, as in PowerPoint's slide pane (the editor's own shortcuts do not run).
     const RAIL_KEYS = {
@@ -235,7 +242,8 @@
         const item = App.util.el('div', {
             class: 'thumb', role: 'button', tabindex: '0',
             'data-index': String(index),
-            onclick: () => App.deck.goTo(index),
+            // Shift+click: a range of slides; Ctrl+click: one more (or one fewer) (Phase 10).
+            onclick: (event) => App.slides.pick(index, event.shiftKey ? 'range' : (event.ctrlKey || event.metaKey) ? 'toggle' : 'single'),
         }, [
             App.util.el('span', { class: 'thumb-number' }, [String(index + 1)]),
             App.util.el('div', { class: 'thumb-box' }, [frame]),
@@ -359,7 +367,11 @@
 
     function highlightCurrent() {
         const current = App.deck.getCurrentIndex();
+        const picked = App.slides.pickedIds();
+        const slides = App.deck.getSlides();
         rail.querySelectorAll('.thumb').forEach((item) => {
+            const slide = slides[Number(item.getAttribute('data-index'))];
+            item.classList.toggle('thumb-picked', !!slide && picked.indexOf(slide.getAttribute('data-slide-id')) !== -1);
             const isCurrent = Number(item.getAttribute('data-index')) === current;
             item.classList.toggle('thumb-current', isCurrent);
             item.setAttribute('aria-current', isCurrent ? 'true' : 'false');

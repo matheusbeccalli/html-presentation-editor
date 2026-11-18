@@ -9561,6 +9561,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         { kind: 'chevron', label: 'Chevron', width: 200, height: 80 },
         { kind: 'pentagon', label: 'Pentagon', width: 200, height: 80 },
         { kind: 'callout', label: 'Callout', width: 160, height: 120 },
+        // Phase 10
+        { kind: 'triangle', label: 'Triangle', width: 140, height: 120 },
+        { kind: 'rtTriangle', label: 'Right Triangle', width: 140, height: 120 },
+        { kind: 'doubleArrow', label: 'Double Arrow', width: 200, height: 0 },
+        { kind: 'elbow', label: 'Elbow Line', width: 200, height: 100 },
+        { kind: 'leftBrace', label: 'Left Brace', width: 20, height: 120 },
+        { kind: 'rightBrace', label: 'Right Brace', width: 20, height: 120 },
+        { kind: 'leftBracket', label: 'Left Bracket', width: 20, height: 120 },
+        { kind: 'rightBracket', label: 'Right Bracket', width: 20, height: 120 },
     ];
 
     // Adjustments as PowerPoint sets them for a new shape.
@@ -9571,8 +9580,21 @@ App.template.newDeckHtml = function newDeckHtml() {
         callout: [0.2083, 1.25],          // the tail's tip, as parts of the width and height
     };
 
+    /* Lines: two ends (dragged by their own handles), a stroke, heads, no text. */
+    const LINE_KINDS = ['line', 'arrow', 'doubleArrow', 'elbow'];
+    // Braces and brackets (Phase 10): a box like the others, but drawn as an outline only (no fill, no text).
+    const OUTLINE_KINDS = ['leftBrace', 'rightBrace', 'leftBracket', 'rightBracket'];
+    // The heads a kind has unless its data-heads says otherwise (Phase 10).
+    const OWN_HEADS = { line: 'none', arrow: 'end', doubleArrow: 'both', elbow: 'none' };
+    App.shapes.HEADS = ['none', 'start', 'end', 'both'];
+
     App.shapes.isLine = function isLine(kind) {
-        return kind === 'line' || kind === 'arrow';
+        return LINE_KINDS.indexOf(kind) !== -1;
+    };
+
+    /* Drawn as a stroke only (lines, braces, brackets): their look is the outline's; they have no fill. */
+    App.shapes.isStroked = function isStroked(kind) {
+        return App.shapes.isLine(kind) || OUTLINE_KINDS.indexOf(kind) !== -1;
     };
 
     // The text area of a box shape: over the whole box, its lines centred both ways, white, 18 pt.
@@ -9583,7 +9605,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* A shape drawn by the editor that can hold text (not a line, not an older plain box). */
     App.shapes.canHoldText = function canHoldText(element) {
         const kind = element && element.getAttribute('data-type') === 'shape' && element.getAttribute('data-shape');
-        return !!kind && !App.shapes.isLine(kind);
+        return !!kind && !App.shapes.isStroked(kind);
     };
 
     /* The text area of a shape, or null; options.create makes an empty one if the shape can hold text. */
@@ -9647,6 +9669,60 @@ App.template.newDeckHtml = function newDeckHtml() {
         return { x1: flipX ? w : 0, y1: flipY ? h : 0, x2: flipX ? 0 : w, y2: flipY ? 0 : h };
     }
 
+    /* An arrowhead: its point at `tip`, coming along the unit direction `u`, `head` px long. */
+    function headAt(tip, u, head) {
+        const half = head * 0.45;
+        const normal = { x: -u.y, y: u.x };
+        const base = { x: tip.x - u.x * head, y: tip.y - u.y * head };
+        return polygon([[tip.x, tip.y], [base.x + normal.x * half, base.y + normal.y * half],
+            [base.x - normal.x * half, base.y - normal.y * half]]);
+    }
+
+    /*
+     * A line's points (corner to corner; an elbow goes across, down the middle and
+     * across), then its heads (Phase 10: none / start / end / both). The stroke
+     * stops inside a head, so its square end never shows past the point.
+     */
+    function lineParts(kind, w, h, opts) {
+        const ends = lineEndsInBox(w, h, opts.flip);
+        const middle = (ends.x1 + ends.x2) / 2;
+        const points = kind === 'elbow'
+            ? [[ends.x1, ends.y1], [middle, ends.y1], [middle, ends.y2], [ends.x2, ends.y2]]
+            : [[ends.x1, ends.y1], [ends.x2, ends.y2]];
+        const heads = App.shapes.HEADS.indexOf(opts.heads) !== -1 ? opts.heads : OWN_HEADS[kind];
+        const lineWidth = opts.lineWidth || LINE_WIDTH;
+        const drawn = points.map(([x, y]) => ({ x: x, y: y }));
+        const headParts = [];
+        const addHead = (tipIndex, fromIndex) => {
+            const tip = drawn[tipIndex];
+            const from = drawn[fromIndex];
+            const length = Math.hypot(tip.x - from.x, tip.y - from.y) || 1;
+            const u = { x: (tip.x - from.x) / length, y: (tip.y - from.y) / length };
+            const size = Math.min(3 * lineWidth + 6, length);
+            headParts.push(headAt(tip, u, size));
+            const stop = Math.max(size - lineWidth, 0);
+            drawn[tipIndex] = { x: tip.x - u.x * stop, y: tip.y - u.y * stop };
+        };
+        const last = drawn.length - 1;
+        if (heads === 'start' || heads === 'both') {
+            addHead(0, 1);
+        }
+        if (heads === 'end' || heads === 'both') {
+            addHead(last, last - 1);
+        }
+        let d = 'M' + n(drawn[0].x) + ' ' + n(drawn[0].y);
+        if (kind === 'elbow') {
+            d += 'H' + n(drawn[1].x) + 'V' + n(drawn[2].y) + 'H' + n(drawn[3].x);
+        } else {
+            d += 'L' + n(drawn[1].x) + ' ' + n(drawn[1].y);
+        }
+        const parts = [{ part: 'line', d: d }];
+        if (headParts.length) {
+            parts.push({ part: 'head', d: headParts.join('') });
+        }
+        return parts;
+    }
+
     /*
      * The paths of a kind of shape in a w x h box (slide px): [{ part, d }],
      * part 'fill' (a filled outline), 'line' (a stroke) or 'head' (an arrow's
@@ -9654,8 +9730,11 @@ App.template.newDeckHtml = function newDeckHtml() {
      */
     App.shapes.geometry = function geometry(kind, w, h, options) {
         const opts = options || {};
-        const parts = drawnParts(kind, w, h, opts);
-        const mirror = App.shapes.isLine(kind) ? '' : mirrorOf(opts.flip, w, h);
+        // A right brace / bracket is the left one mirrored inside its box.
+        const right = { rightBrace: 'leftBrace', rightBracket: 'leftBracket' }[kind];
+        const parts = drawnParts(right || kind, w, h, opts);
+        const flip = right ? App.transform.toggleFlip(opts.flip, 'x') : opts.flip;
+        const mirror = App.shapes.isLine(kind) ? '' : mirrorOf(flip, w, h);
         return mirror ? parts.map((part) => Object.assign(part, { transform: mirror })) : parts;
     };
 
@@ -9701,27 +9780,29 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
             case 'callout':
                 return [{ part: 'fill', d: calloutPath(w, h, adjust) }];
-            case 'line':
-            case 'arrow': {
-                const ends = lineEndsInBox(w, h, opts.flip);
-                if (kind === 'line') {
-                    return [{ part: 'line', d: 'M' + n(ends.x1) + ' ' + n(ends.y1) + 'L' + n(ends.x2) + ' ' + n(ends.y2) }];
-                }
-                const lineWidth = opts.lineWidth || LINE_WIDTH;
-                const length = Math.hypot(ends.x2 - ends.x1, ends.y2 - ends.y1) || 1;
-                const head = Math.min(3 * lineWidth + 6, length);
-                const half = head * 0.45;
-                const u = { x: (ends.x2 - ends.x1) / length, y: (ends.y2 - ends.y1) / length };
-                const normal = { x: -u.y, y: u.x };
-                const base = { x: ends.x2 - u.x * head, y: ends.y2 - u.y * head };
-                // The line stops inside the head, so its square end never shows past the point.
-                const stop = Math.max(head - lineWidth, 0);
-                return [
-                    { part: 'line', d: 'M' + n(ends.x1) + ' ' + n(ends.y1) + 'L' + n(ends.x2 - u.x * stop) + ' ' + n(ends.y2 - u.y * stop) },
-                    { part: 'head', d: polygon([[ends.x2, ends.y2], [base.x + normal.x * half, base.y + normal.y * half],
-                        [base.x - normal.x * half, base.y - normal.y * half]]) },
-                ];
+            case 'triangle':
+                return [{ part: 'fill', d: 'M' + n(w / 2) + ' 0L' + n(w) + ' ' + n(h) + 'H0Z' }];
+            case 'rtTriangle':
+                return [{ part: 'fill', d: 'M0 0L' + n(w) + ' ' + n(h) + 'H0Z' }];
+            case 'leftBracket': {
+                // Square-ish ends curled by a radius of a twelfth of the height (at most the width).
+                const r = Math.min(w / 2, h / 12);
+                return [{ part: 'line', d: 'M' + n(w) + ' 0A' + n(r) + ' ' + n(r) + ' 0 0 0 ' + n(w - r) + ' ' + n(r) +
+                    'V' + n(h - r) + 'A' + n(r) + ' ' + n(r) + ' 0 0 0 ' + n(w) + ' ' + n(h) }];
             }
+            case 'leftBrace': {
+                // From the top right, down the middle of the box, a point out to the left at half height, down again.
+                const r = Math.min(h / 12, h / 4);
+                const x = w / 2;
+                return [{ part: 'line', d: 'M' + n(w) + ' 0Q' + n(x) + ' 0 ' + n(x) + ' ' + n(r) + 'V' + n(h / 2 - r) +
+                    'Q' + n(x) + ' ' + n(h / 2) + ' 0 ' + n(h / 2) + 'Q' + n(x) + ' ' + n(h / 2) + ' ' + n(x) + ' ' + n(h / 2 + r) +
+                    'V' + n(h - r) + 'Q' + n(x) + ' ' + n(h) + ' ' + n(w) + ' ' + n(h) }];
+            }
+            case 'line':
+            case 'arrow':
+            case 'doubleArrow':
+            case 'elbow':
+                return lineParts(kind, w, h, opts);
             default:
                 return [];
         }
@@ -9895,6 +9976,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const line = element.querySelector('path.shape-line');
         return {
             adjust: App.shapes.adjustOf(element), flip: element.getAttribute('data-flip') || '',
+            heads: App.shapes.headsOf(element),
             lineWidth: line ? parseFloat(line.style.strokeWidth) || LINE_WIDTH : LINE_WIDTH,
         };
     }
@@ -9964,7 +10046,7 @@ App.template.newDeckHtml = function newDeckHtml() {
      * (0-100 %, of the fill; of the line for lines), shadow }.
      */
     App.shapes.lookOf = function lookOf(element) {
-        const line = App.shapes.isLine(element.getAttribute('data-shape'));
+        const line = App.shapes.isStroked(element.getAttribute('data-shape'));
         const path = element.querySelector('svg.shape-svg > path.shape-' + (line ? 'line' : 'fill'));
         const width = parseFloat(path.style.strokeWidth) || 0;
         const opacity = parseFloat(line ? path.style.strokeOpacity : path.style.fillOpacity);
@@ -9980,7 +10062,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* Change some of a shape's look (fields as lookOf; a line ignores fill). An outline added to a shape without one is 2 px. */
     App.shapes.setLook = function setLook(element, changes) {
-        const line = App.shapes.isLine(element.getAttribute('data-shape'));
+        const line = App.shapes.isStroked(element.getAttribute('data-shape'));
         const look = App.shapes.lookOf(element);
         const svg = element.querySelector('svg.shape-svg');
         const path = svg.querySelector('path.shape-' + (line ? 'line' : 'fill'));
@@ -10027,6 +10109,57 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.shapes.render(element);   // an arrow's head follows the line's width
     };
 
+    /*
+     * Heads (Phase 10): a line's arrowheads are one path, path.shape-head, filled
+     * with the line's colour (and its transparency). Added when the line gets a
+     * head, removed when it has none left.
+     */
+    function syncHead(element, svg, wanted) {
+        const head = svg && svg.querySelector('path.shape-head');
+        if (!svg || wanted === !!head) {
+            return;
+        }
+        if (!wanted) {
+            head.remove();
+            return;
+        }
+        const line = svg.querySelector('path.shape-line');
+        const path = element.ownerDocument.createElementNS(SVG_NS, 'path');
+        path.setAttribute('class', 'shape-head');
+        path.setAttribute('style', STYLES.head);
+        if (line && line.style.stroke) {
+            path.style.setProperty('fill', line.style.stroke);
+        }
+        if (line && line.style.strokeOpacity) {
+            path.style.setProperty('fill-opacity', line.style.strokeOpacity);
+        }
+        svg.appendChild(path);
+    }
+
+    /* A line's heads: 'none', 'start', 'end' or 'both' (its data-heads, else its kind's own: an arrow's is 'end'). */
+    App.shapes.headsOf = function headsOf(element) {
+        const kind = element.getAttribute('data-shape');
+        const own = element.getAttribute('data-heads');
+        if (!App.shapes.isLine(kind)) {
+            return 'none';
+        }
+        return App.shapes.HEADS.indexOf(own) !== -1 ? own : OWN_HEADS[kind];
+    };
+
+    /* Give a line other heads; data-heads is kept only when they differ from its kind's own. */
+    App.shapes.setHeads = function setHeads(element, heads) {
+        const kind = element.getAttribute('data-shape');
+        if (!App.shapes.isLine(kind) || App.shapes.HEADS.indexOf(heads) === -1) {
+            return;
+        }
+        if (heads === OWN_HEADS[kind]) {
+            element.removeAttribute('data-heads');
+        } else {
+            element.setAttribute('data-heads', heads);
+        }
+        App.shapes.render(element);
+    };
+
     /* Draw a shape again for its box's size now (after a resize); its look is kept. Older shapes are left alone. */
     App.shapes.render = function render(element) {
         const kind = element.getAttribute('data-shape');
@@ -10040,6 +10173,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             svg.style.minHeight = '1px';
         }
         const parts = App.shapes.geometry(kind, rect.width, rect.height, optionsOf(element));
+        syncHead(element, svg, parts.some((part) => part.part === 'head'));
         parts.forEach((part) => {
             const path = element.querySelector('svg.shape-svg > path.shape-' + part.part);
             if (path) {
@@ -11899,6 +12033,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         shapeChevron: '<path d="M2.5 5.5h10l4.5 4.5-4.5 4.5h-10l4.5-4.5z"/>',
         shapePentagon: '<path d="M2.5 5.5h10.5l4.5 4.5-4.5 4.5H2.5z"/>',
         shapeCallout: '<path d="M2.5 3.5h15v9h-9l-4 4v-4h-2z"/>',
+        shapeTriangle: '<path d="M10 3.5l7.5 13h-15z"/>',
+        shapeRtTriangle: '<path d="M3 3.5l14 13H3z"/>',
+        shapeDoubleArrow: '<path d="M4 16L16 4M10.5 4H16v5.5M4 10.5V16h5.5"/>',
+        shapeElbow: '<path d="M3 4.5h7v11h7"/>',
+        shapeLeftBrace: '<path d="M13 3c-3 0-3 1.5-3 3v2.5c0 1-1 1.5-3 1.5 2 0 3 .5 3 1.5V14c0 1.5 0 3 3 3"/>',
+        shapeRightBrace: '<path d="M7 3c3 0 3 1.5 3 3v2.5c0 1 1 1.5 3 1.5-2 0-3 .5-3 1.5V14c0 1.5 0 3-3 3"/>',
+        shapeLeftBracket: '<path d="M12.5 3H9.5c-1 0-1.5.5-1.5 1.5v11c0 1 .5 1.5 1.5 1.5h3"/>',
+        shapeRightBracket: '<path d="M7.5 3h3c1 0 1.5.5 1.5 1.5v11c0 1-.5 1.5-1.5 1.5h-3"/>',
         crop: '<path d="M5.5 1.5v13h13M1.5 5.5h13v13"/>',
         resetPictureSize: '<rect x="5.5" y="5.5" width="9" height="9"/><path d="M2.5 6V2.5H6M17.5 6V2.5H14M2.5 14v3.5H6M17.5 14v3.5H14"/>',
         picture: '<rect x="2.5" y="3.5" width="15" height="13" rx="1"/><circle cx="7" cy="8" r="1.5"/><path d="M2.5 14.5l4.5-4 3 2.5 3.5-3.5 4 4"/>',
@@ -21891,6 +22033,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         return !!element && App.shapes.isLine(element.getAttribute('data-shape'));
     }
 
+    /* A line, brace or bracket: drawn as an outline, so it has no fill (Phase 10). */
+    function isStrokedSelected() {
+        const element = selectedShape();
+        return !!element && App.shapes.isStroked(element.getAttribute('data-shape'));
+    }
+
     App.shapeControls.currentLook = function currentLook() {
         const element = selectedShape();
         return element ? App.shapes.lookOf(element) : null;
@@ -21912,7 +22060,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     /* The Shape Format commands, defined in commands.js. */
     App.shapeControls.commands = function commands() {
         const isShape = () => App.shapeControls.isShapeSelected();
-        const hasFill = () => isShape() && !isLineSelected();
+        const hasFill = () => isShape() && !isStrokedSelected();
         return {
             shapeFill: { label: 'Shape Fill', isEnabled: hasFill, run: () => changeLook('Shape fill', { fill: lastFill }) },
             setShapeFill: {
@@ -21938,6 +22086,15 @@ App.template.newDeckHtml = function newDeckHtml() {
             setShapeDash: { label: 'Dashes', isEnabled: isShape, run: (dash) => changeLook('Shape outline dash', { dash: dash }) },
             setShapeTransparency: {
                 label: 'Transparency', isEnabled: isShape, run: (percent) => changeLook('Shape transparency', { transparency: percent }),
+            },
+            // Arrowheads of a line (Phase 10): none, start, end or both.
+            setLineHeads: {
+                label: 'Arrows', isEnabled: () => isLineSelected(),
+                run: (heads) => {
+                    const element = selectedShape();
+                    App.history.change('Arrows', { slideId: element.closest('section.slide').getAttribute('data-slide-id') },
+                        () => App.shapes.setHeads(element, heads));
+                },
             },
             shapeShadow: {
                 label: 'Shadow', isEnabled: isShape,
@@ -21985,6 +22142,14 @@ App.template.newDeckHtml = function newDeckHtml() {
         return DASH_LABELS.map(([dash, label]) => ({ label: label, value: dash, checked: !!look && look.dash === dash }));
     }
 
+    const HEAD_LABELS = [['none', 'No arrows'], ['end', 'Arrow at the end'], ['start', 'Arrow at the start'], ['both', 'Arrows at both ends']];
+
+    function headItems() {
+        const element = selectedShape();
+        const heads = element ? App.shapes.headsOf(element) : null;
+        return HEAD_LABELS.map(([value, label]) => ({ label: label, value: value, checked: heads === value }));
+    }
+
     function transparencyItems() {
         const look = App.shapeControls.currentLook();
         return TRANSPARENCIES.map((percent) => ({ label: percent + '%', value: percent, checked: !!look && look.transparency === percent }));
@@ -21997,12 +22162,13 @@ App.template.newDeckHtml = function newDeckHtml() {
             'shape-weight': look && look.outline !== 'none' ? look.width + ' px' : 'Width',
             'shape-dash': look ? DASH_LABELS.find(([dash]) => dash === look.dash)[1] : 'Dashes',
             'shape-transparency': look ? 'Transparency ' + look.transparency + '%' : 'Transparency',
+            'line-heads': 'Arrows',
         };
         Object.keys(listButtons).forEach((className) => {
             const button = listButtons[className];
             if (button.isConnected) {
                 button.textContent = labels[className] + ' ▾';
-                button.disabled = !look;
+                button.disabled = !look || (className === 'line-heads' && !isLineSelected());
             }
         });
     };
@@ -22078,6 +22244,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             case 'shapeWeight': return listControl('setShapeOutlineWidth', 'shape-weight', 'Outline width', weightItems);
             case 'shapeDash': return listControl('setShapeDash', 'shape-dash', 'Dashes', dashItems);
             case 'shapeTransparency': return listControl('setShapeTransparency', 'shape-transparency', 'Transparency', transparencyItems);
+            case 'lineHeads': return listControl('setLineHeads', 'line-heads', 'Arrows at the ends of a line', headItems);
             default: return null;
         }
     };
@@ -26410,6 +26577,9 @@ App.template.newDeckHtml = function newDeckHtml() {
     const SHAPES = {
         rect: 'rect', roundRect: 'roundRect', ellipse: 'ellipse', chevron: 'chevron', pentagon: 'homePlate',
         callout: 'wedgeRectCallout', line: 'line', arrow: 'line',
+        // Phase 10
+        triangle: 'triangle', rtTriangle: 'rtTriangle', doubleArrow: 'line', elbow: 'bentConnector3',
+        leftBrace: 'leftBrace', rightBrace: 'rightBrace', leftBracket: 'leftBracket', rightBracket: 'rightBracket',
     };
     const DASH_TYPES = { solid: 'solid', dash: 'dash', dot: 'sysDot', dashDot: 'dashDot' };
 
@@ -26537,10 +26707,13 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         const look = App.shapes.lookOf(element);
         const line = App.shapes.isLine(kind);
-        const path = element.querySelector('svg.shape-svg > path.shape-' + (line ? 'line' : 'fill'));
+        const stroked = App.shapes.isStroked(kind);   // lines, braces, brackets: an outline only
+        const path = element.querySelector('svg.shape-svg > path.shape-' + (stroked ? 'line' : 'fill'));
         const pathStyle = view.getComputedStyle(path);
         const options = position(box, rotation, line);
-        if (!line) {
+        if (stroked && !line) {
+            options.fill = { type: 'none' };
+        } else if (!line) {
             const fill = fillOf(pathStyle.fill);
             options.fill = fill ? { color: fill.color, transparency: look.transparency } : { type: 'none' };
         }
@@ -26550,8 +26723,12 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (line && look.transparency) {
                 options.line.transparency = look.transparency;
             }
-            if (kind === 'arrow') {
+            const heads = App.shapes.headsOf(element);   // Phase 10: either end or both
+            if (heads === 'end' || heads === 'both') {
                 options.line.endArrowType = 'triangle';
+            }
+            if (heads === 'start' || heads === 'both') {
+                options.line.beginArrowType = 'triangle';
             }
         }
         const flip = element.getAttribute('data-flip') || '';
@@ -27245,6 +27422,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 { label: 'Shape Styles', rows: [[{ control: 'shapeFill' }, { control: 'shapeOutline' }],
                     [{ control: 'shapeWeight' }, { control: 'shapeDash' }]] },
                 { label: 'Effects', rows: [[{ control: 'shapeTransparency' }], [{ command: 'shapeShadow', icon: 'shadow' }]] },
+                { label: 'Line', rows: [[{ control: 'lineHeads' }]] },
             ],
             note: 'Fill and Outline: the button applies the colour on its bar, ▾ picks another. A width or a dash gives a shape ' +
                 'without an outline one. Transparency is of the fill (of the line for lines). Also in the Format pane.',

@@ -51,6 +51,12 @@
         return !!element && App.shapes.isLine(element.getAttribute('data-shape'));
     }
 
+    /* A line, brace or bracket: drawn as an outline, so it has no fill (Phase 10). */
+    function isStrokedSelected() {
+        const element = selectedShape();
+        return !!element && App.shapes.isStroked(element.getAttribute('data-shape'));
+    }
+
     App.shapeControls.currentLook = function currentLook() {
         const element = selectedShape();
         return element ? App.shapes.lookOf(element) : null;
@@ -72,7 +78,7 @@
     /* The Shape Format commands, defined in commands.js. */
     App.shapeControls.commands = function commands() {
         const isShape = () => App.shapeControls.isShapeSelected();
-        const hasFill = () => isShape() && !isLineSelected();
+        const hasFill = () => isShape() && !isStrokedSelected();
         return {
             shapeFill: { label: 'Shape Fill', isEnabled: hasFill, run: () => changeLook('Shape fill', { fill: lastFill }) },
             setShapeFill: {
@@ -98,6 +104,15 @@
             setShapeDash: { label: 'Dashes', isEnabled: isShape, run: (dash) => changeLook('Shape outline dash', { dash: dash }) },
             setShapeTransparency: {
                 label: 'Transparency', isEnabled: isShape, run: (percent) => changeLook('Shape transparency', { transparency: percent }),
+            },
+            // Arrowheads of a line (Phase 10): none, start, end or both.
+            setLineHeads: {
+                label: 'Arrows', isEnabled: () => isLineSelected(),
+                run: (heads) => {
+                    const element = selectedShape();
+                    App.history.change('Arrows', { slideId: element.closest('section.slide').getAttribute('data-slide-id') },
+                        () => App.shapes.setHeads(element, heads));
+                },
             },
             shapeShadow: {
                 label: 'Shadow', isEnabled: isShape,
@@ -145,6 +160,14 @@
         return DASH_LABELS.map(([dash, label]) => ({ label: label, value: dash, checked: !!look && look.dash === dash }));
     }
 
+    const HEAD_LABELS = [['none', 'No arrows'], ['end', 'Arrow at the end'], ['start', 'Arrow at the start'], ['both', 'Arrows at both ends']];
+
+    function headItems() {
+        const element = selectedShape();
+        const heads = element ? App.shapes.headsOf(element) : null;
+        return HEAD_LABELS.map(([value, label]) => ({ label: label, value: value, checked: heads === value }));
+    }
+
     function transparencyItems() {
         const look = App.shapeControls.currentLook();
         return TRANSPARENCIES.map((percent) => ({ label: percent + '%', value: percent, checked: !!look && look.transparency === percent }));
@@ -157,12 +180,13 @@
             'shape-weight': look && look.outline !== 'none' ? look.width + ' px' : 'Width',
             'shape-dash': look ? DASH_LABELS.find(([dash]) => dash === look.dash)[1] : 'Dashes',
             'shape-transparency': look ? 'Transparency ' + look.transparency + '%' : 'Transparency',
+            'line-heads': 'Arrows',
         };
         Object.keys(listButtons).forEach((className) => {
             const button = listButtons[className];
             if (button.isConnected) {
                 button.textContent = labels[className] + ' ▾';
-                button.disabled = !look;
+                button.disabled = !look || (className === 'line-heads' && !isLineSelected());
             }
         });
     };
@@ -238,6 +262,7 @@
             case 'shapeWeight': return listControl('setShapeOutlineWidth', 'shape-weight', 'Outline width', weightItems);
             case 'shapeDash': return listControl('setShapeDash', 'shape-dash', 'Dashes', dashItems);
             case 'shapeTransparency': return listControl('setShapeTransparency', 'shape-transparency', 'Transparency', transparencyItems);
+            case 'lineHeads': return listControl('setLineHeads', 'line-heads', 'Arrows at the ends of a line', headItems);
             default: return null;
         }
     };

@@ -217,3 +217,63 @@ test('shapes: data-adjust changes the drawing', () => {
     assertEqual(callout.getAttribute('data-adjust'), '0.5 -0.3333');
     assertEqual(callout.querySelector('path').getAttribute('d'), 'M0 0H26.67L80 -40L53.33 0H160V120H0Z', 'the tail on top');
 });
+
+// ---- Phase 10 step 4: more shapes, arrowheads ----
+
+test('shapes (Phase 10): triangles, braces and brackets', () => {
+    assertEqual(pathsOf('triangle', 200, 100), ['fill:M100 0L200 100H0Z']);
+    assertEqual(pathsOf('rtTriangle', 200, 100), ['fill:M0 0L200 100H0Z']);
+    // Braces and brackets are outlines (a stroke, no fill), curled as PowerPoint draws them.
+    assertEqual(pathsOf('leftBracket', 20, 120), ['line:M20 0A10 10 0 0 0 10 10V110A10 10 0 0 0 20 120']);
+    assertEqual(pathsOf('leftBrace', 20, 120),
+        ['line:M20 0Q10 0 10 10V50Q10 60 0 60Q10 60 10 70V110Q10 120 20 120']);
+    // The right ones are the left ones mirrored inside their box (and mirrored back when flipped).
+    const right = App.shapes.geometry('rightBracket', 20, 120, {});
+    assertEqual([right[0].d, right[0].transform], ['M20 0A10 10 0 0 0 10 10V110A10 10 0 0 0 20 120', 'matrix(-1 0 0 1 20 0)']);
+    assertEqual(App.shapes.geometry('rightBrace', 20, 120, { flip: 'x' })[0].transform, undefined);
+});
+
+test('shapes (Phase 10): heads at either end of a line; a double arrow has both', () => {
+    assertEqual(pathsOf('line', 200, 0, { heads: 'end', lineWidth: 2 }), pathsOf('arrow', 200, 0, { lineWidth: 2 }));
+    assertEqual(pathsOf('line', 200, 0, { heads: 'start', lineWidth: 2 }), ['line:M10 0L200 0', 'head:M0 0L12 -5.4L12 5.4Z']);
+    assertEqual(pathsOf('doubleArrow', 200, 0, { lineWidth: 2 }),
+        ['line:M10 0L190 0', 'head:M0 0L12 -5.4L12 5.4ZM200 0L188 5.4L188 -5.4Z']);
+    assertEqual(pathsOf('arrow', 200, 0, { heads: 'none', lineWidth: 2 }), ['line:M0 0L200 0'], 'an arrow without its head');
+});
+
+test('shapes (Phase 10): an elbow line goes across, down the middle, across; flipped from the other corner', () => {
+    assertEqual(pathsOf('elbow', 200, 100), ['line:M0 0H100V100H200']);
+    assertEqual(pathsOf('elbow', 200, 100, { flip: 'x' }), ['line:M200 0H100V100H0']);
+    assertEqual(pathsOf('elbow', 200, 100, { heads: 'end', lineWidth: 2 }),
+        ['line:M0 0H100V100H190', 'head:M200 100L188 105.4L188 94.6Z']);
+});
+
+test('shapes (Phase 10): the heads of a line element, kept in data-heads only when not its kind\'s own', () => {
+    const doc = parseDoc('<!DOCTYPE html><html><head></head><body><section class="slide"></section></body></html>');
+    const line = App.shapes.createShape(doc, 'line', { left: 0, top: 0, width: 200, height: 0 }, 'e1');
+    const arrow = App.shapes.createShape(doc, 'arrow', { left: 0, top: 0, width: 200, height: 0 }, 'e2');
+    const both = App.shapes.createShape(doc, 'doubleArrow', { left: 0, top: 0, width: 200, height: 0 }, 'e3');
+    assertEqual([App.shapes.headsOf(line), App.shapes.headsOf(arrow), App.shapes.headsOf(both)], ['none', 'end', 'both']);
+    App.shapes.setLook(line, { outline: '#ff0000' });
+    App.shapes.setHeads(line, 'both');
+    assertEqual(line.getAttribute('data-heads'), 'both');
+    const head = line.querySelector('path.shape-head');
+    assertEqual([head !== null, head && head.style.fill], [true, 'rgb(255, 0, 0)'], 'a head appears, in the line\'s colour');
+    assertEqual(head.getAttribute('d'), 'M0 0L12 -5.4L12 5.4ZM200 0L188 5.4L188 -5.4Z');
+    App.shapes.setHeads(line, 'none');
+    assertEqual([line.hasAttribute('data-heads'), line.querySelector('path.shape-head')], [false, null], 'the kind\'s own: no attribute');
+    App.shapes.setHeads(arrow, 'none');
+    assertEqual([arrow.getAttribute('data-heads'), arrow.querySelector('path.shape-head')], ['none', null]);
+});
+
+test('shapes (Phase 10): the new kinds in the gallery; braces and brackets are outlines that hold no text', () => {
+    const kinds = App.shapes.KINDS.map((entry) => entry.kind);
+    ['triangle', 'rtTriangle', 'leftBrace', 'rightBrace', 'leftBracket', 'rightBracket', 'elbow', 'doubleArrow']
+        .forEach((kind) => assert(kinds.indexOf(kind) !== -1, kind + ' in the gallery'));
+    const doc = parseDoc('<!DOCTYPE html><html><head></head><body><section class="slide"></section></body></html>');
+    const brace = App.shapes.createShape(doc, 'leftBrace', { left: 0, top: 0, width: 20, height: 120 }, 'e1');
+    assertEqual([App.shapes.isLine('leftBrace'), App.shapes.isStroked('leftBrace'), App.shapes.canHoldText(brace)], [false, true, false]);
+    assertEqual(App.shapes.lookOf(brace).fill, null, 'no fill');
+    assertEqual(brace.querySelector('.shape-text'), null);
+    assertEqual([App.shapes.isLine('elbow'), App.shapes.isLine('doubleArrow')], [true, true]);
+});

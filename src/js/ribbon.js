@@ -117,6 +117,7 @@
                 { label: 'Shape Styles', rows: [[{ control: 'shapeFill' }, { control: 'shapeOutline' }],
                     [{ control: 'shapeWeight' }, { control: 'shapeDash' }]] },
                 { label: 'Effects', rows: [[{ control: 'shapeTransparency' }], [{ command: 'shapeShadow', icon: 'shadow' }]] },
+                { label: 'Line', rows: [[{ control: 'lineHeads' }]] },
             ],
             note: 'Fill and Outline: the button applies the colour on its bar, ▾ picks another. A width or a dash gives a shape ' +
                 'without an outline one. Transparency is of the fill (of the line for lines). Also in the Format pane.',

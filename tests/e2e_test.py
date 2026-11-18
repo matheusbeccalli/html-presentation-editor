@@ -2351,7 +2351,7 @@ SHAPE_INFO = """id => { const el = App.deck.getDocument().querySelector('[data-i
 
 
 def test_insert_shapes(browser):
-    """Insert > Shapes: a gallery of 8 kinds; drag to draw (Shift: square, or lines at 45 degrees), a plain click gives
+    """Insert > Shapes: a gallery of 16 kinds (8 more since Phase 10); drag to draw (Shift: square, or lines at 45 degrees), a plain click gives
     the default size; accent fill, no outline; one undo step each; a resize redraws the shape; saved and reopened."""
     editor = Editor(browser)
     editor.open(CONTRACT)
@@ -2366,7 +2366,7 @@ def test_insert_shapes(browser):
         page.click(f".shape-gallery-item[data-shape='{kind}']")
 
     page.click(".ribbon-button.shapes-button")
-    check(page.locator(".shape-gallery-item").count() == 8, "8 shapes in the gallery")
+    check(page.locator(".shape-gallery-item").count() == 16, "16 shapes in the gallery")
     page.screenshot(path=str(OUTPUT / "56-shapes-gallery.png"))
     page.keyboard.press("Escape")
     check(page.locator(".shape-gallery").count() == 0, "Esc closes the gallery")
@@ -7575,6 +7575,98 @@ def test_eyedropper(browser):
     editor.close()
 
 
+def test_more_shapes_and_arrowheads(browser):
+    """Phase 10 step 4: Insert > Shapes has a triangle, a right triangle, braces, brackets, an elbow line and a double
+    arrow; braces and brackets are outlines (no fill, no text); a line's Arrows list (Shape Format) puts heads at either
+    end or both, one undo step; an elbow is drawn and dragged by its two ends; saved and reopened; PowerPoint gets its
+    own shapes and arrowheads."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    selected = lambda: page.evaluate("App.selection.selectedId()")  # noqa: E731
+    el_js = lambda i: f"App.deck.getDocument().querySelector('[data-id=\"{i}\"]')"  # noqa: E731
+    page.evaluate("App.deck.goTo(4)")
+    page.click(".ribbon-tab[data-tab='insert']")
+
+    def pick(kind):
+        page.click(".ribbon-button.shapes-button")
+        page.click(f".shape-gallery-item[data-shape='{kind}']")
+
+    page.click(".ribbon-button.shapes-button")
+    page.screenshot(path=str(OUTPUT / "144-shapes-gallery-more.png"))
+    page.keyboard.press("Escape")
+
+    pick("triangle")
+    drag(page, slide_to_screen(page, 100, 400), slide_to_screen(page, 240, 520))
+    triangle = selected()
+    check(page.evaluate(f"{el_js(triangle)}.getAttribute('data-shape')") == "triangle", "a triangle")
+    page.click(".ribbon-tab[data-tab='insert']")
+    pick("leftBrace")
+    drag(page, slide_to_screen(page, 300, 400), slide_to_screen(page, 330, 560))
+    brace = selected()
+    check(page.evaluate(f"App.shapes.lookOf({el_js(brace)}).fill") is None and
+          page.evaluate(f"{el_js(brace)}.querySelector('.shape-text')") is None, "the brace: an outline, no text")
+    page.click(".ribbon-tab[data-tab='shape-format']")
+    check(page.is_disabled(".shape-fill-menu-button"), "no fill for a brace")
+    page.click(".ribbon-tab[data-tab='insert']")
+    pick("rightBracket")
+    page.mouse.click(*slide_to_screen(page, 400, 420))
+    bracket = selected()
+    check(page.evaluate(f"{el_js(bracket)}.querySelector('path.shape-line').getAttribute('transform')") == "matrix(-1 0 0 1 20 0)",
+          "a right bracket: the left one mirrored")
+
+    # An elbow line from (500, 400) to (700, 520): across, down the middle, across; its ends drag like a line's.
+    page.click(".ribbon-tab[data-tab='insert']")
+    pick("elbow")
+    drag(page, slide_to_screen(page, 500, 400), slide_to_screen(page, 700, 520))
+    elbow = selected()
+    check(page.evaluate(f"{el_js(elbow)}.querySelector('path.shape-line').getAttribute('d')") == "M0 0H100V120H200",
+          page.evaluate(f"{el_js(elbow)}.querySelector('path.shape-line').getAttribute('d')"))
+    check(page.locator("#overlay .selection-handle[data-handle='start']").count() == 1, "two end handles, as a line")
+
+    # Shape Format > Arrows ▾ > Arrows at both ends.
+    page.click(".ribbon-tab[data-tab='shape-format']")
+    page.click(".line-heads")
+    page.click(".line-heads-menu .menu-item:has-text('Arrows at both ends')")
+    check(page.evaluate(f"App.shapes.headsOf({el_js(elbow)})") == "both" and page.evaluate("App.history.undoLabel()") == "Arrows",
+          "both heads, one step")
+    check(page.evaluate(f"{el_js(elbow)}.querySelectorAll('path.shape-head').length") == 1, "drawn")
+    page.screenshot(path=str(OUTPUT / "145-elbow-arrows.png"))
+    page.keyboard.press("Control+z")
+    check(page.evaluate(f"App.shapes.headsOf({el_js(elbow)})") == "none" and
+          page.evaluate(f"{el_js(elbow)}.querySelector('path.shape-head')") is None, "undone: no heads")
+    page.keyboard.press("Control+y")
+
+    # The double arrow from the gallery: both heads of its own.
+    page.click(".ribbon-tab[data-tab='insert']")
+    pick("doubleArrow")
+    drag(page, slide_to_screen(page, 800, 420), slide_to_screen(page, 1000, 420))
+    double = selected()
+    check(page.evaluate(f"App.shapes.headsOf({el_js(double)})") == "both", "a double arrow")
+
+    # Saved and reopened.
+    saved = editor.save_as_download("contract-deck-shapes10.html")
+    reopened = Editor(browser)
+    reopened.open(saved)
+    kinds = reopened.page.evaluate("Array.from(App.deck.getSlides()[4].querySelectorAll('[data-shape]'), (e) => e.getAttribute('data-shape') + ':' + App.shapes.headsOf(e))")
+    check(kinds == ["triangle:none", "leftBrace:none", "rightBracket:none", "elbow:both", "doubleArrow:both"], f"reopened: {kinds}")
+    reopened.close()
+
+    # PowerPoint: its own shapes; the braces unfilled; the arrowheads.
+    path, report = export_pptx(editor, "contract-deck-shapes10.pptx")
+    xml = pptx_parts(path)["ppt/slides/slide5.xml"]
+    shapes = re.findall(r"<p:sp>(.*?)</p:sp>", xml, flags=re.S)
+    by_kind = {re.search(r'prst="([^"]+)"', sp).group(1): sp for sp in shapes if 'prst="' in sp}
+    for kind in ["triangle", "leftBrace", "rightBracket", "bentConnector3"]:
+        check(kind in by_kind, f"a native {kind}: {sorted(by_kind)}")
+    check("<a:solidFill>" not in by_kind["leftBrace"].split("<a:ln")[0], "the brace has no fill")
+    check("headEnd" in by_kind["bentConnector3"] and "tailEnd" in by_kind["bentConnector3"], "the elbow's two heads")
+    lines = [sp for sp in shapes if 'prst="line"' in sp]
+    check(any("headEnd" in sp and "tailEnd" in sp for sp in lines), "the double arrow's two heads")
+    check(editor.errors == [] and reopened.errors == [], f"no errors: {editor.errors} {reopened.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7679,6 +7771,7 @@ TESTS = [
     test_flip,
     test_text_layout_and_change_case,
     test_eyedropper,
+    test_more_shapes_and_arrowheads,
 ]
 
 

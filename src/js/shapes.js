@@ -53,6 +53,15 @@
         { kind: 'chevron', label: 'Chevron', width: 200, height: 80 },
         { kind: 'pentagon', label: 'Pentagon', width: 200, height: 80 },
         { kind: 'callout', label: 'Callout', width: 160, height: 120 },
+        // Phase 10
+        { kind: 'triangle', label: 'Triangle', width: 140, height: 120 },
+        { kind: 'rtTriangle', label: 'Right Triangle', width: 140, height: 120 },
+        { kind: 'doubleArrow', label: 'Double Arrow', width: 200, height: 0 },
+        { kind: 'elbow', label: 'Elbow Line', width: 200, height: 100 },
+        { kind: 'leftBrace', label: 'Left Brace', width: 20, height: 120 },
+        { kind: 'rightBrace', label: 'Right Brace', width: 20, height: 120 },
+        { kind: 'leftBracket', label: 'Left Bracket', width: 20, height: 120 },
+        { kind: 'rightBracket', label: 'Right Bracket', width: 20, height: 120 },
     ];
 
     // Adjustments as PowerPoint sets them for a new shape.
@@ -63,8 +72,21 @@
         callout: [0.2083, 1.25],          // the tail's tip, as parts of the width and height
     };
 
+    /* Lines: two ends (dragged by their own handles), a stroke, heads, no text. */
+    const LINE_KINDS = ['line', 'arrow', 'doubleArrow', 'elbow'];
+    // Braces and brackets (Phase 10): a box like the others, but drawn as an outline only (no fill, no text).
+    const OUTLINE_KINDS = ['leftBrace', 'rightBrace', 'leftBracket', 'rightBracket'];
+    // The heads a kind has unless its data-heads says otherwise (Phase 10).
+    const OWN_HEADS = { line: 'none', arrow: 'end', doubleArrow: 'both', elbow: 'none' };
+    App.shapes.HEADS = ['none', 'start', 'end', 'both'];
+
     App.shapes.isLine = function isLine(kind) {
-        return kind === 'line' || kind === 'arrow';
+        return LINE_KINDS.indexOf(kind) !== -1;
+    };
+
+    /* Drawn as a stroke only (lines, braces, brackets): their look is the outline's; they have no fill. */
+    App.shapes.isStroked = function isStroked(kind) {
+        return App.shapes.isLine(kind) || OUTLINE_KINDS.indexOf(kind) !== -1;
     };
 
     // The text area of a box shape: over the whole box, its lines centred both ways, white, 18 pt.
@@ -75,7 +97,7 @@
     /* A shape drawn by the editor that can hold text (not a line, not an older plain box). */
     App.shapes.canHoldText = function canHoldText(element) {
         const kind = element && element.getAttribute('data-type') === 'shape' && element.getAttribute('data-shape');
-        return !!kind && !App.shapes.isLine(kind);
+        return !!kind && !App.shapes.isStroked(kind);
     };
 
     /* The text area of a shape, or null; options.create makes an empty one if the shape can hold text. */
@@ -139,6 +161,60 @@
         return { x1: flipX ? w : 0, y1: flipY ? h : 0, x2: flipX ? 0 : w, y2: flipY ? 0 : h };
     }
 
+    /* An arrowhead: its point at `tip`, coming along the unit direction `u`, `head` px long. */
+    function headAt(tip, u, head) {
+        const half = head * 0.45;
+        const normal = { x: -u.y, y: u.x };
+        const base = { x: tip.x - u.x * head, y: tip.y - u.y * head };
+        return polygon([[tip.x, tip.y], [base.x + normal.x * half, base.y + normal.y * half],
+            [base.x - normal.x * half, base.y - normal.y * half]]);
+    }
+
+    /*
+     * A line's points (corner to corner; an elbow goes across, down the middle and
+     * across), then its heads (Phase 10: none / start / end / both). The stroke
+     * stops inside a head, so its square end never shows past the point.
+     */
+    function lineParts(kind, w, h, opts) {
+        const ends = lineEndsInBox(w, h, opts.flip);
+        const middle = (ends.x1 + ends.x2) / 2;
+        const points = kind === 'elbow'
+            ? [[ends.x1, ends.y1], [middle, ends.y1], [middle, ends.y2], [ends.x2, ends.y2]]
+            : [[ends.x1, ends.y1], [ends.x2, ends.y2]];
+        const heads = App.shapes.HEADS.indexOf(opts.heads) !== -1 ? opts.heads : OWN_HEADS[kind];
+        const lineWidth = opts.lineWidth || LINE_WIDTH;
+        const drawn = points.map(([x, y]) => ({ x: x, y: y }));
+        const headParts = [];
+        const addHead = (tipIndex, fromIndex) => {
+            const tip = drawn[tipIndex];
+            const from = drawn[fromIndex];
+            const length = Math.hypot(tip.x - from.x, tip.y - from.y) || 1;
+            const u = { x: (tip.x - from.x) / length, y: (tip.y - from.y) / length };
+            const size = Math.min(3 * lineWidth + 6, length);
+            headParts.push(headAt(tip, u, size));
+            const stop = Math.max(size - lineWidth, 0);
+            drawn[tipIndex] = { x: tip.x - u.x * stop, y: tip.y - u.y * stop };
+        };
+        const last = drawn.length - 1;
+        if (heads === 'start' || heads === 'both') {
+            addHead(0, 1);
+        }
+        if (heads === 'end' || heads === 'both') {
+            addHead(last, last - 1);
+        }
+        let d = 'M' + n(drawn[0].x) + ' ' + n(drawn[0].y);
+        if (kind === 'elbow') {
+            d += 'H' + n(drawn[1].x) + 'V' + n(drawn[2].y) + 'H' + n(drawn[3].x);
+        } else {
+            d += 'L' + n(drawn[1].x) + ' ' + n(drawn[1].y);
+        }
+        const parts = [{ part: 'line', d: d }];
+        if (headParts.length) {
+            parts.push({ part: 'head', d: headParts.join('') });
+        }
+        return parts;
+    }
+
     /*
      * The paths of a kind of shape in a w x h box (slide px): [{ part, d }],
      * part 'fill' (a filled outline), 'line' (a stroke) or 'head' (an arrow's
@@ -146,8 +222,11 @@
      */
     App.shapes.geometry = function geometry(kind, w, h, options) {
         const opts = options || {};
-        const parts = drawnParts(kind, w, h, opts);
-        const mirror = App.shapes.isLine(kind) ? '' : mirrorOf(opts.flip, w, h);
+        // A right brace / bracket is the left one mirrored inside its box.
+        const right = { rightBrace: 'leftBrace', rightBracket: 'leftBracket' }[kind];
+        const parts = drawnParts(right || kind, w, h, opts);
+        const flip = right ? App.transform.toggleFlip(opts.flip, 'x') : opts.flip;
+        const mirror = App.shapes.isLine(kind) ? '' : mirrorOf(flip, w, h);
         return mirror ? parts.map((part) => Object.assign(part, { transform: mirror })) : parts;
     };
 
@@ -193,27 +272,29 @@
             }
             case 'callout':
                 return [{ part: 'fill', d: calloutPath(w, h, adjust) }];
-            case 'line':
-            case 'arrow': {
-                const ends = lineEndsInBox(w, h, opts.flip);
-                if (kind === 'line') {
-                    return [{ part: 'line', d: 'M' + n(ends.x1) + ' ' + n(ends.y1) + 'L' + n(ends.x2) + ' ' + n(ends.y2) }];
-                }
-                const lineWidth = opts.lineWidth || LINE_WIDTH;
-                const length = Math.hypot(ends.x2 - ends.x1, ends.y2 - ends.y1) || 1;
-                const head = Math.min(3 * lineWidth + 6, length);
-                const half = head * 0.45;
-                const u = { x: (ends.x2 - ends.x1) / length, y: (ends.y2 - ends.y1) / length };
-                const normal = { x: -u.y, y: u.x };
-                const base = { x: ends.x2 - u.x * head, y: ends.y2 - u.y * head };
-                // The line stops inside the head, so its square end never shows past the point.
-                const stop = Math.max(head - lineWidth, 0);
-                return [
-                    { part: 'line', d: 'M' + n(ends.x1) + ' ' + n(ends.y1) + 'L' + n(ends.x2 - u.x * stop) + ' ' + n(ends.y2 - u.y * stop) },
-                    { part: 'head', d: polygon([[ends.x2, ends.y2], [base.x + normal.x * half, base.y + normal.y * half],
-                        [base.x - normal.x * half, base.y - normal.y * half]]) },
-                ];
+            case 'triangle':
+                return [{ part: 'fill', d: 'M' + n(w / 2) + ' 0L' + n(w) + ' ' + n(h) + 'H0Z' }];
+            case 'rtTriangle':
+                return [{ part: 'fill', d: 'M0 0L' + n(w) + ' ' + n(h) + 'H0Z' }];
+            case 'leftBracket': {
+                // Square-ish ends curled by a radius of a twelfth of the height (at most the width).
+                const r = Math.min(w / 2, h / 12);
+                return [{ part: 'line', d: 'M' + n(w) + ' 0A' + n(r) + ' ' + n(r) + ' 0 0 0 ' + n(w - r) + ' ' + n(r) +
+                    'V' + n(h - r) + 'A' + n(r) + ' ' + n(r) + ' 0 0 0 ' + n(w) + ' ' + n(h) }];
             }
+            case 'leftBrace': {
+                // From the top right, down the middle of the box, a point out to the left at half height, down again.
+                const r = Math.min(h / 12, h / 4);
+                const x = w / 2;
+                return [{ part: 'line', d: 'M' + n(w) + ' 0Q' + n(x) + ' 0 ' + n(x) + ' ' + n(r) + 'V' + n(h / 2 - r) +
+                    'Q' + n(x) + ' ' + n(h / 2) + ' 0 ' + n(h / 2) + 'Q' + n(x) + ' ' + n(h / 2) + ' ' + n(x) + ' ' + n(h / 2 + r) +
+                    'V' + n(h - r) + 'Q' + n(x) + ' ' + n(h) + ' ' + n(w) + ' ' + n(h) }];
+            }
+            case 'line':
+            case 'arrow':
+            case 'doubleArrow':
+            case 'elbow':
+                return lineParts(kind, w, h, opts);
             default:
                 return [];
         }
@@ -387,6 +468,7 @@
         const line = element.querySelector('path.shape-line');
         return {
             adjust: App.shapes.adjustOf(element), flip: element.getAttribute('data-flip') || '',
+            heads: App.shapes.headsOf(element),
             lineWidth: line ? parseFloat(line.style.strokeWidth) || LINE_WIDTH : LINE_WIDTH,
         };
     }
@@ -456,7 +538,7 @@
      * (0-100 %, of the fill; of the line for lines), shadow }.
      */
     App.shapes.lookOf = function lookOf(element) {
-        const line = App.shapes.isLine(element.getAttribute('data-shape'));
+        const line = App.shapes.isStroked(element.getAttribute('data-shape'));
         const path = element.querySelector('svg.shape-svg > path.shape-' + (line ? 'line' : 'fill'));
         const width = parseFloat(path.style.strokeWidth) || 0;
         const opacity = parseFloat(line ? path.style.strokeOpacity : path.style.fillOpacity);
@@ -472,7 +554,7 @@
 
     /* Change some of a shape's look (fields as lookOf; a line ignores fill). An outline added to a shape without one is 2 px. */
     App.shapes.setLook = function setLook(element, changes) {
-        const line = App.shapes.isLine(element.getAttribute('data-shape'));
+        const line = App.shapes.isStroked(element.getAttribute('data-shape'));
         const look = App.shapes.lookOf(element);
         const svg = element.querySelector('svg.shape-svg');
         const path = svg.querySelector('path.shape-' + (line ? 'line' : 'fill'));
@@ -519,6 +601,57 @@
         App.shapes.render(element);   // an arrow's head follows the line's width
     };
 
+    /*
+     * Heads (Phase 10): a line's arrowheads are one path, path.shape-head, filled
+     * with the line's colour (and its transparency). Added when the line gets a
+     * head, removed when it has none left.
+     */
+    function syncHead(element, svg, wanted) {
+        const head = svg && svg.querySelector('path.shape-head');
+        if (!svg || wanted === !!head) {
+            return;
+        }
+        if (!wanted) {
+            head.remove();
+            return;
+        }
+        const line = svg.querySelector('path.shape-line');
+        const path = element.ownerDocument.createElementNS(SVG_NS, 'path');
+        path.setAttribute('class', 'shape-head');
+        path.setAttribute('style', STYLES.head);
+        if (line && line.style.stroke) {
+            path.style.setProperty('fill', line.style.stroke);
+        }
+        if (line && line.style.strokeOpacity) {
+            path.style.setProperty('fill-opacity', line.style.strokeOpacity);
+        }
+        svg.appendChild(path);
+    }
+
+    /* A line's heads: 'none', 'start', 'end' or 'both' (its data-heads, else its kind's own: an arrow's is 'end'). */
+    App.shapes.headsOf = function headsOf(element) {
+        const kind = element.getAttribute('data-shape');
+        const own = element.getAttribute('data-heads');
+        if (!App.shapes.isLine(kind)) {
+            return 'none';
+        }
+        return App.shapes.HEADS.indexOf(own) !== -1 ? own : OWN_HEADS[kind];
+    };
+
+    /* Give a line other heads; data-heads is kept only when they differ from its kind's own. */
+    App.shapes.setHeads = function setHeads(element, heads) {
+        const kind = element.getAttribute('data-shape');
+        if (!App.shapes.isLine(kind) || App.shapes.HEADS.indexOf(heads) === -1) {
+            return;
+        }
+        if (heads === OWN_HEADS[kind]) {
+            element.removeAttribute('data-heads');
+        } else {
+            element.setAttribute('data-heads', heads);
+        }
+        App.shapes.render(element);
+    };
+
     /* Draw a shape again for its box's size now (after a resize); its look is kept. Older shapes are left alone. */
     App.shapes.render = function render(element) {
         const kind = element.getAttribute('data-shape');
@@ -532,6 +665,7 @@
             svg.style.minHeight = '1px';
         }
         const parts = App.shapes.geometry(kind, rect.width, rect.height, optionsOf(element));
+        syncHead(element, svg, parts.some((part) => part.part === 'head'));
         parts.forEach((part) => {
             const path = element.querySelector('svg.shape-svg > path.shape-' + part.part);
             if (path) {

@@ -235,6 +235,9 @@
     const SHAPES = {
         rect: 'rect', roundRect: 'roundRect', ellipse: 'ellipse', chevron: 'chevron', pentagon: 'homePlate',
         callout: 'wedgeRectCallout', line: 'line', arrow: 'line',
+        // Phase 10
+        triangle: 'triangle', rtTriangle: 'rtTriangle', doubleArrow: 'line', elbow: 'bentConnector3',
+        leftBrace: 'leftBrace', rightBrace: 'rightBrace', leftBracket: 'leftBracket', rightBracket: 'rightBracket',
     };
     const DASH_TYPES = { solid: 'solid', dash: 'dash', dot: 'sysDot', dashDot: 'dashDot' };
 
@@ -362,10 +365,13 @@
         }
         const look = App.shapes.lookOf(element);
         const line = App.shapes.isLine(kind);
-        const path = element.querySelector('svg.shape-svg > path.shape-' + (line ? 'line' : 'fill'));
+        const stroked = App.shapes.isStroked(kind);   // lines, braces, brackets: an outline only
+        const path = element.querySelector('svg.shape-svg > path.shape-' + (stroked ? 'line' : 'fill'));
         const pathStyle = view.getComputedStyle(path);
         const options = position(box, rotation, line);
-        if (!line) {
+        if (stroked && !line) {
+            options.fill = { type: 'none' };
+        } else if (!line) {
             const fill = fillOf(pathStyle.fill);
             options.fill = fill ? { color: fill.color, transparency: look.transparency } : { type: 'none' };
         }
@@ -375,8 +381,12 @@
             if (line && look.transparency) {
                 options.line.transparency = look.transparency;
             }
-            if (kind === 'arrow') {
+            const heads = App.shapes.headsOf(element);   // Phase 10: either end or both
+            if (heads === 'end' || heads === 'both') {
                 options.line.endArrowType = 'triangle';
+            }
+            if (heads === 'start' || heads === 'both') {
+                options.line.beginArrowType = 'triangle';
             }
         }
         const flip = element.getAttribute('data-flip') || '';

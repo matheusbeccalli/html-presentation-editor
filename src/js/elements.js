@@ -309,26 +309,7 @@
 
     /* The mark as clipboard HTML, with the element's text (for a paste into another program) and the elements. */
     function markData(text) {
-        return App.elements.clipboardData(clipboardHtml || [], text, copyMark);
-    }
-
-    /* UTF-8 text as base64 and back (btoa alone only takes Latin-1). */
-    function toBase64(text) {
-        const bytes = new TextEncoder().encode(text);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i += 0x8000) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-        }
-        return btoa(binary);
-    }
-
-    function fromBase64(code) {
-        const binary = atob(code);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-        }
-        return new TextDecoder().decode(bytes);
+        return App.elements.clipboardData(clipboardHtml || [], text, copyMark, App.deck.getDeckId());
     }
 
     /*
@@ -337,12 +318,13 @@
      * elements themselves encoded in data-elements, so another editor tab can paste
      * them whole. Returns { html, text }.
      */
-    App.elements.clipboardData = function clipboardData(htmlList, text, mark) {
+    App.elements.clipboardData = function clipboardData(htmlList, text, mark, deckId) {
         const holder = document.createElement('div');
         holder.setAttribute('data-deck-editor', 'element');
         holder.setAttribute('data-copy', mark || '');
         if (htmlList.length) {
-            holder.setAttribute('data-elements', toBase64(JSON.stringify(htmlList)));
+            holder.setAttribute('data-elements', App.util.toBase64(JSON.stringify(htmlList)));
+            holder.setAttribute('data-deck-id', deckId || '');   // links to slides only make sense in the same deck
         }
         holder.textContent = text;
         return { html: holder.outerHTML, text: text };
@@ -350,10 +332,11 @@
 
     /*
      * The elements in clipboard HTML another editor tab wrote: their HTML (back to
-     * front), cleaned as an opened deck is (no scripts, handlers or frames); null
+     * front), cleaned as an opened deck is (no scripts, handlers or frames; remote
+     * pictures and fonts blocked); links to slides of another deck taken off; null
      * when it holds none. They get new ids when pasted (insertCopy).
      */
-    App.elements.elementsFromClipboard = function elementsFromClipboard(html) {
+    App.elements.elementsFromClipboard = function elementsFromClipboard(html, deckId) {
         if (!html || html.indexOf('data-elements') === -1) {
             return null;
         }
@@ -361,7 +344,7 @@
         const holder = parsed.querySelector('[data-deck-editor="element"][data-elements]');
         let list = null;
         try {
-            list = holder ? JSON.parse(fromBase64(holder.getAttribute('data-elements'))) : null;
+            list = holder ? JSON.parse(App.util.fromBase64(holder.getAttribute('data-elements'))) : null;
         } catch (error) {
             return null;   // not ours after all
         }
@@ -371,6 +354,10 @@
         const doc = new DOMParser().parseFromString('<!DOCTYPE html><html><head></head><body></body></html>', 'text/html');
         doc.body.innerHTML = list.filter((item) => typeof item === 'string').join('');
         App.importer.sanitize(doc);
+        App.importer.removeRemoteRefs(doc);   // the editor never loads anything from outside (SPEC 2.3)
+        if (!deckId || holder.getAttribute('data-deck-id') !== deckId) {
+            App.util.fixForeignSlideLinks(doc.body, null);
+        }
         const elements = Array.from(doc.body.children).filter((child) => child.classList.contains('el'));
         return elements.length ? elements.map((element) => element.outerHTML) : null;
     };
@@ -451,9 +438,9 @@
         const pictures = App.images.picturesIn(event.clipboardData);
         if (!ours && App.chartData.pasteOnChart(clipboard)) {
             event.preventDefault();   // cells pasted on a selected chart become its data, not a new table
-        } else if (!ours && App.elements.elementsFromClipboard(clipboard.html)) {
+        } else if (!ours && App.elements.elementsFromClipboard(clipboard.html, App.deck.getDeckId())) {
             event.preventDefault();   // elements copied in another editor tab (Phase 10): pasted whole
-            insertCopy(App.elements.elementsFromClipboard(clipboard.html), 'Paste');
+            insertCopy(App.elements.elementsFromClipboard(clipboard.html, App.deck.getDeckId()), 'Paste');
         } else if (!ours && App.tablePaste.paste(clipboard)) {
             event.preventDefault();
         } else if (!ours && pictures.length > 0) {

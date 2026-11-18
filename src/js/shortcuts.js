@@ -192,7 +192,7 @@
         if (target.ownerDocument && target.ownerDocument !== document) {
             return true;   // the deck's own document (its iframe)
         }
-        return !!(target.closest && target.closest('#canvas-area'));
+        return !!(target.closest && target.closest('#canvas-stage'));   // the slide and its overlay, not the panels
     };
 
     /*

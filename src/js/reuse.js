@@ -28,7 +28,9 @@
         const text = await file.text();
         const result = await App.importer.importDeck(text);
         const doc = new DOMParser().parseFromString(result.html, 'text/html');
-        return { doc: doc, slides: Array.from(doc.querySelectorAll('section.slide')), name: file.name };
+        const meta = doc.head.querySelector('meta[name="deck-id"]');
+        return { doc: doc, slides: Array.from(doc.querySelectorAll('section.slide')), name: file.name,
+            deckId: meta ? meta.getAttribute('content') : null };
     };
 
     /* The ticked slides of the window, in their deck's order. */
@@ -39,7 +41,7 @@
     }
 
     App.reuse.open = async function open() {
-        const state = { doc: null, slides: [], name: '' };
+        const state = { doc: null, slides: [], name: '', deckId: null };
         const file = el('input', { id: 'reuse-file', type: 'file', accept: '.html,.htm,text/html', hidden: true });
         const browse = el('button', { type: 'button', class: 'btn', onclick: () => file.click() }, ['Browse…']);
         const name = el('span', { class: 'panel-hint reuse-name' }, ['Pick another deck (.html).']);
@@ -99,8 +101,11 @@
         if (choice !== 'insert' || !chosen.length) {
             return;
         }
-        if (App.slides.paste(App.slides.clipboardHtml(chosen), chosen.length > 1 ? 'Reuse slides' : 'Reuse slide')) {
-            App.ui.setStatus(chosen.length + ' slide' + (chosen.length === 1 ? '' : 's') + ' inserted from ' + state.name);
+        const pasted = App.slides.paste(App.slides.clipboardHtml(chosen, state.deckId), chosen.length > 1 ? 'Reuse slides' : 'Reuse slide');
+        if (pasted) {
+            App.ui.setStatus(chosen.length + ' slide' + (chosen.length === 1 ? '' : 's') + ' inserted from ' + state.name +
+                (pasted.removedRemote ? ' · ' + pasted.removedRemote + ' link' + (pasted.removedRemote === 1 ? '' : 's') +
+                    ' to pictures or fonts on the internet removed' : ''));
         }
     };
 })();

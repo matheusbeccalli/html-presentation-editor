@@ -42,8 +42,16 @@
         // Working in the rail means working on slides, not on an element (as in PowerPoint):
         // without this, Delete or the arrow keys here would act on the element still selected.
         rail.addEventListener('pointerdown', () => App.selection.clear());
+        // A thumbnail pressed with the mouse gets the focus before its click: the click decides
+        // (Shift / Ctrl+click pick several slides, Phase 10), not the focus.
+        let pressing = false;
+        rail.addEventListener('pointerdown', () => { pressing = true; });
+        window.addEventListener('pointerup', () => setTimeout(() => { pressing = false; }, 0));
         rail.addEventListener('focusin', (event) => {
             App.selection.clear();
+            if (pressing) {
+                return;
+            }
             // A thumbnail reached with Tab is the slide shown, so the rail's keys act on it.
             const item = event.target.closest('.thumb');
             if (item && Number(item.getAttribute('data-index')) !== App.deck.getCurrentIndex()) {

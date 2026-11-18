@@ -66,6 +66,41 @@ App.util.escapeHtml = function escapeHtml(text) {
  * Return the first id "<prefix><n>" (n = 1, 2, 3 ...) that is not in `usedIds`,
  * and add it to the set so the next call gets a different one.
  */
+/* UTF-8 text as base64 and back (btoa alone only takes Latin-1): copied slides and elements on the clipboard. */
+App.util.toBase64 = function toBase64(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
+};
+
+App.util.fromBase64 = function fromBase64(code) {
+    const binary = atob(code);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+};
+
+/*
+ * Links to slides (#slide-<id>) in `root` that came from another deck: a link to
+ * one of the slides that came along (idMap: old id -> new id) follows it; any
+ * other is taken off (its text stays), since that slide is not in this deck.
+ */
+App.util.fixForeignSlideLinks = function fixForeignSlideLinks(root, idMap) {
+    root.querySelectorAll('a[href^="#slide-"]').forEach((link) => {
+        const id = link.getAttribute('href').slice(7);
+        if (idMap && idMap.has(id)) {
+            link.setAttribute('href', '#slide-' + idMap.get(id));
+        } else {
+            link.replaceWith(...Array.from(link.childNodes));
+        }
+    });
+};
+
 App.util.uniqueId = function uniqueId(prefix, usedIds) {
     let n = 1;
     while (usedIds.has(prefix + n)) {

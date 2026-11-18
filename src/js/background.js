@@ -166,24 +166,33 @@
         return !!App.state.hasDeck && !!App.deck.getCurrentSlide();
     };
 
-    /* The slide shown gets `value` (a colour or var(--color-…)) as its own. */
+    /* The slides the action is for: the slides picked in the rail (Phase 10), else the slide shown. */
+    function targetSlides() {
+        return App.slides.selectedSlides();
+    }
+
+    function scopeOf(slides) {
+        return slides.length > 1 ? { slides: slides.map((slide) => slide.getAttribute('data-slide-id')) }
+            : { slideId: slides[0].getAttribute('data-slide-id') };
+    }
+
+    /* The slide shown (every picked slide) gets `value` (a colour or var(--color-…)) as its own. */
     App.background.setColor = function setColor(value) {
-        const slide = App.deck.getCurrentSlide();
-        if (!slide) {
+        const slides = targetSlides();
+        if (!slides.length) {
             return;
         }
-        App.history.change('Slide background', { slideId: slide.getAttribute('data-slide-id') },
-            () => App.background.writeOwn(slide, value));
+        App.history.change('Slide background', scopeOf(slides), () => slides.forEach((slide) => App.background.writeOwn(slide, value)));
     };
 
-    /* Reset to Theme: the slide shown follows the theme's Background again. */
+    /* Reset to Theme: the slide shown (every picked slide) follows the theme's Background again. */
     App.background.reset = function reset() {
-        const slide = App.deck.getCurrentSlide();
-        if (!slide) {
+        const slides = targetSlides();
+        if (!slides.length) {
             return;
         }
-        const scope = needsHeadChange(slide.ownerDocument) ? 'deck' : { slideId: slide.getAttribute('data-slide-id') };
-        App.history.change('Reset slide background', scope, () => followTheme(slide));
+        const scope = needsHeadChange(slides[0].ownerDocument) ? 'deck' : scopeOf(slides);
+        App.history.change('Reset slide background', scope, () => slides.forEach((slide) => followTheme(slide)));
     };
 
     /* Apply to All: `value` becomes the theme's Background and every slide follows it. */

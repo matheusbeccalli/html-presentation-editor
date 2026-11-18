@@ -7696,10 +7696,25 @@ def test_selection_pane(browser):
 
     # The eye hides the logo: gone from the screen, not clickable, not in Ctrl+A.
     logo_colour = slide_colour(page, 70, 60, 100, 90)
+    picture_pixel = """async () => { const root = App.serialize.cleanCopy(App.deck.getDocument());
+        const canvas = await App.snapshot.toCanvas(App.snapshot.slideSvg(root, 0), 1);
+        return Array.from(canvas.getContext('2d').getImageData(68, 92, 1, 1).data.slice(0, 3)); }"""
+    pixel_before = page.evaluate(picture_pixel)
     page.click(row("e1") + " .selection-eye")
     check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').getAttribute('data-hidden')") == "true" and
           label() == "Hide", f"hidden: {label()}")
     check(slide_colour(page, 70, 60, 100, 90) != logo_colour, "the logo is gone from the screen")
+    pixel_after = page.evaluate(picture_pixel)
+    check(pixel_before[0] > 150 and pixel_before[1] < 80 and min(pixel_after) > 230, f"the slide's picture: {pixel_before} -> {pixel_after}")
+    print_copy = page.evaluate("App.pdf.printDocument(App.deck.getDocument(), [0], 'x', '')")
+    check('data-hidden="true"' in print_copy and '.el[data-hidden="true"] { display: none !important; }' in print_copy,
+          "the print copy carries the element hidden and the rule that hides it")
+    page.keyboard.press("F5")
+    wait_until(page, "App.present.isActive() && !!document.querySelector('.slideshow-frame').contentDocument.querySelector('[data-id=\"e1\"]')")
+    check(page.evaluate("getComputedStyle(document.querySelector('.slideshow-frame').contentDocument.querySelector('[data-id=\"e1\"]')).display") == "none",
+          "not in the slide show")
+    page.keyboard.press("Escape")
+    wait_until(page, "!App.present.isActive()")
     page.screenshot(path=str(OUTPUT / "146-selection-pane.png"))
     page.keyboard.press("Escape")
     page.mouse.click(*slide_to_screen(page, 124, 76))
@@ -7903,6 +7918,13 @@ def test_slide_picks_and_clipboard(browser):
     label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
     titles0 = page.evaluate(TITLES)
 
+    # From one slide, Ctrl+click adds others.
+    page.click(thumb(1))
+    page.click(thumb(3), modifiers=["Control"])
+    check(picked() == ["s2", "s4"], f"Ctrl+click adds one: {picked()}")
+    page.click(thumb(4), modifiers=["Control"])
+    check(picked() == ["s2", "s4", "s5"], f"and another: {picked()}")
+
     # Click slide 2, Shift+click slide 4: three picked, framed; Ctrl+click slide 3: out again.
     page.click(thumb(1))
     page.click(thumb(3), modifiers=["Shift"])
@@ -7964,6 +7986,16 @@ def test_slide_picks_and_clipboard(browser):
     drag(page, [box["x"] + 60, box["y"] + 40], [last["x"] + 60, last["y"] + last["height"] - 5], steps=10)
     check(order() == ["s1", "s4", "s5", "s6", "s2", "s3"] and label() == "Move slides", f"dragged together: {order()} {label()}")
     page.keyboard.press("Control+z")
+    # Slide Background on two picked slides: both, one step.
+    page.click(thumb(1))
+    page.click(thumb(2), modifiers=["Shift"])
+    page.click(".ribbon-tab[data-tab='design']")
+    page.click(".slide-background-menu-button")
+    page.click(".slide-background-menu .color-swatch[title='Red']")
+    check(page.evaluate("App.deck.getSlides().slice(1, 3).map(App.background.ownColor)") == ["rgb(255, 0, 0)", "rgb(255, 0, 0)"] and
+          page.evaluate("App.background.ownColor(App.deck.getSlides()[3])") is None and label() == "Slide background",
+          page.evaluate("App.deck.getSlides().map(App.background.ownColor)"))
+    page.keyboard.press("Control+z")
     page.click(thumb(1))
     page.click(thumb(2), modifiers=["Shift"])
     page.keyboard.press("Delete")
@@ -8018,6 +8050,8 @@ def test_reuse_slides_and_elements_across_tabs(browser):
     check(len(set(order())) == 8 and page.evaluate("App.deck.getCurrentIndex()") == 2, f"new ids, the first shown: {order()}")
     check("inserted from contract-deck-format1.html" in page.text_content("#status-message"), page.text_content("#status-message"))
     check(page.evaluate("App.deck.getSlides()[2].querySelectorAll('table').length") == 1, "the table came along")
+    check(page.evaluate("!!App.charts.readData(App.deck.getSlides()[3].querySelector('.el[data-type=\"chart\"]'))"),
+          "the chart came along with its data (still editable)")
     page.keyboard.press("Control+z")
     check(len(order()) == 6, "one Ctrl+Z")
 
@@ -8147,6 +8181,15 @@ def test_phase10_done_when(browser):
     page.click(".language-button")
     page.click(".language-menu .menu-item:has-text('English (United States)')")
     page.screenshot(path=str(OUTPUT / "151-phase10-done-when.png"))
+
+    saved = editor.save_as_download("contract-deck-phase10.html")
+    reopened = Editor(browser)
+    reopened.open(saved)
+    kept = reopened.page.evaluate("""() => { const sub = App.deck.getSlides()[0].querySelector('[data-id="e4"]');
+        return [App.text.anchorOf(sub), !!sub.querySelector('a[href="#slide-s3"]'), App.text.deckLanguage(App.deck.getDocument()),
+            App.elements.isHidden(App.deck.getSlides()[0].querySelector('[data-id="e3"]'))]; }""")
+    check(kept == ["bottom", True, "en-US", True], f"saved and reopened: {kept}")
+    reopened.close()
 
     path, report = export_pptx(editor, "contract-deck-phase10.pptx")
     parts = pptx_parts(path)

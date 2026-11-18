@@ -278,49 +278,79 @@
 
     const CLIPBOARD_MARK = 'data-deck-editor-slides';
 
+    function titleText(slide) {
+        const title = App.slides.titleOf(slide);
+        return title ? title.textContent.replace(/\s+/g, ' ').trim() : '';
+    }
+
     /*
      * Copied slides as they go on the clipboard (text/html): a <div> marked
-     * data-deck-editor-slides holding the slides as they are (notes and
-     * comments too), so another editor tab can paste them whole.
+     * data-deck-editor-slides whose only readable text is the slides' titles
+     * (pasted into an e-mail, nothing else shows: no notes, no review comments),
+     * holding the slides themselves encoded in data-slides (base64 JSON) and the
+     * deck they came from (data-deck-id), so another editor tab pastes them whole.
      */
-    App.slides.clipboardHtml = function clipboardHtml(slides) {
-        const box = slides[0].ownerDocument.createElement('div');
+    App.slides.clipboardHtml = function clipboardHtml(slides, deckId) {
+        const box = document.createElement('div');
         box.setAttribute(CLIPBOARD_MARK, '1');
-        slides.forEach((slide) => {
+        box.setAttribute('data-deck-id', deckId || '');
+        box.setAttribute('data-slides', App.util.toBase64(JSON.stringify(slides.map((slide) => {
             const copy = slide.cloneNode(true);
             copy.removeAttribute('data-editor-current');
-            box.appendChild(copy);
-        });
+            return copy.outerHTML;
+        }))));
+        box.textContent = slides.map(titleText).filter(Boolean).join('\n');
         return box.outerHTML;
     };
 
     /*
-     * The slides in clipboard HTML, ready to go into deck `doc`: cleaned as an
-     * opened deck is (no scripts, handlers or frames), their slide-master copy
-     * dropped (this deck's master is put on them), new slide and element ids
-     * (comments follow their elements). null when the HTML holds no copied slides.
+     * The slides in clipboard HTML, ready to go into deck `doc` (whose id is
+     * `deckId`): { slides, removedRemote }, or null when the HTML holds none.
+     * They are cleaned as an opened deck is (no scripts, handlers or frames;
+     * pictures and fonts from the internet blocked: removedRemote counts them),
+     * their slide-master copy dropped, given new slide and element ids (comments
+     * follow their elements); from another deck, a link to one of the slides that
+     * came along follows it and any other slide link is taken off.
      */
-    App.slides.slidesFromClipboard = function slidesFromClipboard(html, doc) {
+    App.slides.slidesFromClipboard = function slidesFromClipboard(html, doc, deckId) {
         if (!html || html.indexOf(CLIPBOARD_MARK) === -1) {
             return null;
         }
-        const parsed = new DOMParser().parseFromString(html, 'text/html');
-        const box = parsed.querySelector('[' + CLIPBOARD_MARK + ']');
-        const found = box ? Array.from(box.querySelectorAll(':scope > section.slide')) : [];
+        const box = new DOMParser().parseFromString(html, 'text/html').querySelector('[' + CLIPBOARD_MARK + '][data-slides]');
+        let list = null;
+        try {
+            list = box ? JSON.parse(App.util.fromBase64(box.getAttribute('data-slides'))) : null;
+        } catch (error) {
+            return null;
+        }
+        if (!Array.isArray(list)) {
+            return null;
+        }
+        const parsed = new DOMParser().parseFromString('<!DOCTYPE html><html><head></head><body></body></html>', 'text/html');
+        parsed.body.innerHTML = list.filter((item) => typeof item === 'string').join('');
+        const found = Array.from(parsed.body.querySelectorAll(':scope > section.slide'));
         if (!found.length) {
             return null;
         }
         App.importer.sanitize(parsed);
+        const removedRemote = App.importer.removeRemoteRefs(parsed);
         const slideIds = new Set(Array.from(doc.querySelectorAll('section.slide'), (slide) => slide.getAttribute('data-slide-id')));
         const taken = {
             elements: usedElementIds(doc),
             comments: new Set(Array.from(doc.querySelectorAll('.comment[data-comment-id]'), (node) => node.getAttribute('data-comment-id'))),
         };
-        return found.map((slide) => {
+        const idMap = new Map();
+        const slides = found.map((slide) => {
             slide.querySelectorAll(':scope > .master-layer').forEach((layer) => layer.remove());
             slide.removeAttribute('data-editor-current');
-            return App.slides.copyOf(doc.importNode(slide, true), App.util.uniqueId('s', slideIds), taken);
+            const copy = App.slides.copyOf(doc.importNode(slide, true), App.util.uniqueId('s', slideIds), taken);
+            idMap.set(slide.getAttribute('data-slide-id'), copy.getAttribute('data-slide-id'));
+            return copy;
         });
+        if (!deckId || box.getAttribute('data-deck-id') !== deckId) {
+            slides.forEach((slide) => App.util.fixForeignSlideLinks(slide, idMap));
+        }
+        return { slides: slides, removedRemote: removedRemote };
     };
 
     /* A hidden slide is skipped when presenting (the player, Phase 8); the editor shows it dimmed. */
@@ -572,7 +602,7 @@
         if (!targets.length || (cut && !App.slides.canRemove())) {
             return null;
         }
-        copied = App.slides.clipboardHtml(targets);
+        copied = App.slides.clipboardHtml(targets, App.deck.getDeckId());
         if (cut) {
             App.slides.remove();
         }
@@ -584,15 +614,17 @@
     };
 
     /*
-     * Paste slides from clipboard HTML (none: the last copied here) after the picked slides; false if it holds none.
+     * Paste slides from clipboard HTML (none: the last copied here) after the picked slides:
+     * { count, removedRemote }, or false if it holds none.
      * label: the undo step's name (Reuse Slides gives its own).
      */
     App.slides.paste = function paste(html, label) {
         const doc = App.deck.getDocument();
-        const slides = doc ? App.slides.slidesFromClipboard(html || copied, doc) : null;
-        if (!slides || !slides.length) {
+        const found = doc ? App.slides.slidesFromClipboard(html || copied, doc, App.deck.getDeckId()) : null;
+        if (!found) {
             return false;
         }
+        const slides = found.slides;
         finishWork();
         const targets = App.slides.selectedSlides();
         const after = targets[targets.length - 1] || null;
@@ -602,15 +634,16 @@
             slides.forEach((slide) => slide.insertBefore(layer.cloneNode(true), slide.firstChild));
         }
         insertAfter(label || (slides.length > 1 ? 'Paste slides' : 'Paste slide'), after, slides);
-        return true;
+        if (found.removedRemote) {
+            App.ui.setStatus(found.removedRemote + ' link' + (found.removedRemote === 1 ? '' : 's') +
+                ' to pictures or fonts on the internet removed (the editor works offline)');
+        }
+        return { count: slides.length, removedRemote: found.removedRemote };
     };
 
     /* A copy or cut event in the slide rail: the picked slides go on the system clipboard. */
     App.slides.onCopyEvent = function onCopyEvent(event) {
-        const titles = App.slides.selectedSlides().map((slide) => {
-            const title = App.slides.titleOf(slide);
-            return title ? title.textContent.replace(/\s+/g, ' ').trim() : '';
-        }).filter(Boolean).join('\n');
+        const titles = App.slides.selectedSlides().map(titleText).filter(Boolean).join('\n');
         const html = App.slides.copySlides(event.type === 'cut');
         if (!html) {
             return;
@@ -627,7 +660,7 @@
             return false;
         }
         event.preventDefault();
-        return App.slides.paste(html);
+        return !!App.slides.paste(html);
     };
 
     // ---------------------------------------------------------------

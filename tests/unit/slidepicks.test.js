@@ -47,13 +47,16 @@ test('slide clipboard: copied slides come back cleaned, without their master cop
     const source = fiveSlides();
     const s2 = source.querySelector('[data-slide-id="s2"]');
     s2.insertAdjacentHTML('beforeend', '<div class="master-layer"><span>logo</span></div><script>alert(1)</script>' +
-        '<aside class="notes">Nota</aside>');
+        '<aside class="notes">Nota secreta</aside>');
     s2.querySelector('.el').setAttribute('onclick', 'alert(2)');
-    App.comments.add(s2, { target: 'e2', author: 'MB', date: '2026-11-18T10:00:00.000Z', text: 'ver' });
-    const html = App.slides.clipboardHtml([s2, source.querySelector('[data-slide-id="s4"]')]);
+    App.comments.add(s2, { target: 'e2', author: 'MB', date: '2026-11-18T10:00:00.000Z', text: 'comentário interno' });
+    const html = App.slides.clipboardHtml([s2, source.querySelector('[data-slide-id="s4"]')], 'deck-a');
     assert(html.indexOf('data-deck-editor-slides') !== -1, 'marked');
+    const shown = parseDoc('<!DOCTYPE html><html><body>' + html + '</body></html>').body.textContent;
+    assert(shown.indexOf('Nota secreta') === -1 && shown.indexOf('comentário interno') === -1,
+        'pasted into an e-mail, no notes or comments show: ' + shown);
     const target = fiveSlides();
-    const pasted = App.slides.slidesFromClipboard(html, target);
+    const pasted = App.slides.slidesFromClipboard(html, target, 'deck-b').slides;
     assertEqual(pasted.length, 2);
     assertEqual(pasted.map((slide) => slide.ownerDocument === target), [true, true]);
     const ids = pasted.map((slide) => slide.getAttribute('data-slide-id'));
@@ -62,7 +65,24 @@ test('slide clipboard: copied slides come back cleaned, without their master cop
     assert(!target.querySelector('[data-id="' + elementId + '"]'), 'a new element id: ' + elementId);
     assertEqual([pasted[0].querySelector('script'), pasted[0].querySelector('.master-layer'),
         pasted[0].querySelector('.el').hasAttribute('onclick')], [null, null, false], 'cleaned');
-    assertEqual(pasted[0].querySelector('aside.notes').textContent, 'Nota', 'notes come along');
+    assertEqual(pasted[0].querySelector('aside.notes').textContent, 'Nota secreta', 'notes come along');
     assertEqual(App.comments.listOf(pasted[0]).map((c) => c.target), [elementId], 'the comment points at the copy');
-    assertEqual(App.slides.slidesFromClipboard('<p>texto</p>', target), null, 'not slides: null');
+    assertEqual(App.slides.slidesFromClipboard('<p>texto</p>', target, 'deck-b'), null, 'not slides: null');
+});
+
+test('slide clipboard: pictures from the internet are blocked; slide links from another deck follow or come off', () => {
+    const source = fiveSlides();
+    const s2 = source.querySelector('[data-slide-id="s2"]');
+    s2.insertAdjacentHTML('beforeend', '<img class="el" data-type="image" data-id="e9" alt="" src="https://example.com/x.png">');
+    s2.querySelector('p').innerHTML = '<a href="#slide-s4">ver anexo</a> e <a href="#slide-s1">capa</a>';
+    const copied = [s2, source.querySelector('[data-slide-id="s4"]')];
+    const target = fiveSlides();
+    const foreign = App.slides.slidesFromClipboard(App.slides.clipboardHtml(copied, 'deck-a'), target, 'deck-b');
+    assertEqual(foreign.removedRemote, 1);
+    assert(foreign.slides[0].querySelector('img').getAttribute('src').indexOf('https:') !== 0, 'the remote picture is blocked');
+    const newS4 = foreign.slides[1].getAttribute('data-slide-id');
+    assertEqual(foreign.slides[0].querySelector('p').innerHTML, '<a href="#slide-' + newS4 + '">ver anexo</a> e capa',
+        'the link to a slide that came along follows it; the other comes off');
+    const same = App.slides.slidesFromClipboard(App.slides.clipboardHtml(copied, 'deck-b'), target, 'deck-b');
+    assertEqual(same.slides[0].querySelectorAll('a').length, 2, 'the same deck: links kept as they are');
 });

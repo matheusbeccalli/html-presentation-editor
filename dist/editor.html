@@ -1667,6 +1667,41 @@ App.util.escapeHtml = function escapeHtml(text) {
  * Return the first id "<prefix><n>" (n = 1, 2, 3 ...) that is not in `usedIds`,
  * and add it to the set so the next call gets a different one.
  */
+/* UTF-8 text as base64 and back (btoa alone only takes Latin-1): copied slides and elements on the clipboard. */
+App.util.toBase64 = function toBase64(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    }
+    return btoa(binary);
+};
+
+App.util.fromBase64 = function fromBase64(code) {
+    const binary = atob(code);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder().decode(bytes);
+};
+
+/*
+ * Links to slides (#slide-<id>) in `root` that came from another deck: a link to
+ * one of the slides that came along (idMap: old id -> new id) follows it; any
+ * other is taken off (its text stays), since that slide is not in this deck.
+ */
+App.util.fixForeignSlideLinks = function fixForeignSlideLinks(root, idMap) {
+    root.querySelectorAll('a[href^="#slide-"]').forEach((link) => {
+        const id = link.getAttribute('href').slice(7);
+        if (idMap && idMap.has(id)) {
+            link.setAttribute('href', '#slide-' + idMap.get(id));
+        } else {
+            link.replaceWith(...Array.from(link.childNodes));
+        }
+    });
+};
+
 App.util.uniqueId = function uniqueId(prefix, usedIds) {
     let n = 1;
     while (usedIds.has(prefix + n)) {
@@ -1970,7 +2005,7 @@ App.createEventBus = function createEventBus() {
         if (target.ownerDocument && target.ownerDocument !== document) {
             return true;   // the deck's own document (its iframe)
         }
-        return !!(target.closest && target.closest('#canvas-area'));
+        return !!(target.closest && target.closest('#canvas-stage'));   // the slide and its overlay, not the panels
     };
 
     /*
@@ -15144,24 +15179,33 @@ App.template.newDeckHtml = function newDeckHtml() {
         return !!App.state.hasDeck && !!App.deck.getCurrentSlide();
     };
 
-    /* The slide shown gets `value` (a colour or var(--color-…)) as its own. */
+    /* The slides the action is for: the slides picked in the rail (Phase 10), else the slide shown. */
+    function targetSlides() {
+        return App.slides.selectedSlides();
+    }
+
+    function scopeOf(slides) {
+        return slides.length > 1 ? { slides: slides.map((slide) => slide.getAttribute('data-slide-id')) }
+            : { slideId: slides[0].getAttribute('data-slide-id') };
+    }
+
+    /* The slide shown (every picked slide) gets `value` (a colour or var(--color-…)) as its own. */
     App.background.setColor = function setColor(value) {
-        const slide = App.deck.getCurrentSlide();
-        if (!slide) {
+        const slides = targetSlides();
+        if (!slides.length) {
             return;
         }
-        App.history.change('Slide background', { slideId: slide.getAttribute('data-slide-id') },
-            () => App.background.writeOwn(slide, value));
+        App.history.change('Slide background', scopeOf(slides), () => slides.forEach((slide) => App.background.writeOwn(slide, value)));
     };
 
-    /* Reset to Theme: the slide shown follows the theme's Background again. */
+    /* Reset to Theme: the slide shown (every picked slide) follows the theme's Background again. */
     App.background.reset = function reset() {
-        const slide = App.deck.getCurrentSlide();
-        if (!slide) {
+        const slides = targetSlides();
+        if (!slides.length) {
             return;
         }
-        const scope = needsHeadChange(slide.ownerDocument) ? 'deck' : { slideId: slide.getAttribute('data-slide-id') };
-        App.history.change('Reset slide background', scope, () => followTheme(slide));
+        const scope = needsHeadChange(slides[0].ownerDocument) ? 'deck' : scopeOf(slides);
+        App.history.change('Reset slide background', scope, () => slides.forEach((slide) => followTheme(slide)));
     };
 
     /* Apply to All: `value` becomes the theme's Background and every slide follows it. */
@@ -16505,26 +16549,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* The mark as clipboard HTML, with the element's text (for a paste into another program) and the elements. */
     function markData(text) {
-        return App.elements.clipboardData(clipboardHtml || [], text, copyMark);
-    }
-
-    /* UTF-8 text as base64 and back (btoa alone only takes Latin-1). */
-    function toBase64(text) {
-        const bytes = new TextEncoder().encode(text);
-        let binary = '';
-        for (let i = 0; i < bytes.length; i += 0x8000) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-        }
-        return btoa(binary);
-    }
-
-    function fromBase64(code) {
-        const binary = atob(code);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i);
-        }
-        return new TextDecoder().decode(bytes);
+        return App.elements.clipboardData(clipboardHtml || [], text, copyMark, App.deck.getDeckId());
     }
 
     /*
@@ -16533,12 +16558,13 @@ App.template.newDeckHtml = function newDeckHtml() {
      * elements themselves encoded in data-elements, so another editor tab can paste
      * them whole. Returns { html, text }.
      */
-    App.elements.clipboardData = function clipboardData(htmlList, text, mark) {
+    App.elements.clipboardData = function clipboardData(htmlList, text, mark, deckId) {
         const holder = document.createElement('div');
         holder.setAttribute('data-deck-editor', 'element');
         holder.setAttribute('data-copy', mark || '');
         if (htmlList.length) {
-            holder.setAttribute('data-elements', toBase64(JSON.stringify(htmlList)));
+            holder.setAttribute('data-elements', App.util.toBase64(JSON.stringify(htmlList)));
+            holder.setAttribute('data-deck-id', deckId || '');   // links to slides only make sense in the same deck
         }
         holder.textContent = text;
         return { html: holder.outerHTML, text: text };
@@ -16546,10 +16572,11 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /*
      * The elements in clipboard HTML another editor tab wrote: their HTML (back to
-     * front), cleaned as an opened deck is (no scripts, handlers or frames); null
+     * front), cleaned as an opened deck is (no scripts, handlers or frames; remote
+     * pictures and fonts blocked); links to slides of another deck taken off; null
      * when it holds none. They get new ids when pasted (insertCopy).
      */
-    App.elements.elementsFromClipboard = function elementsFromClipboard(html) {
+    App.elements.elementsFromClipboard = function elementsFromClipboard(html, deckId) {
         if (!html || html.indexOf('data-elements') === -1) {
             return null;
         }
@@ -16557,7 +16584,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const holder = parsed.querySelector('[data-deck-editor="element"][data-elements]');
         let list = null;
         try {
-            list = holder ? JSON.parse(fromBase64(holder.getAttribute('data-elements'))) : null;
+            list = holder ? JSON.parse(App.util.fromBase64(holder.getAttribute('data-elements'))) : null;
         } catch (error) {
             return null;   // not ours after all
         }
@@ -16567,6 +16594,10 @@ App.template.newDeckHtml = function newDeckHtml() {
         const doc = new DOMParser().parseFromString('<!DOCTYPE html><html><head></head><body></body></html>', 'text/html');
         doc.body.innerHTML = list.filter((item) => typeof item === 'string').join('');
         App.importer.sanitize(doc);
+        App.importer.removeRemoteRefs(doc);   // the editor never loads anything from outside (SPEC 2.3)
+        if (!deckId || holder.getAttribute('data-deck-id') !== deckId) {
+            App.util.fixForeignSlideLinks(doc.body, null);
+        }
         const elements = Array.from(doc.body.children).filter((child) => child.classList.contains('el'));
         return elements.length ? elements.map((element) => element.outerHTML) : null;
     };
@@ -16647,9 +16678,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         const pictures = App.images.picturesIn(event.clipboardData);
         if (!ours && App.chartData.pasteOnChart(clipboard)) {
             event.preventDefault();   // cells pasted on a selected chart become its data, not a new table
-        } else if (!ours && App.elements.elementsFromClipboard(clipboard.html)) {
+        } else if (!ours && App.elements.elementsFromClipboard(clipboard.html, App.deck.getDeckId())) {
             event.preventDefault();   // elements copied in another editor tab (Phase 10): pasted whole
-            insertCopy(App.elements.elementsFromClipboard(clipboard.html), 'Paste');
+            insertCopy(App.elements.elementsFromClipboard(clipboard.html, App.deck.getDeckId()), 'Paste');
         } else if (!ours && App.tablePaste.paste(clipboard)) {
             event.preventDefault();
         } else if (!ours && pictures.length > 0) {
@@ -17468,8 +17499,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Working in the rail means working on slides, not on an element (as in PowerPoint):
         // without this, Delete or the arrow keys here would act on the element still selected.
         rail.addEventListener('pointerdown', () => App.selection.clear());
+        // A thumbnail pressed with the mouse gets the focus before its click: the click decides
+        // (Shift / Ctrl+click pick several slides, Phase 10), not the focus.
+        let pressing = false;
+        rail.addEventListener('pointerdown', () => { pressing = true; });
+        window.addEventListener('pointerup', () => setTimeout(() => { pressing = false; }, 0));
         rail.addEventListener('focusin', (event) => {
             App.selection.clear();
+            if (pressing) {
+                return;
+            }
             // A thumbnail reached with Tab is the slide shown, so the rail's keys act on it.
             const item = event.target.closest('.thumb');
             if (item && Number(item.getAttribute('data-index')) !== App.deck.getCurrentIndex()) {
@@ -25290,7 +25329,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         const text = await file.text();
         const result = await App.importer.importDeck(text);
         const doc = new DOMParser().parseFromString(result.html, 'text/html');
-        return { doc: doc, slides: Array.from(doc.querySelectorAll('section.slide')), name: file.name };
+        const meta = doc.head.querySelector('meta[name="deck-id"]');
+        return { doc: doc, slides: Array.from(doc.querySelectorAll('section.slide')), name: file.name,
+            deckId: meta ? meta.getAttribute('content') : null };
     };
 
     /* The ticked slides of the window, in their deck's order. */
@@ -25301,7 +25342,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     App.reuse.open = async function open() {
-        const state = { doc: null, slides: [], name: '' };
+        const state = { doc: null, slides: [], name: '', deckId: null };
         const file = el('input', { id: 'reuse-file', type: 'file', accept: '.html,.htm,text/html', hidden: true });
         const browse = el('button', { type: 'button', class: 'btn', onclick: () => file.click() }, ['Browse…']);
         const name = el('span', { class: 'panel-hint reuse-name' }, ['Pick another deck (.html).']);
@@ -25361,8 +25402,11 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (choice !== 'insert' || !chosen.length) {
             return;
         }
-        if (App.slides.paste(App.slides.clipboardHtml(chosen), chosen.length > 1 ? 'Reuse slides' : 'Reuse slide')) {
-            App.ui.setStatus(chosen.length + ' slide' + (chosen.length === 1 ? '' : 's') + ' inserted from ' + state.name);
+        const pasted = App.slides.paste(App.slides.clipboardHtml(chosen, state.deckId), chosen.length > 1 ? 'Reuse slides' : 'Reuse slide');
+        if (pasted) {
+            App.ui.setStatus(chosen.length + ' slide' + (chosen.length === 1 ? '' : 's') + ' inserted from ' + state.name +
+                (pasted.removedRemote ? ' · ' + pasted.removedRemote + ' link' + (pasted.removedRemote === 1 ? '' : 's') +
+                    ' to pictures or fonts on the internet removed' : ''));
         }
     };
 })();
@@ -25909,49 +25953,79 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     const CLIPBOARD_MARK = 'data-deck-editor-slides';
 
+    function titleText(slide) {
+        const title = App.slides.titleOf(slide);
+        return title ? title.textContent.replace(/\s+/g, ' ').trim() : '';
+    }
+
     /*
      * Copied slides as they go on the clipboard (text/html): a <div> marked
-     * data-deck-editor-slides holding the slides as they are (notes and
-     * comments too), so another editor tab can paste them whole.
+     * data-deck-editor-slides whose only readable text is the slides' titles
+     * (pasted into an e-mail, nothing else shows: no notes, no review comments),
+     * holding the slides themselves encoded in data-slides (base64 JSON) and the
+     * deck they came from (data-deck-id), so another editor tab pastes them whole.
      */
-    App.slides.clipboardHtml = function clipboardHtml(slides) {
-        const box = slides[0].ownerDocument.createElement('div');
+    App.slides.clipboardHtml = function clipboardHtml(slides, deckId) {
+        const box = document.createElement('div');
         box.setAttribute(CLIPBOARD_MARK, '1');
-        slides.forEach((slide) => {
+        box.setAttribute('data-deck-id', deckId || '');
+        box.setAttribute('data-slides', App.util.toBase64(JSON.stringify(slides.map((slide) => {
             const copy = slide.cloneNode(true);
             copy.removeAttribute('data-editor-current');
-            box.appendChild(copy);
-        });
+            return copy.outerHTML;
+        }))));
+        box.textContent = slides.map(titleText).filter(Boolean).join('\n');
         return box.outerHTML;
     };
 
     /*
-     * The slides in clipboard HTML, ready to go into deck `doc`: cleaned as an
-     * opened deck is (no scripts, handlers or frames), their slide-master copy
-     * dropped (this deck's master is put on them), new slide and element ids
-     * (comments follow their elements). null when the HTML holds no copied slides.
+     * The slides in clipboard HTML, ready to go into deck `doc` (whose id is
+     * `deckId`): { slides, removedRemote }, or null when the HTML holds none.
+     * They are cleaned as an opened deck is (no scripts, handlers or frames;
+     * pictures and fonts from the internet blocked: removedRemote counts them),
+     * their slide-master copy dropped, given new slide and element ids (comments
+     * follow their elements); from another deck, a link to one of the slides that
+     * came along follows it and any other slide link is taken off.
      */
-    App.slides.slidesFromClipboard = function slidesFromClipboard(html, doc) {
+    App.slides.slidesFromClipboard = function slidesFromClipboard(html, doc, deckId) {
         if (!html || html.indexOf(CLIPBOARD_MARK) === -1) {
             return null;
         }
-        const parsed = new DOMParser().parseFromString(html, 'text/html');
-        const box = parsed.querySelector('[' + CLIPBOARD_MARK + ']');
-        const found = box ? Array.from(box.querySelectorAll(':scope > section.slide')) : [];
+        const box = new DOMParser().parseFromString(html, 'text/html').querySelector('[' + CLIPBOARD_MARK + '][data-slides]');
+        let list = null;
+        try {
+            list = box ? JSON.parse(App.util.fromBase64(box.getAttribute('data-slides'))) : null;
+        } catch (error) {
+            return null;
+        }
+        if (!Array.isArray(list)) {
+            return null;
+        }
+        const parsed = new DOMParser().parseFromString('<!DOCTYPE html><html><head></head><body></body></html>', 'text/html');
+        parsed.body.innerHTML = list.filter((item) => typeof item === 'string').join('');
+        const found = Array.from(parsed.body.querySelectorAll(':scope > section.slide'));
         if (!found.length) {
             return null;
         }
         App.importer.sanitize(parsed);
+        const removedRemote = App.importer.removeRemoteRefs(parsed);
         const slideIds = new Set(Array.from(doc.querySelectorAll('section.slide'), (slide) => slide.getAttribute('data-slide-id')));
         const taken = {
             elements: usedElementIds(doc),
             comments: new Set(Array.from(doc.querySelectorAll('.comment[data-comment-id]'), (node) => node.getAttribute('data-comment-id'))),
         };
-        return found.map((slide) => {
+        const idMap = new Map();
+        const slides = found.map((slide) => {
             slide.querySelectorAll(':scope > .master-layer').forEach((layer) => layer.remove());
             slide.removeAttribute('data-editor-current');
-            return App.slides.copyOf(doc.importNode(slide, true), App.util.uniqueId('s', slideIds), taken);
+            const copy = App.slides.copyOf(doc.importNode(slide, true), App.util.uniqueId('s', slideIds), taken);
+            idMap.set(slide.getAttribute('data-slide-id'), copy.getAttribute('data-slide-id'));
+            return copy;
         });
+        if (!deckId || box.getAttribute('data-deck-id') !== deckId) {
+            slides.forEach((slide) => App.util.fixForeignSlideLinks(slide, idMap));
+        }
+        return { slides: slides, removedRemote: removedRemote };
     };
 
     /* A hidden slide is skipped when presenting (the player, Phase 8); the editor shows it dimmed. */
@@ -26203,7 +26277,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (!targets.length || (cut && !App.slides.canRemove())) {
             return null;
         }
-        copied = App.slides.clipboardHtml(targets);
+        copied = App.slides.clipboardHtml(targets, App.deck.getDeckId());
         if (cut) {
             App.slides.remove();
         }
@@ -26215,15 +26289,17 @@ App.template.newDeckHtml = function newDeckHtml() {
     };
 
     /*
-     * Paste slides from clipboard HTML (none: the last copied here) after the picked slides; false if it holds none.
+     * Paste slides from clipboard HTML (none: the last copied here) after the picked slides:
+     * { count, removedRemote }, or false if it holds none.
      * label: the undo step's name (Reuse Slides gives its own).
      */
     App.slides.paste = function paste(html, label) {
         const doc = App.deck.getDocument();
-        const slides = doc ? App.slides.slidesFromClipboard(html || copied, doc) : null;
-        if (!slides || !slides.length) {
+        const found = doc ? App.slides.slidesFromClipboard(html || copied, doc, App.deck.getDeckId()) : null;
+        if (!found) {
             return false;
         }
+        const slides = found.slides;
         finishWork();
         const targets = App.slides.selectedSlides();
         const after = targets[targets.length - 1] || null;
@@ -26233,15 +26309,16 @@ App.template.newDeckHtml = function newDeckHtml() {
             slides.forEach((slide) => slide.insertBefore(layer.cloneNode(true), slide.firstChild));
         }
         insertAfter(label || (slides.length > 1 ? 'Paste slides' : 'Paste slide'), after, slides);
-        return true;
+        if (found.removedRemote) {
+            App.ui.setStatus(found.removedRemote + ' link' + (found.removedRemote === 1 ? '' : 's') +
+                ' to pictures or fonts on the internet removed (the editor works offline)');
+        }
+        return { count: slides.length, removedRemote: found.removedRemote };
     };
 
     /* A copy or cut event in the slide rail: the picked slides go on the system clipboard. */
     App.slides.onCopyEvent = function onCopyEvent(event) {
-        const titles = App.slides.selectedSlides().map((slide) => {
-            const title = App.slides.titleOf(slide);
-            return title ? title.textContent.replace(/\s+/g, ' ').trim() : '';
-        }).filter(Boolean).join('\n');
+        const titles = App.slides.selectedSlides().map(titleText).filter(Boolean).join('\n');
         const html = App.slides.copySlides(event.type === 'cut');
         if (!html) {
             return;
@@ -26258,7 +26335,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             return false;
         }
         event.preventDefault();
-        return App.slides.paste(html);
+        return !!App.slides.paste(html);
     };
 
     // ---------------------------------------------------------------

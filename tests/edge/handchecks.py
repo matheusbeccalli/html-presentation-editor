@@ -116,6 +116,9 @@ HAND_CHECKS = [
      "left": "the real eyedropper (a magnifier picking a pixel on the screen) cannot be driven by a test: a stand-in returns a colour"},
     {"key": "More shapes: open samples/contract-deck.html", "tests": ["test_more_shapes_and_arrowheads"], "auto": False,
      "left": "dragging the elbow's end handles; PowerPoint's own view (the test reads the .pptx XML)"},
+    {"key": "Selection Pane: open samples/contract-deck.html", "tests": ["test_selection_pane"], "auto": False,
+     "left": "the thumbnail and opening the saved file by double-clicking it (the test opens it in a plain page)"},
+    {"key": "Tab: click an empty part of a slide", "tests": ["test_selection_pane"], "auto": True},
     {"key": "Change Case: click the subtitle", "tests": ["test_text_layout_and_change_case"], "auto": False,
      "left": "the test selects \"Atlas\" directly, not with the mouse"},
 ]

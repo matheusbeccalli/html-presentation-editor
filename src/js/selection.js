@@ -197,7 +197,7 @@
     App.selection.selectAll = function selectAll() {
         const slide = App.deck.getCurrentSlide();
         if (slide) {
-            App.selection.selectMany(App.transform.topLevelElements(slide));
+            App.selection.selectMany(App.elements.pickableElements(slide));   // hidden ones are left out
         }
     };
 
@@ -284,7 +284,7 @@
         if (!slide) {
             return null;
         }
-        const elements = App.transform.topLevelElements(slide);
+        const elements = App.elements.pickableElements(slide);   // a hidden element is never clicked
         const items = elements.map((element, index) => ({
             id: index, rect: App.transform.readRect(element), z: App.transform.zIndexOf(element),
             angle: App.transform.rotationOf(element),   // a turned element is hit where it shows
@@ -451,7 +451,7 @@
             }
             const rect = App.transform.bandRect(start, point);
             App.transform.writeRect(band, rect);
-            const caught = App.transform.topLevelElements(slide)
+            const caught = App.elements.pickableElements(slide)
                 .filter((element) => App.transform.containsRect(rect,
                     App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element))))
                 .map((element) => element.getAttribute('data-id'))

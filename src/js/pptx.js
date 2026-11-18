@@ -265,7 +265,7 @@
     // An element's (or the slide's) own parts in stacking order (z-index, then their order).
     function partsOf(parent, view) {
         const parts = Array.from(parent.children).filter((child) =>
-            !child.hasAttribute('data-editor-only') &&
+            !child.hasAttribute('data-editor-only') && !App.elements.isHidden(child) &&   // hidden: left out (reported)
             (child.classList.contains('el') || child.classList.contains('master-layer')));
         return parts
             .map((part, order) => ({ part: part, order: order, z: parseInt(view.getComputedStyle(part).zIndex, 10) || 0 }))
@@ -758,6 +758,9 @@
             extra: [] };
         const items = [];
         partsOf(slide, view).forEach((part) => readPart(part, null, ctx, items));
+        slide.querySelectorAll('.el[data-hidden="true"]').forEach(() => {
+            ctx.report.push('an element hidden in the Selection Pane was left out');
+        });
         return {
             hidden: App.slides.isHidden(slide),
             notes: App.notes.textOf(slide),

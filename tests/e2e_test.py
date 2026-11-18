@@ -7667,6 +7667,98 @@ def test_more_shapes_and_arrowheads(browser):
     editor.close()
 
 
+def test_selection_pane(browser):
+    """Phase 10 step 5: Alt+F10 opens the Selection Pane (front first); a row click selects (Ctrl+click several); the
+    eye hides an element (gone from the slide, never clicked, left out of Ctrl+A, the saved deck and PowerPoint);
+    double-click renames; dragging a row restacks; Tab / Shift+Tab step through the slide (not while a ribbon button
+    has the focus); each one undo step; saved and reopened."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    rows = lambda: page.evaluate("Array.from(document.querySelectorAll('#selection-list .selection-row'), (r) => r.getAttribute('data-id'))")  # noqa: E731
+    row = lambda i: f"#selection-list .selection-row[data-id='{i}']"  # noqa: E731
+    selected = lambda: sorted(page.evaluate("App.selection.selectedIds()"))  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+    # Slide 1: e1 logo (z 1), e2 title, e3 red bar, e4 subtitle (z 4).
+
+    page.mouse.click(*slide_to_screen(page, 700, 650))   # the slide has the focus
+    page.keyboard.press("Alt+F10")
+    check(page.is_visible("#selection-pane"), "Alt+F10 opens the pane")
+    check(rows() == ["e4", "e3", "e2", "e1"], f"front first: {rows()}")
+    check(page.text_content(row("e1") + " .selection-name") == "Picture" and
+          page.text_content(row("e2") + " .selection-name") == "Text: Projeto Atlas", "named by what they are")
+
+    page.click(row("e2") + " .selection-name")
+    check(selected() == ["e2"], f"a row click selects: {selected()}")
+    page.click(row("e1") + " .selection-name", modifiers=["Control"])
+    check(selected() == ["e1", "e2"], f"Ctrl+click adds: {selected()}")
+    check("selected" in page.get_attribute(row("e1"), "class"), "the rows show it")
+
+    # The eye hides the logo: gone from the screen, not clickable, not in Ctrl+A.
+    logo_colour = slide_colour(page, 70, 60, 100, 90)
+    page.click(row("e1") + " .selection-eye")
+    check(page.evaluate("App.deck.getDocument().querySelector('[data-id=\"e1\"]').getAttribute('data-hidden')") == "true" and
+          label() == "Hide", f"hidden: {label()}")
+    check(slide_colour(page, 70, 60, 100, 90) != logo_colour, "the logo is gone from the screen")
+    page.screenshot(path=str(OUTPUT / "146-selection-pane.png"))
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 124, 76))
+    check(selected() == [], f"a click where the logo was picks nothing: {selected()}")
+    page.keyboard.press("Control+a")
+    check(selected() == ["e2", "e3", "e4"], f"Ctrl+A leaves it out: {selected()}")
+
+    # Tab / Shift+Tab: back to front, round, hidden left out.
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 700, 650))
+    page.keyboard.press("Tab")
+    check(selected() == ["e2"], f"Tab: the back-most shown: {selected()}")
+    page.keyboard.press("Tab")
+    page.keyboard.press("Tab")
+    check(selected() == ["e4"], f"Tab Tab: {selected()}")
+    page.keyboard.press("Tab")
+    check(selected() == ["e2"], f"round again: {selected()}")
+    page.keyboard.press("Shift+Tab")
+    check(selected() == ["e4"], f"Shift+Tab: {selected()}")
+    page.click(".ribbon-tab[data-tab='arrange']")
+    page.focus("button[data-command='selectionPane']")
+    page.keyboard.press("Tab")
+    check(selected() == ["e4"], "Tab on a ribbon button moves the focus, not the selection")
+
+    # Rename: double-click, type, Enter.
+    page.dblclick(row("e2") + " .selection-name")
+    page.fill("#selection-list .selection-name-input", "Título do deck")
+    page.press("#selection-list .selection-name-input", "Enter")
+    check(page.text_content(row("e2") + " .selection-name") == "Título do deck" and label() == "Rename", f"renamed: {label()}")
+
+    # Drag the subtitle's row (front) to the bottom: it goes to the back.
+    start = page.locator(row("e4")).bounding_box()
+    end = page.locator(row("e1")).bounding_box()
+    drag(page, [start["x"] + 60, start["y"] + start["height"] / 2], [end["x"] + 60, end["y"] + end["height"] - 2], steps=8)
+    check(rows() == ["e3", "e2", "e1", "e4"] and label() == "Reorder", f"restacked: {rows()} {label()}")
+    page.keyboard.press("Control+z")
+    check(rows() == ["e4", "e3", "e2", "e1"], f"undone: {rows()}")
+
+    # Saved: the name and the hidden logo stay; the saved deck on its own does not show it either.
+    saved = editor.save_as_download("contract-deck-selection.html")
+    html = saved.read_text(encoding="utf-8")
+    check('data-name="Título do deck"' in html and 'data-hidden="true"' in html, "saved")
+    raw = browser.new_page()
+    raw.goto(saved.as_uri())
+    check(raw.evaluate("getComputedStyle(document.querySelector('[data-id=\"e1\"]')).display") == "none", "hidden in the saved deck")
+    raw.close()
+    reopened = Editor(browser)
+    reopened.open(saved)
+    check(reopened.page.evaluate("App.elements.isHidden(App.deck.getDocument().querySelector('[data-id=\"e1\"]'))"), "reopened: hidden")
+    reopened.close()
+
+    # PowerPoint: the logo is left out, and the report says so.
+    path, report = export_pptx(editor, "contract-deck-selection.pptx")
+    check("<p:pic>" not in pptx_parts(path)["ppt/slides/slide1.xml"], "no picture on slide 1")
+    check("Slide 1: an element hidden in the Selection Pane was left out" in report, report)
+    check(editor.errors == [] and reopened.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7772,6 +7864,7 @@ TESTS = [
     test_text_layout_and_change_case,
     test_eyedropper,
     test_more_shapes_and_arrowheads,
+    test_selection_pane,
 ]
 
 

@@ -158,6 +158,7 @@
                 { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }, { command: 'flipHorizontal', icon: 'flipHorizontal' }],
                     [{ command: 'rotateLeft90', icon: 'rotateLeft90' }, { command: 'flipVertical', icon: 'flipVertical' }]] },
                 { label: 'Lock', commands: [['lock', 'lock']] },
+                { label: 'Selection', commands: [['selectionPane', 'selectionPane']] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
                 'Distribute: equal gaps between three or more. Group: one element of several; double-click text in it to type. ' +
@@ -382,7 +383,7 @@
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
          'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed', 'crop-changed',
-         'chart-data-changed', 'comments-pane-changed', 'settings-changed']
+         'chart-data-changed', 'comments-pane-changed', 'settings-changed', 'selection-pane-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 

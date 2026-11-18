@@ -153,6 +153,17 @@
             label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
         });
+        // The Selection Pane and Tab through the slide (Phase 10).
+        App.commands.define('selectionPane', {
+            label: 'Selection Pane', run: () => App.selectionPane.toggle(), isEnabled: hasDeck,
+            isChecked: () => App.selectionPane.isOpen(),
+        });
+        App.commands.define('selectNextElement', {
+            label: 'Select the next object', isEnabled: () => hasDeck() && !App.text.isEditing(), run: () => App.selectionPane.step(1),
+        });
+        App.commands.define('selectPreviousElement', {
+            label: 'Select the previous object', isEnabled: () => hasDeck() && !App.text.isEditing(), run: () => App.selectionPane.step(-1),
+        });
         App.commands.define('shortcuts', { label: 'Keyboard Shortcuts', run: () => App.help.openShortcuts() });
         App.commands.define('about', { label: 'About / Licenses', run: () => App.help.openAbout() });
         App.commands.define('deleteAllComments', {

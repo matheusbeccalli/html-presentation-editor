@@ -125,6 +125,7 @@
                 whileTyping: !!(options && options.whileTyping),
                 blockBrowserDefault: !!(options && options.blockBrowserDefault),
                 clipboardEvent: !!(options && options.clipboardEvent),
+                onSlide: !!(options && options.onSlide),
             });
         }
 
@@ -149,6 +150,10 @@
                 return false;
             }
             if (entry.clipboardEvent || (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping)) {
+                return false;
+            }
+            // Keys that act on the slide only when nothing else has the focus (Tab still moves through the ribbon).
+            if (entry.onSlide && !App.shortcuts.isOnSlide(event.target)) {
                 return false;
             }
             // Enter and Space press a focused button or menu item; they are not shortcuts there.
@@ -179,6 +184,17 @@
         return { register: register, lookup: lookup, handle: handle, list: list };
     };
 
+    /* Is the key pressed on the slide (nothing else focused: the page itself, the slide area or the deck)? */
+    App.shortcuts.isOnSlide = function isOnSlide(target) {
+        if (!target || target === document || target === document.body || target === document.documentElement) {
+            return true;
+        }
+        if (target.ownerDocument && target.ownerDocument !== document) {
+            return true;   // the deck's own document (its iframe)
+        }
+        return !!(target.closest && target.closest('#canvas-area'));
+    };
+
     /*
      * The editor's shortcuts. Browsers reserve some keys (Ctrl+N, Ctrl+T, Ctrl+W)
      * and never pass them to the page, so "New deck" is a menu item only.
@@ -195,6 +211,11 @@
         ['Home', 'firstSlide'],
         ['End', 'lastSlide'],
         ['Escape', 'deselect'],
+        // Tab / Shift+Tab step through the slide's elements, as in PowerPoint (Phase 10).
+        ['Tab', 'selectNextElement', { onSlide: true }],
+        ['Shift+Tab', 'selectPreviousElement', { onSlide: true }],
+        // The Selection Pane, as in PowerPoint (Phase 10).
+        ['Alt+F10', 'selectionPane', { blockBrowserDefault: true }],
         ['Enter', 'editText'],
         ['F2', 'editText'],
         ['ArrowLeft', 'nudgeLeft'],

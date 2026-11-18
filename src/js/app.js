@@ -60,6 +60,7 @@ App.start = function start() {
     App.chartData.init();       // the data grid under the slide
     App.notes.init();           // the speaker notes under the slide
     App.commentsPane.init();    // the review comments pane on the right (Phase 9)
+    App.selectionPane.init();   // the Selection Pane on the right (Phase 10)
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();

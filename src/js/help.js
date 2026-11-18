@@ -36,6 +36,7 @@
                 undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy', paste: 'Paste', duplicate: 'Duplicate',
                 delete: 'Delete the selection', selectAll: 'Select everything on the slide', deselect: 'Deselect / leave the text',
                 find: 'Find', replace: 'Replace', contextMenu: 'Menu of the selection',
+                selectNextElement: 'Select the next object', selectPreviousElement: 'Select the previous object',
             },
         },
         {
@@ -65,7 +66,7 @@
             },
         },
         { title: 'Review', commands: { newComment: 'New comment' } },
-        { title: 'View', commands: { toggleGridlines: 'Gridlines on / off' } },
+        { title: 'View', commands: { toggleGridlines: 'Gridlines on / off', selectionPane: 'Selection Pane' } },
         { title: 'Mouse', commands: {} },
         { title: 'Help', commands: { shortcuts: 'This list of shortcuts' } },
     ];

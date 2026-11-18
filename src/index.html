@@ -176,6 +176,23 @@
             Comments are saved with the deck, but never shown when presenting, printing or exporting.</p>
         <div id="comments-list"></div>
     </aside>
+
+    <!-- The Selection Pane (selectionpane.js, Phase 10): the slide's elements front first; Alt+F10. -->
+    <aside id="selection-pane" aria-label="Selection" hidden>
+        <div class="comments-head">
+            <h2>Selection</h2>
+            <span class="panel-hint selection-head-space"></span>
+            <button type="button" class="banner-close" id="selection-close" title="Close the Selection Pane (Alt+F10)">×</button>
+        </div>
+        <div class="selection-buttons">
+            <button type="button" class="btn" id="selection-show-all">Show All</button>
+            <button type="button" class="btn" id="selection-hide-all">Hide All</button>
+        </div>
+        <p class="panel-hint selection-hint">Front first. Click to select (Ctrl+click: several), the eye hides, double-click renames,
+            drag up or down to bring forward or send back.</p>
+        <p class="panel-hint" id="selection-empty">Nothing on this slide.</p>
+        <div id="selection-list" role="listbox" aria-label="Elements on the slide" aria-multiselectable="true"></div>
+    </aside>
 </main>
 
 <footer id="statusbar">
@@ -259,6 +276,7 @@
 <!-- INLINE-JS: js/notes.js -->
 <!-- INLINE-JS: js/comments.js -->
 <!-- INLINE-JS: js/commentspane.js -->
+<!-- INLINE-JS: js/selectionpane.js -->
 <!-- INLINE-JS: js/help.js -->
 <!-- INLINE-JS: js/slides.js -->
 <!-- INLINE-JS: js/findreplace.js -->

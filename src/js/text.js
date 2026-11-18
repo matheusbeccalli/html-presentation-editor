@@ -140,6 +140,8 @@
         // Autofit "shrink": the lines are drawn at the scale the editor measured (fitText). zoom,
         // unlike a transform, lets the smaller text wrap again over the full width of the box.
         rules.push('.el[data-autofit="shrink"] > p { zoom: var(--autofit-scale, 1); }');
+        // An element hidden in the Selection Pane (Phase 10): nowhere to be seen, in the editor or out of it.
+        rules.push('.el[data-hidden="true"] { display: none !important; }');
         return rules.join('\n') + '\n';
     };
 

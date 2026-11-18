@@ -677,6 +677,31 @@ iframe.pdf-print-frame {
     display: flex; flex-direction: column; gap: 8px;
 }
 #comments-pane[hidden] { display: none; }
+/* The Selection Pane (selectionpane.js, Phase 10): beside the Comments pane, same look. */
+#selection-pane {
+    flex: none; width: 240px; padding: 12px 14px; overflow-y: auto;
+    background: var(--surface); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 8px;
+}
+#selection-pane[hidden] { display: none; }
+.selection-head-space { flex: 1; }
+.selection-buttons { display: flex; gap: 6px; }
+.selection-buttons .btn { min-width: 0; padding: 4px 10px; }
+.selection-hint, #selection-empty { margin: 0; font-size: 11px; line-height: 1.4; }
+#selection-list { position: relative; display: flex; flex-direction: column; gap: 2px; }
+.selection-row {
+    display: flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid transparent; border-radius: 3px;
+    cursor: default; user-select: none; font-size: 13px;
+}
+.selection-row:hover { background: var(--surface-alt); }
+.selection-row.selected { background: var(--accent-light, #fbe3dd); border-color: var(--accent); }
+.selection-row.hidden-element .selection-name { color: var(--text-muted, #888); font-style: italic; }
+.selection-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-name-input { flex: 1; min-width: 0; padding: 1px 4px; font: inherit; }
+.selection-eye { flex: none; width: 24px; height: 22px; padding: 0; border: none; background: none; cursor: pointer; color: var(--text); }
+.selection-eye svg { width: 18px; height: 18px; }
+.selection-drop-line { position: absolute; left: 0; right: 0; height: 2px; background: var(--accent); pointer-events: none; }
+.selection-drop-line[hidden] { display: none; }
 .comments-head { display: flex; align-items: baseline; gap: 8px; }
 .comments-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .comments-head #comments-count { flex: 1; font-size: 12px; }
@@ -710,7 +735,7 @@ iframe.pdf-print-frame {
 .comment-draft-hint { margin: 0; font-size: 11px; }
 .comment-draft-buttons { display: flex; gap: 6px; }
 @media (max-width: 900px) {
-    #comments-pane { display: none; }
+    #comments-pane, #selection-pane { display: none; }
 }
 
 /* Comment markers over the slide (commentspane.js): same size on screen at every zoom, like the handles. */
@@ -1081,6 +1106,23 @@ iframe.pdf-print-frame {
         <p class="panel-hint" id="comments-empty">No comments on this slide. Select an element (or nothing, for the whole slide) and click New comment.
             Comments are saved with the deck, but never shown when presenting, printing or exporting.</p>
         <div id="comments-list"></div>
+    </aside>
+
+    <!-- The Selection Pane (selectionpane.js, Phase 10): the slide's elements front first; Alt+F10. -->
+    <aside id="selection-pane" aria-label="Selection" hidden>
+        <div class="comments-head">
+            <h2>Selection</h2>
+            <span class="panel-hint selection-head-space"></span>
+            <button type="button" class="banner-close" id="selection-close" title="Close the Selection Pane (Alt+F10)">×</button>
+        </div>
+        <div class="selection-buttons">
+            <button type="button" class="btn" id="selection-show-all">Show All</button>
+            <button type="button" class="btn" id="selection-hide-all">Hide All</button>
+        </div>
+        <p class="panel-hint selection-hint">Front first. Click to select (Ctrl+click: several), the eye hides, double-click renames,
+            drag up or down to bring forward or send back.</p>
+        <p class="panel-hint" id="selection-empty">Nothing on this slide.</p>
+        <div id="selection-list" role="listbox" aria-label="Elements on the slide" aria-multiselectable="true"></div>
     </aside>
 </main>
 
@@ -1490,6 +1532,7 @@ App.start = function start() {
     App.chartData.init();       // the data grid under the slide
     App.notes.init();           // the speaker notes under the slide
     App.commentsPane.init();    // the review comments pane on the right (Phase 9)
+    App.selectionPane.init();   // the Selection Pane on the right (Phase 10)
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
@@ -1813,6 +1856,7 @@ App.createEventBus = function createEventBus() {
                 whileTyping: !!(options && options.whileTyping),
                 blockBrowserDefault: !!(options && options.blockBrowserDefault),
                 clipboardEvent: !!(options && options.clipboardEvent),
+                onSlide: !!(options && options.onSlide),
             });
         }
 
@@ -1837,6 +1881,10 @@ App.createEventBus = function createEventBus() {
                 return false;
             }
             if (entry.clipboardEvent || (App.shortcuts.isTypingTarget(event.target) && !entry.whileTyping)) {
+                return false;
+            }
+            // Keys that act on the slide only when nothing else has the focus (Tab still moves through the ribbon).
+            if (entry.onSlide && !App.shortcuts.isOnSlide(event.target)) {
                 return false;
             }
             // Enter and Space press a focused button or menu item; they are not shortcuts there.
@@ -1867,6 +1915,17 @@ App.createEventBus = function createEventBus() {
         return { register: register, lookup: lookup, handle: handle, list: list };
     };
 
+    /* Is the key pressed on the slide (nothing else focused: the page itself, the slide area or the deck)? */
+    App.shortcuts.isOnSlide = function isOnSlide(target) {
+        if (!target || target === document || target === document.body || target === document.documentElement) {
+            return true;
+        }
+        if (target.ownerDocument && target.ownerDocument !== document) {
+            return true;   // the deck's own document (its iframe)
+        }
+        return !!(target.closest && target.closest('#canvas-area'));
+    };
+
     /*
      * The editor's shortcuts. Browsers reserve some keys (Ctrl+N, Ctrl+T, Ctrl+W)
      * and never pass them to the page, so "New deck" is a menu item only.
@@ -1883,6 +1942,11 @@ App.createEventBus = function createEventBus() {
         ['Home', 'firstSlide'],
         ['End', 'lastSlide'],
         ['Escape', 'deselect'],
+        // Tab / Shift+Tab step through the slide's elements, as in PowerPoint (Phase 10).
+        ['Tab', 'selectNextElement', { onSlide: true }],
+        ['Shift+Tab', 'selectPreviousElement', { onSlide: true }],
+        // The Selection Pane, as in PowerPoint (Phase 10).
+        ['Alt+F10', 'selectionPane', { blockBrowserDefault: true }],
         ['Enter', 'editText'],
         ['F2', 'editText'],
         ['ArrowLeft', 'nudgeLeft'],
@@ -3764,6 +3828,8 @@ App.template.newDeckHtml = function newDeckHtml() {
         // Autofit "shrink": the lines are drawn at the scale the editor measured (fitText). zoom,
         // unlike a transform, lets the smaller text wrap again over the full width of the box.
         rules.push('.el[data-autofit="shrink"] > p { zoom: var(--autofit-scale, 1); }');
+        // An element hidden in the Selection Pane (Phase 10): nowhere to be seen, in the editor or out of it.
+        rules.push('.el[data-hidden="true"] { display: none !important; }');
         return rules.join('\n') + '\n';
     };
 
@@ -12081,6 +12147,10 @@ App.template.newDeckHtml = function newDeckHtml() {
         cellMargins: '<rect x="2.5" y="2.5" width="15" height="15"/><rect x="6" y="6" width="8" height="8" stroke-dasharray="1.5 1.5"/>',
         lineSpacing: '<path d="M9 4.5h8.5M9 8.5h8.5M9 12.5h8.5M9 16.5h8.5"/><path d="M2.5 6L4.5 3.5 6.5 6M2.5 14l2 2.5 2-2.5M4.5 3.5v13"/>',
         // Change Case: "Aa"; Align Text: lines in the middle of a box (Phase 10).
+        // Selection Pane (Phase 10): stacked shapes; an eye open / crossed out.
+        selectionPane: '<rect x="2.5" y="3.5" width="9" height="7"/><rect x="8.5" y="9.5" width="9" height="7"/>',
+        eyeOpen: '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.2"/>',
+        eyeClosed: '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><path d="M3.5 16.5l13-13"/>',
         eyedropper: '<path d="M13.5 3.5l3 3-2 2-3-3z"/><path d="M12.5 7.5l-7 7-1 3 3-1 7-7"/>',
         changeCase: '<path d="M2.5 15.5l4-11 4 11M4 11.5h5"/><path d="M16.5 10v5.5M16.5 12.25a2.75 2.75 0 1 0 0 1.5"/>',
         alignTextMiddle: '<rect x="3.5" y="3.5" width="13" height="13"/><path d="M6.5 8.5h7M6.5 11.5h7"/>',
@@ -13251,7 +13321,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* The targets on `slide` for a drag of `moving` (the elements being dragged do not attract themselves). */
     App.snap.targetsFor = function targetsFor(slide, moving) {
-        const others = App.transform.topLevelElements(slide).filter((element) => moving.indexOf(element) === -1);
+        const others = App.elements.pickableElements(slide).filter((element) => moving.indexOf(element) === -1);   // not hidden ones
         // A turned element is lined up by the upright box round what shows.
         const shown = others.map((element) => App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element)));
         return App.snap.targetsOf(shown, { width: 1280, height: 720 });
@@ -15095,7 +15165,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     App.selection.selectAll = function selectAll() {
         const slide = App.deck.getCurrentSlide();
         if (slide) {
-            App.selection.selectMany(App.transform.topLevelElements(slide));
+            App.selection.selectMany(App.elements.pickableElements(slide));   // hidden ones are left out
         }
     };
 
@@ -15182,7 +15252,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (!slide) {
             return null;
         }
-        const elements = App.transform.topLevelElements(slide);
+        const elements = App.elements.pickableElements(slide);   // a hidden element is never clicked
         const items = elements.map((element, index) => ({
             id: index, rect: App.transform.readRect(element), z: App.transform.zIndexOf(element),
             angle: App.transform.rotationOf(element),   // a turned element is hit where it shows
@@ -15349,7 +15419,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             }
             const rect = App.transform.bandRect(start, point);
             App.transform.writeRect(band, rect);
-            const caught = App.transform.topLevelElements(slide)
+            const caught = App.elements.pickableElements(slide)
                 .filter((element) => App.transform.containsRect(rect,
                     App.transform.visualRect(App.transform.readRect(element), App.transform.rotationOf(element))))
                 .map((element) => element.getAttribute('data-id'))
@@ -16437,6 +16507,84 @@ App.template.newDeckHtml = function newDeckHtml() {
             return;
         }
         App.history.change('Rotate', currentSlideScope(), () => App.transform.setRotation(element, degrees));
+    };
+
+    // ---------------------------------------------------------------
+    // Names, hidden elements, stacking (Phase 10: the Selection Pane)
+    // ---------------------------------------------------------------
+    //
+    // A name is the element's data-name (saved; PowerPoint's own names are
+    // free text too); without one the pane says what it is, as the comments
+    // do ("Text: Receita…", "Picture"). A hidden element has
+    // data-hidden="true": the deck's text stylesheet hides it everywhere (the
+    // editor, the show, print, pictures), PowerPoint export leaves it out, and
+    // a click or Ctrl+A on the slide never picks it; it keeps its place in the
+    // stacking order.
+
+    const NAME_LENGTH = 60;
+
+    App.elements.nameOf = function nameOf(element) {
+        const own = (element.getAttribute('data-name') || '').trim();
+        return own || App.comments.targetLabel(element.closest('section.slide'), element.getAttribute('data-id'));
+    };
+
+    App.elements.setName = function setName(element, name) {
+        const clean = String(name || '').replace(/\s+/g, ' ').trim().slice(0, NAME_LENGTH);
+        if (clean) {
+            element.setAttribute('data-name', clean);
+        } else {
+            element.removeAttribute('data-name');
+        }
+    };
+
+    App.elements.isHidden = function isHidden(element) {
+        return !!element && element.getAttribute('data-hidden') === 'true';
+    };
+
+    App.elements.setHidden = function setHidden(element, hidden) {
+        if (hidden) {
+            element.setAttribute('data-hidden', 'true');
+        } else {
+            element.removeAttribute('data-hidden');
+        }
+    };
+
+    /* What a click, a rubber band, Ctrl+A or Tab can pick on `slide`: its elements back to front, hidden ones left out. */
+    App.elements.pickableElements = function pickableElements(slide) {
+        return App.transform.topLevelElements(slide).filter((element) => !App.elements.isHidden(element));
+    };
+
+    /* `ids` (front first) with `id` moved to position `index` (pure: the pane's drag). */
+    App.elements.moveInOrder = function moveInOrder(ids, id, index) {
+        if (ids.indexOf(id) === -1) {
+            return ids.slice();
+        }
+        const rest = ids.filter((one) => one !== id);
+        rest.splice(Math.max(0, Math.min(index, rest.length)), 0, id);
+        return rest;
+    };
+
+    /* Stack `slide`'s elements as `ids` says (front first): z-index 1, 2, 3 … from the back, as arrange does. */
+    App.elements.restackSlide = function restackSlide(slide, ids) {
+        const count = ids.length;
+        ids.forEach((id, index) => {
+            const element = slide.querySelector(':scope > .el[data-id="' + CSS.escape(id) + '"]');
+            if (element) {
+                element.style.zIndex = String(count - index);
+            }
+        });
+    };
+
+    /* Tab / Shift+Tab (dir 1 / -1): the id after `current` in `order` (back to front), going round; null if empty. */
+    App.elements.stepId = function stepId(order, current, dir) {
+        if (!order.length) {
+            return null;
+        }
+        const at = order.indexOf(current);
+        if (at === -1) {
+            return dir > 0 ? order[0] : order[order.length - 1];
+        }
+        return order[(at + dir + order.length) % order.length];
     };
 
     // ---------------------------------------------------------------
@@ -19458,6 +19606,17 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('commentsPane', {
             label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
+        });
+        // The Selection Pane and Tab through the slide (Phase 10).
+        App.commands.define('selectionPane', {
+            label: 'Selection Pane', run: () => App.selectionPane.toggle(), isEnabled: hasDeck,
+            isChecked: () => App.selectionPane.isOpen(),
+        });
+        App.commands.define('selectNextElement', {
+            label: 'Select the next object', isEnabled: () => hasDeck() && !App.text.isEditing(), run: () => App.selectionPane.step(1),
+        });
+        App.commands.define('selectPreviousElement', {
+            label: 'Select the previous object', isEnabled: () => hasDeck() && !App.text.isEditing(), run: () => App.selectionPane.step(-1),
         });
         App.commands.define('shortcuts', { label: 'Keyboard Shortcuts', run: () => App.help.openShortcuts() });
         App.commands.define('about', { label: 'About / Licenses', run: () => App.help.openAbout() });
@@ -24198,6 +24357,299 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/selectionpane.js ----
+/*
+ * selectionpane.js - the Selection Pane (Phase 10, PowerPoint's Alt+F10).
+ *
+ * A pane on the right listing the slide's elements, front first (the top of
+ * the list is the element in front). A row:
+ *   - click: selects that element (Ctrl+click or Shift+click adds it or takes
+ *     it out), also one hidden behind others or hidden altogether;
+ *   - the eye: hides or shows it (data-hidden="true": saved, and left out of
+ *     the show, print, pictures and PowerPoint; elements.js);
+ *   - double-click on the name: rename it (data-name; Enter keeps, Esc drops);
+ *   - drag up or down: moves it in front of / behind the others.
+ * Show All / Hide All act on the whole slide. Every change is one undo step.
+ *
+ * Tab / Shift+Tab on the slide (shortcuts.js, onSlide) select the next /
+ * previous element back to front, going round, hidden ones left out (step).
+ *
+ * Talks to: elements.js (names, hidden, moveInOrder, restackSlide, stepId),
+ * selection.js, history.js, transform.js (topLevelElements), events.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.selectionPane = {};
+
+    const el = (tag, attrs, children) => App.util.el(tag, attrs, children);
+    const DRAG_START = 4;   // px the pointer moves before a press on a row becomes a drag
+
+    let nodes = null;
+    let renaming = null;    // the id of the element whose name is being typed
+    let drag = null;        // { id, startY, active, index, line }
+
+    App.selectionPane.isOpen = function isOpen() {
+        return !!nodes && !nodes.pane.hidden;
+    };
+
+    App.selectionPane.open = function open() {
+        nodes.pane.hidden = false;
+        render();
+        App.events.emit('selection-pane-changed', { open: true });
+    };
+
+    App.selectionPane.close = function close() {
+        renaming = null;
+        nodes.pane.hidden = true;
+        App.events.emit('selection-pane-changed', { open: false });
+    };
+
+    App.selectionPane.toggle = function toggle() {
+        if (App.selectionPane.isOpen()) {
+            App.selectionPane.close();
+        } else {
+            App.selectionPane.open();
+        }
+    };
+
+    function slideScope(slide) {
+        return { slideId: slide.getAttribute('data-slide-id') };
+    }
+
+    function byId(slide, id) {
+        return slide.querySelector(':scope > .el[data-id="' + CSS.escape(id) + '"]');
+    }
+
+    /* Tab (1) / Shift+Tab (-1) on the slide: the next element back to front, going round; hidden ones left out. */
+    App.selectionPane.step = function step(dir) {
+        const slide = App.deck.getCurrentSlide();
+        if (!slide) {
+            return;
+        }
+        const order = App.elements.pickableElements(slide).map((element) => element.getAttribute('data-id'));
+        const ids = App.selection.selectedIds();
+        const id = App.elements.stepId(order, ids.length === 1 ? ids[0] : null, dir);
+        if (id) {
+            App.selection.select(byId(slide, id));
+        }
+    };
+
+    function setHidden(slide, elements, hidden) {
+        const changing = elements.filter((element) => App.elements.isHidden(element) !== hidden);
+        if (!changing.length) {
+            return;
+        }
+        App.history.change(hidden ? 'Hide' : 'Show', slideScope(slide), () => {
+            changing.forEach((element) => App.elements.setHidden(element, hidden));
+        });
+    }
+
+    function rename(slide, id, name) {
+        renaming = null;
+        const element = byId(slide, id);
+        const before = element ? element.getAttribute('data-name') || '' : '';
+        const clean = String(name || '').replace(/\s+/g, ' ').trim();
+        if (element && clean !== before) {
+            App.history.change('Rename', slideScope(slide), () => App.elements.setName(element, clean));
+        } else {
+            render();
+        }
+    }
+
+    /* A click on a row: that element alone, or (Ctrl / Shift) added to or taken out of the selection. */
+    function choose(slide, id, add) {
+        const element = byId(slide, id);
+        if (!element) {
+            return;
+        }
+        if (!add) {
+            App.selection.select(element);
+            return;
+        }
+        const chosen = App.selection.getElements();
+        const next = chosen.indexOf(element) === -1 ? chosen.concat([element]) : chosen.filter((one) => one !== element);
+        App.selection.selectMany(next);
+    }
+
+    function nameField(slide, id, name) {
+        const input = el('input', { type: 'text', class: 'selection-name-input', value: name, maxlength: '60',
+            'aria-label': 'Name of the element', autocomplete: 'off', spellcheck: 'false' });
+        let done = false;
+        input.addEventListener('keydown', (event) => {
+            event.stopPropagation();   // Delete, arrows and Tab type here, not on the slide
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                done = true;
+                rename(slide, id, input.value);
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                done = true;
+                renaming = null;
+                render();
+            }
+        });
+        input.addEventListener('blur', () => {
+            if (!done) {
+                done = true;
+                rename(slide, id, input.value);
+            }
+        });
+        return input;
+    }
+
+    function row(slide, element, selectedIds) {
+        const id = element.getAttribute('data-id');
+        const hidden = App.elements.isHidden(element);
+        const name = App.elements.nameOf(element);
+        const eye = el('button', {
+            type: 'button', class: 'selection-eye', 'aria-pressed': String(!hidden),
+            title: hidden ? 'Hidden: click to show it' : 'Click to hide it (left out of the show, print and exports)',
+            'aria-label': (hidden ? 'Show ' : 'Hide ') + name,
+            onclick: (event) => {
+                event.stopPropagation();
+                setHidden(slide, [element], !hidden);
+            },
+        });
+        eye.innerHTML = App.icons.get(hidden ? 'eyeClosed' : 'eyeOpen');
+        const label = renaming === id ? nameField(slide, id, element.getAttribute('data-name') || name)
+            : el('span', { class: 'selection-name', title: name + ' (double-click to rename)' }, [name]);
+        const item = el('div', {
+            class: 'selection-row' + (selectedIds.indexOf(id) !== -1 ? ' selected' : '') + (hidden ? ' hidden-element' : ''),
+            'data-id': id, role: 'option', 'aria-selected': String(selectedIds.indexOf(id) !== -1),
+        }, [eye, label]);
+        item.addEventListener('pointerdown', (event) => onRowPointerDown(event, slide, id));
+        item.addEventListener('click', (event) => {
+            if (event.target.closest('.selection-eye, input') || (drag && drag.moved)) {
+                return;
+            }
+            choose(slide, id, event.ctrlKey || event.metaKey || event.shiftKey);
+        });
+        item.addEventListener('dblclick', (event) => {
+            if (event.target.closest('.selection-eye')) {
+                return;
+            }
+            renaming = id;
+            render();
+            const input = nodes.list.querySelector('.selection-name-input');
+            if (input) {
+                input.focus();
+                input.select();
+            }
+        });
+        return item;
+    }
+
+    // ---- Dragging a row up or down: the element moves in the stack ----
+
+    function rows() {
+        return Array.from(nodes.list.querySelectorAll('.selection-row'));
+    }
+
+    /* Where a row dropped at clientY lands: its index in the list (front first) once taken out. */
+    function dropIndex(clientY, id) {
+        const others = rows().filter((item) => item.getAttribute('data-id') !== id);
+        const index = others.findIndex((item) => {
+            const box = item.getBoundingClientRect();
+            return clientY < box.top + box.height / 2;
+        });
+        return index === -1 ? others.length : index;
+    }
+
+    function onRowPointerDown(event, slide, id) {
+        if (event.button !== 0 || event.target.closest('.selection-eye, input')) {
+            return;
+        }
+        drag = { id: id, startY: event.clientY, active: false, moved: false, index: null, slide: slide };
+        window.addEventListener('pointermove', onDragMove);
+        window.addEventListener('pointerup', onDragEnd, { once: true });
+    }
+
+    function onDragMove(event) {
+        if (!drag) {
+            return;
+        }
+        if (!drag.active && Math.abs(event.clientY - drag.startY) < DRAG_START) {
+            return;
+        }
+        drag.active = true;
+        drag.index = dropIndex(event.clientY, drag.id);
+        const others = rows().filter((item) => item.getAttribute('data-id') !== drag.id);
+        const listBox = nodes.list.getBoundingClientRect();
+        const y = others.length === 0 ? 0 : drag.index < others.length
+            ? others[drag.index].getBoundingClientRect().top - listBox.top
+            : others[others.length - 1].getBoundingClientRect().bottom - listBox.top;
+        nodes.dropLine.hidden = false;
+        nodes.dropLine.style.top = (y + nodes.list.scrollTop - 1) + 'px';
+    }
+
+    function onDragEnd() {
+        window.removeEventListener('pointermove', onDragMove);
+        nodes.dropLine.hidden = true;
+        const ended = drag;
+        if (ended && ended.active) {
+            ended.moved = true;
+            const slide = ended.slide;
+            const ids = App.transform.topLevelElements(slide).reverse().map((element) => element.getAttribute('data-id'));
+            const next = App.elements.moveInOrder(ids, ended.id, ended.index);
+            if (next.join(' ') !== ids.join(' ')) {
+                App.history.change('Reorder', slideScope(slide), () => App.elements.restackSlide(slide, next));
+            }
+        }
+        setTimeout(() => {   // the click that ends a drag does not also select
+            drag = null;
+        }, 0);
+    }
+
+    function render() {
+        if (!App.selectionPane.isOpen()) {
+            return;
+        }
+        const slide = App.deck.getCurrentSlide();
+        const elements = slide ? App.transform.topLevelElements(slide).reverse() : [];   // front first
+        const selectedIds = App.selection.selectedIds();
+        nodes.list.replaceChildren(...elements.map((element) => row(slide, element, selectedIds)), nodes.dropLine);
+        nodes.empty.hidden = elements.length > 0;
+        nodes.showAll.disabled = !elements.some(App.elements.isHidden);
+        nodes.hideAll.disabled = !elements.some((element) => !App.elements.isHidden(element));
+    }
+
+    App.selectionPane.render = render;
+
+    App.selectionPane.init = function init() {
+        nodes = {
+            pane: document.getElementById('selection-pane'),
+            list: document.getElementById('selection-list'),
+            empty: document.getElementById('selection-empty'),
+            showAll: document.getElementById('selection-show-all'),
+            hideAll: document.getElementById('selection-hide-all'),
+            dropLine: el('div', { class: 'selection-drop-line', hidden: true }),
+        };
+        document.getElementById('selection-close').addEventListener('click', () => App.selectionPane.close());
+        nodes.showAll.addEventListener('click', () => {
+            const slide = App.deck.getCurrentSlide();
+            if (slide) {
+                setHidden(slide, App.transform.topLevelElements(slide), false);
+            }
+        });
+        nodes.hideAll.addEventListener('click', () => {
+            const slide = App.deck.getCurrentSlide();
+            if (slide) {
+                setHidden(slide, App.transform.topLevelElements(slide), true);
+            }
+        });
+        ['deck-loaded', 'slide-changed', 'history-changed', 'selection-changed'].forEach((name) => App.events.on(name, () => {
+            if (name !== 'selection-changed') {
+                renaming = null;
+            }
+            render();
+        }));
+    };
+})();
+
+</script>
+<script>
 // ---- js/help.js ----
 /*
  * help.js - the Help tab: the keyboard shortcut cheat sheet (press ?) and the
@@ -24237,6 +24689,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 undo: 'Undo', redo: 'Redo', cut: 'Cut', copy: 'Copy', paste: 'Paste', duplicate: 'Duplicate',
                 delete: 'Delete the selection', selectAll: 'Select everything on the slide', deselect: 'Deselect / leave the text',
                 find: 'Find', replace: 'Replace', contextMenu: 'Menu of the selection',
+                selectNextElement: 'Select the next object', selectPreviousElement: 'Select the previous object',
             },
         },
         {
@@ -24266,7 +24719,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             },
         },
         { title: 'Review', commands: { newComment: 'New comment' } },
-        { title: 'View', commands: { toggleGridlines: 'Gridlines on / off' } },
+        { title: 'View', commands: { toggleGridlines: 'Gridlines on / off', selectionPane: 'Selection Pane' } },
         { title: 'Mouse', commands: {} },
         { title: 'Help', commands: { shortcuts: 'This list of shortcuts' } },
     ];
@@ -26607,7 +27060,7 @@ App.template.newDeckHtml = function newDeckHtml() {
     // An element's (or the slide's) own parts in stacking order (z-index, then their order).
     function partsOf(parent, view) {
         const parts = Array.from(parent.children).filter((child) =>
-            !child.hasAttribute('data-editor-only') &&
+            !child.hasAttribute('data-editor-only') && !App.elements.isHidden(child) &&   // hidden: left out (reported)
             (child.classList.contains('el') || child.classList.contains('master-layer')));
         return parts
             .map((part, order) => ({ part: part, order: order, z: parseInt(view.getComputedStyle(part).zIndex, 10) || 0 }))
@@ -27100,6 +27553,9 @@ App.template.newDeckHtml = function newDeckHtml() {
             extra: [] };
         const items = [];
         partsOf(slide, view).forEach((part) => readPart(part, null, ctx, items));
+        slide.querySelectorAll('.el[data-hidden="true"]').forEach(() => {
+            ctx.report.push('an element hidden in the Selection Pane was left out');
+        });
         return {
             hidden: App.slides.isHidden(slide),
             notes: App.notes.textOf(slide),
@@ -27463,6 +27919,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 { label: 'Rotate', rows: [[{ command: 'rotateRight90', icon: 'rotateRight90' }, { command: 'flipHorizontal', icon: 'flipHorizontal' }],
                     [{ command: 'rotateLeft90', icon: 'rotateLeft90' }, { command: 'flipVertical', icon: 'flipVertical' }]] },
                 { label: 'Lock', commands: [['lock', 'lock']] },
+                { label: 'Selection', commands: [['selectionPane', 'selectionPane']] },
             ],
             note: 'Align: one object lines up on the slide, several on each other (or on the slide with Align to slide). ' +
                 'Distribute: equal gaps between three or more. Group: one element of several; double-click text in it to type. ' +
@@ -27687,7 +28144,7 @@ App.template.newDeckHtml = function newDeckHtml() {
 
         ['deck-loaded', 'history-changed', 'saved', 'selection-changed', 'slide-changed', 'clipboard-changed',
          'recent-changed', 'text-edit-changed', 'text-selection-changed', 'painter-changed', 'table-cells-changed', 'crop-changed',
-         'chart-data-changed', 'comments-pane-changed', 'settings-changed']
+         'chart-data-changed', 'comments-pane-changed', 'settings-changed', 'selection-pane-changed']
             .forEach((name) => App.events.on(name, App.ribbon.refresh));
     };
 

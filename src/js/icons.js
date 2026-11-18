@@ -129,6 +129,10 @@
         cellMargins: '<rect x="2.5" y="2.5" width="15" height="15"/><rect x="6" y="6" width="8" height="8" stroke-dasharray="1.5 1.5"/>',
         lineSpacing: '<path d="M9 4.5h8.5M9 8.5h8.5M9 12.5h8.5M9 16.5h8.5"/><path d="M2.5 6L4.5 3.5 6.5 6M2.5 14l2 2.5 2-2.5M4.5 3.5v13"/>',
         // Change Case: "Aa"; Align Text: lines in the middle of a box (Phase 10).
+        // Selection Pane (Phase 10): stacked shapes; an eye open / crossed out.
+        selectionPane: '<rect x="2.5" y="3.5" width="9" height="7"/><rect x="8.5" y="9.5" width="9" height="7"/>',
+        eyeOpen: '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.2"/>',
+        eyeClosed: '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><path d="M3.5 16.5l13-13"/>',
         eyedropper: '<path d="M13.5 3.5l3 3-2 2-3-3z"/><path d="M12.5 7.5l-7 7-1 3 3-1 7-7"/>',
         changeCase: '<path d="M2.5 15.5l4-11 4 11M4 11.5h5"/><path d="M16.5 10v5.5M16.5 12.25a2.75 2.75 0 1 0 0 1.5"/>',
         alignTextMiddle: '<rect x="3.5" y="3.5" width="13" height="13"/><path d="M6.5 8.5h7M6.5 11.5h7"/>',

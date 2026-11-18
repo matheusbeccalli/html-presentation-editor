@@ -574,6 +574,84 @@
     };
 
     // ---------------------------------------------------------------
+    // Names, hidden elements, stacking (Phase 10: the Selection Pane)
+    // ---------------------------------------------------------------
+    //
+    // A name is the element's data-name (saved; PowerPoint's own names are
+    // free text too); without one the pane says what it is, as the comments
+    // do ("Text: Receita…", "Picture"). A hidden element has
+    // data-hidden="true": the deck's text stylesheet hides it everywhere (the
+    // editor, the show, print, pictures), PowerPoint export leaves it out, and
+    // a click or Ctrl+A on the slide never picks it; it keeps its place in the
+    // stacking order.
+
+    const NAME_LENGTH = 60;
+
+    App.elements.nameOf = function nameOf(element) {
+        const own = (element.getAttribute('data-name') || '').trim();
+        return own || App.comments.targetLabel(element.closest('section.slide'), element.getAttribute('data-id'));
+    };
+
+    App.elements.setName = function setName(element, name) {
+        const clean = String(name || '').replace(/\s+/g, ' ').trim().slice(0, NAME_LENGTH);
+        if (clean) {
+            element.setAttribute('data-name', clean);
+        } else {
+            element.removeAttribute('data-name');
+        }
+    };
+
+    App.elements.isHidden = function isHidden(element) {
+        return !!element && element.getAttribute('data-hidden') === 'true';
+    };
+
+    App.elements.setHidden = function setHidden(element, hidden) {
+        if (hidden) {
+            element.setAttribute('data-hidden', 'true');
+        } else {
+            element.removeAttribute('data-hidden');
+        }
+    };
+
+    /* What a click, a rubber band, Ctrl+A or Tab can pick on `slide`: its elements back to front, hidden ones left out. */
+    App.elements.pickableElements = function pickableElements(slide) {
+        return App.transform.topLevelElements(slide).filter((element) => !App.elements.isHidden(element));
+    };
+
+    /* `ids` (front first) with `id` moved to position `index` (pure: the pane's drag). */
+    App.elements.moveInOrder = function moveInOrder(ids, id, index) {
+        if (ids.indexOf(id) === -1) {
+            return ids.slice();
+        }
+        const rest = ids.filter((one) => one !== id);
+        rest.splice(Math.max(0, Math.min(index, rest.length)), 0, id);
+        return rest;
+    };
+
+    /* Stack `slide`'s elements as `ids` says (front first): z-index 1, 2, 3 … from the back, as arrange does. */
+    App.elements.restackSlide = function restackSlide(slide, ids) {
+        const count = ids.length;
+        ids.forEach((id, index) => {
+            const element = slide.querySelector(':scope > .el[data-id="' + CSS.escape(id) + '"]');
+            if (element) {
+                element.style.zIndex = String(count - index);
+            }
+        });
+    };
+
+    /* Tab / Shift+Tab (dir 1 / -1): the id after `current` in `order` (back to front), going round; null if empty. */
+    App.elements.stepId = function stepId(order, current, dir) {
+        if (!order.length) {
+            return null;
+        }
+        const at = order.indexOf(current);
+        if (at === -1) {
+            return dir > 0 ? order[0] : order[order.length - 1];
+        }
+        return order[(at + dir + order.length) % order.length];
+    };
+
+    // ---------------------------------------------------------------
     // Flip (Phase 10)
     // ---------------------------------------------------------------
 

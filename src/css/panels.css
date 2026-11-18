@@ -310,6 +310,31 @@
     display: flex; flex-direction: column; gap: 8px;
 }
 #comments-pane[hidden] { display: none; }
+/* The Selection Pane (selectionpane.js, Phase 10): beside the Comments pane, same look. */
+#selection-pane {
+    flex: none; width: 240px; padding: 12px 14px; overflow-y: auto;
+    background: var(--surface); border-left: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 8px;
+}
+#selection-pane[hidden] { display: none; }
+.selection-head-space { flex: 1; }
+.selection-buttons { display: flex; gap: 6px; }
+.selection-buttons .btn { min-width: 0; padding: 4px 10px; }
+.selection-hint, #selection-empty { margin: 0; font-size: 11px; line-height: 1.4; }
+#selection-list { position: relative; display: flex; flex-direction: column; gap: 2px; }
+.selection-row {
+    display: flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid transparent; border-radius: 3px;
+    cursor: default; user-select: none; font-size: 13px;
+}
+.selection-row:hover { background: var(--surface-alt); }
+.selection-row.selected { background: var(--accent-light, #fbe3dd); border-color: var(--accent); }
+.selection-row.hidden-element .selection-name { color: var(--text-muted, #888); font-style: italic; }
+.selection-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-name-input { flex: 1; min-width: 0; padding: 1px 4px; font: inherit; }
+.selection-eye { flex: none; width: 24px; height: 22px; padding: 0; border: none; background: none; cursor: pointer; color: var(--text); }
+.selection-eye svg { width: 18px; height: 18px; }
+.selection-drop-line { position: absolute; left: 0; right: 0; height: 2px; background: var(--accent); pointer-events: none; }
+.selection-drop-line[hidden] { display: none; }
 .comments-head { display: flex; align-items: baseline; gap: 8px; }
 .comments-head h2 { margin: 0; font-size: 14px; font-weight: 600; }
 .comments-head #comments-count { flex: 1; font-size: 12px; }
@@ -343,7 +368,7 @@
 .comment-draft-hint { margin: 0; font-size: 11px; }
 .comment-draft-buttons { display: flex; gap: 6px; }
 @media (max-width: 900px) {
-    #comments-pane { display: none; }
+    #comments-pane, #selection-pane { display: none; }
 }
 
 /* Comment markers over the slide (commentspane.js): same size on screen at every zoom, like the handles. */

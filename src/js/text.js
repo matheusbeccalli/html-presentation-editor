@@ -2458,6 +2458,282 @@
         };
     };
 
+    // ---------------------------------------------------------------
+    // Change Case (Phase 10): the letters themselves change, as in PowerPoint
+    // ---------------------------------------------------------------
+    //
+    // One character becomes one character, so every piece of formatting keeps
+    // its place: the text nodes are rewritten where they are (a letter that
+    // would become two, like ß in upper case, stays as it is). Words and
+    // sentences are found in the whole line, so a range that starts mid-line
+    // still knows whether its first letter starts a word.
+
+    const CASE_LOCALE = 'pt-BR';
+    const isLetter = (ch) => !!ch && ch.toLocaleLowerCase(CASE_LOCALE) !== ch.toLocaleUpperCase(CASE_LOCALE);
+    const isWordChar = (ch) => isLetter(ch) || /[0-9'’]/.test(ch || '');
+
+    function oneChar(ch, upper) {
+        const changed = upper ? ch.toLocaleUpperCase(CASE_LOCALE) : ch.toLocaleLowerCase(CASE_LOCALE);
+        return changed.length === 1 ? changed : ch;
+    }
+
+    /* Does a sentence start at `index` of `text`? At the start, or after . ! ? (and spaces). */
+    function startsSentence(text, index) {
+        let i = index - 1;
+        while (i >= 0 && /\s/.test(text[i]) && text[i] !== '\n') {
+            i--;
+        }
+        return i < 0 || text[i] === '\n' || /[.!?]/.test(text[i]);
+    }
+
+    /*
+     * `text` with characters [start, end) in another case: 'upper', 'lower',
+     * 'title' (Capitalize Each Word: first letter up, the rest down), 'sentence'
+     * (Sentence case.) or 'toggle' (tOGGLE cASE). Same length as `text`.
+     */
+    App.text.changeCase = function changeCase(text, start, end, kind) {
+        const chars = Array.from(text);   // whole characters (é is one), as the text nodes count them in UTF-16 below
+        if (chars.length !== text.length) {
+            return text;   // emoji / surrogate pairs: left as they are rather than shifting offsets
+        }
+        let sentenceOpen = startsSentence(text, start);
+        for (let i = start; i < Math.min(end, chars.length); i++) {
+            const ch = chars[i];
+            if (kind === 'upper') {
+                chars[i] = oneChar(ch, true);
+            } else if (kind === 'lower') {
+                chars[i] = oneChar(ch, false);
+            } else if (kind === 'toggle') {
+                chars[i] = oneChar(ch, ch === ch.toLocaleLowerCase(CASE_LOCALE));
+            } else if (kind === 'title') {
+                chars[i] = oneChar(ch, !isWordChar(text[i - 1]));
+            } else if (kind === 'sentence') {
+                if (/[.!?\n]/.test(ch)) {
+                    sentenceOpen = true;
+                    chars[i] = ch;
+                } else if (isLetter(ch)) {
+                    chars[i] = oneChar(ch, sentenceOpen && startsSentence(text, i));
+                    sentenceOpen = false;
+                }
+            }
+        }
+        return chars.join('');
+    };
+
+    /* Shift+F3, as in Office: lowercase -> UPPERCASE -> Capitalize Each Word -> lowercase. */
+    App.text.nextCase = function nextCase(text) {
+        if (text === text.toLocaleLowerCase(CASE_LOCALE)) {
+            return 'upper';
+        }
+        return text === text.toLocaleUpperCase(CASE_LOCALE) ? 'title' : 'lower';
+    };
+
+    const CASE_KINDS = ['sentence', 'lower', 'upper', 'title', 'toggle', 'cycle'];
+
+    /* A line's text as the cursor counts it: a line break is one character. */
+    function caretText(line) {
+        return inlineItems(line).map((item) => (item.nodeType === Node.TEXT_NODE ? item.data : '\n')).join('');
+    }
+
+    /*
+     * The action for Change Case (kind: one of CASE_KINDS; 'cycle' is Shift+F3)
+     * on the selection, the word at the cursor, or every line of the box (caret
+     * null); null when nothing would change.
+     */
+    App.text.caseAction = function caseAction(element, kind, caret) {
+        const segments = CASE_KINDS.indexOf(kind) !== -1 ? formatSegments(element, caret) : null;
+        if (!segments) {
+            return null;
+        }
+        const lines = textLines(element);
+        const texts = segments.map((segment) => caretText(lines[segment.index]));
+        const chosen = kind === 'cycle'
+            ? App.text.nextCase(segments.map((segment, i) => texts[i].slice(segment.start, segment.end)).join(''))
+            : kind;
+        const changed = segments.map((segment, i) => App.text.changeCase(texts[i], segment.start, segment.end, chosen));
+        if (changed.every((text, i) => text === texts[i])) {
+            return null;
+        }
+        return {
+            label: 'Change case',
+            run: () => {
+                segments.forEach((segment, i) => {
+                    let at = 0;
+                    inlineItems(lines[segment.index]).forEach((item) => {
+                        if (item.nodeType !== Node.TEXT_NODE) {
+                            at += 1;
+                            return;
+                        }
+                        const next = changed[i].slice(at, at + item.data.length);
+                        if (next !== item.data) {
+                            item.data = next;
+                        }
+                        at += item.data.length;
+                    });
+                });
+                return caret;
+            },
+        };
+    };
+
+    /* Home > Font > Change Case (Aa) and Shift+F3, on the text being edited or the selected box. */
+    App.text.applyCase = function applyCase(kind) {
+        const target = listTarget();
+        const action = target && App.text.caseAction(target.element, kind, target.caret);
+        if (!action) {
+            return;
+        }
+        pending = null;
+        if (editing) {
+            runInEditor(action);
+        } else {
+            runOnBox(target.element, action);
+        }
+    };
+
+    // ---------------------------------------------------------------
+    // Text layout (Phase 10): Align Text top / middle / bottom, inner margins
+    // ---------------------------------------------------------------
+    //
+    // A text box is aligned to the middle or bottom by its own inline flex
+    // column (display: flex; flex-direction: column; justify-content: center |
+    // flex-end), the form the importer writes for a centred title
+    // (keepVerticalAlignment); top is the plain box, with none of it. A shape's
+    // text area is always such a column (shapes.TEXT_STYLE, middle when new).
+    // Inner margins are the padding of the box, or of the shape's text area.
+
+    const ANCHORS = { top: 'flex-start', middle: 'center', bottom: 'flex-end' };
+
+    /*
+     * Where the text of a text box or shape sits: its own box, or the shape's
+     * text area; null for neither. A shape with no text area yet: made when
+     * `create`, else a stand-in with the new area's style, so reading changes nothing.
+     */
+    function layoutBox(element, create) {
+        if (!element) {
+            return null;
+        }
+        const type = element.getAttribute('data-type');
+        if (type === 'text') {
+            return element;
+        }
+        if (type !== 'shape' || !App.shapes.canHoldText(element)) {
+            return null;
+        }
+        const area = App.shapes.textOf(element, { create: !!create });
+        if (area) {
+            return area;
+        }
+        const standIn = element.ownerDocument.createElement('div');
+        standIn.setAttribute('style', App.shapes.TEXT_STYLE);
+        return standIn;
+    }
+
+    /* A text box or a shape that can hold text: Align Text and margins apply. */
+    App.text.canLayout = function canLayout(element) {
+        return layoutBox(element, false) !== null;
+    };
+
+    /* 'top', 'middle' or 'bottom'. */
+    App.text.anchorOf = function anchorOf(element) {
+        const box = layoutBox(element);
+        if (!box || box.style.display !== 'flex' || !/column/.test(box.style.flexDirection)) {
+            return 'top';
+        }
+        const value = box.style.justifyContent;
+        return value === 'center' ? 'middle' : (value === 'flex-end' || value === 'end') ? 'bottom' : 'top';
+    };
+
+    App.text.setAnchor = function setAnchor(element, anchor) {
+        const box = layoutBox(element, true);
+        if (!box || !ANCHORS[anchor]) {
+            return;
+        }
+        const isShapeText = element.getAttribute('data-type') === 'shape';
+        if (anchor === 'top' && !isShapeText) {
+            ['display', 'flex-direction', 'justify-content', 'align-items'].forEach((name) => box.style.removeProperty(name));
+            return;
+        }
+        box.style.setProperty('display', 'flex');
+        box.style.setProperty('flex-direction', 'column');
+        box.style.setProperty('justify-content', ANCHORS[anchor]);
+        if (!isShapeText) {
+            box.style.setProperty('align-items', 'stretch');   // the lines keep the box's full width
+        }
+    };
+
+    /* The inner margins in slide px: { left, right, top, bottom } (the inline padding; 0 where none is set). */
+    App.text.marginsOf = function marginsOf(element) {
+        const box = layoutBox(element);
+        const side = (name) => (box ? parseFloat(box.style.getPropertyValue('padding-' + name)) || 0 : 0);
+        return { left: side('left'), right: side('right'), top: side('top'), bottom: side('bottom') };
+    };
+
+    App.text.setMargins = function setMargins(element, margins) {
+        const box = layoutBox(element, true);
+        if (!box) {
+            return;
+        }
+        ['left', 'right', 'top', 'bottom'].forEach((name) => {
+            if (typeof margins[name] === 'number' && margins[name] >= 0) {
+                box.style.setProperty('padding-' + name, App.util.round2(margins[name]) + 'px');
+            }
+        });
+    };
+
+    /* The text boxes and shapes Align Text and margins act on: the one being typed in, else the selected ones. */
+    function layoutTargets() {
+        if (editing) {
+            const owner = editing.element.matches('.el') ? editing.element : editing.element.closest('.el[data-type="shape"]');
+            return owner && App.text.canLayout(owner) ? [owner] : [];
+        }
+        return App.selection.getElements().filter(App.text.canLayout);
+    }
+
+    App.text.canApplyLayout = function canApplyLayout() {
+        return layoutTargets().length > 0;
+    };
+
+    /* What the ribbon and the Format pane show: the first target's { anchor, margins }, or null. */
+    App.text.layoutState = function layoutState() {
+        const first = layoutTargets()[0];
+        return first ? { anchor: App.text.anchorOf(first), margins: App.text.marginsOf(first) } : null;
+    };
+
+    /* `change(element)` on every target, as one undo step; the text being typed in keeps its cursor. */
+    function applyLayout(label, change) {
+        const targets = layoutTargets();
+        if (!targets.length) {
+            return;
+        }
+        if (editing) {
+            const element = editing.element;
+            runInEditor({ label: label, run: () => {
+                const caret = App.text.getCaret(element);
+                targets.forEach(change);
+                return caret;
+            } });
+            return;
+        }
+        App.history.change(label, { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') }, () => {
+            targets.forEach((target) => {
+                change(target);
+                App.text.fitText(target);   // new margins: an autofit box fits its text again
+            });
+        });
+        App.selection.refresh();
+    }
+
+    /* Home > Paragraph > Align Text: 'top', 'middle' or 'bottom'. */
+    App.text.applyAnchor = function applyAnchor(anchor) {
+        applyLayout('Align text', (element) => App.text.setAnchor(element, anchor));
+    };
+
+    /* The Format pane's inner margins (some or all of { left, right, top, bottom }, slide px). */
+    App.text.applyMargins = function applyMargins(margins) {
+        applyLayout('Text margins', (element) => App.text.setMargins(element, margins));
+    };
+
     /*
      * What the selected text has, for the ribbon: { bold, italic, underline,
      * strikethrough, superscript, subscript } (true when every selected

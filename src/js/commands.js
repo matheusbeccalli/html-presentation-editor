@@ -444,6 +444,23 @@
             run: () => App.elements.rotateBy(90) });
         App.commands.define('rotateLeft90', { label: 'Rotate Left 90°', isEnabled: () => App.elements.canRotate(),
             run: () => App.elements.rotateBy(-90) });
+        // Text layout and Change Case (Phase 10).
+        [['alignTextTop', 'Top', 'top'], ['alignTextMiddle', 'Middle', 'middle'], ['alignTextBottom', 'Bottom', 'bottom']]
+            .forEach(([name, label, anchor]) => {
+                App.commands.define(name, {
+                    label: 'Align text: ' + label, keepsEdit: true, isEnabled: () => App.text.canApplyLayout(),
+                    isChecked: () => { const state = App.text.layoutState(); return !!state && state.anchor === anchor; },
+                    run: () => App.text.applyAnchor(anchor),
+                });
+            });
+        App.commands.define('changeCase', {
+            label: 'Change Case', keepsEdit: true, isEnabled: () => App.text.canStyle(),
+            run: (kind) => App.text.applyCase(kind),
+        });
+        App.commands.define('cycleCase', {
+            label: 'Change case (lower, UPPER, Each Word)', keepsEdit: true, isEnabled: () => App.text.canStyle(),
+            run: () => App.text.applyCase('cycle'),
+        });
         App.commands.define('flipHorizontal', { label: 'Flip Horizontal', isEnabled: () => App.elements.canFlip(),
             run: () => App.elements.flip('x') });
         App.commands.define('flipVertical', { label: 'Flip Vertical', isEnabled: () => App.elements.canFlip(),

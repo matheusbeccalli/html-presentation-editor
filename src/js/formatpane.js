@@ -63,6 +63,9 @@
     let textSection = null;
     let autofitHint = null;
     const edited = new Set();   // fields the user is typing in, not applied yet
+    let layoutSection = null;   // Text layout (Phase 10): vertical alignment and inner margins
+    let anchorSelect = null;
+    let marginInputs = [];
 
     App.formatPane.init = function init() {
         hint = document.getElementById('format-hint');
@@ -75,6 +78,16 @@
         inputs.concat([rotation]).forEach((input) => {
             input.addEventListener('input', () => edited.add(input));
             input.addEventListener('change', () => apply(input));   // fires on Tab / click elsewhere
+            input.addEventListener('keydown', (event) => onFieldKey(event, input));
+        });
+
+        layoutSection = document.getElementById('format-layout');
+        anchorSelect = document.getElementById('format-anchor');
+        marginInputs = Array.from(layoutSection.querySelectorAll('input[data-margin]'));
+        anchorSelect.addEventListener('change', () => App.text.applyAnchor(anchorSelect.value));
+        marginInputs.forEach((input) => {
+            input.addEventListener('input', () => edited.add(input));
+            input.addEventListener('change', () => applyMargin(input));
             input.addEventListener('keydown', (event) => onFieldKey(event, input));
         });
 
@@ -100,6 +113,7 @@
         section.hidden = !element;
         const isText = !!element && element.getAttribute('data-type') === 'text';
         textSection.hidden = !isText;
+        layoutSection.hidden = true;   // refreshLayout shows it for a text box or shape
         if (!element) {
             edited.clear();
             return;
@@ -110,6 +124,7 @@
             const scale = parseFloat(element.style.getPropertyValue('--autofit-scale'));
             autofitHint.textContent = mode === 'shrink' && scale < 1 ? 'Text shrunk to ' + Math.round(scale * 100) + '%' : '';
         }
+        refreshLayout(element);
         typeLabel.textContent = TYPE_LABELS[element.getAttribute('data-type')] || 'Object';
         const rect = App.transform.readRect(element);
         const locked = App.elements.isLocked(element);   // Phase 7: a locked element keeps its size and place
@@ -125,6 +140,37 @@
         }
     };
 
+    /* Text layout: shown for one text box or shape with text; the values of that one. */
+    function refreshLayout(element) {
+        const state = App.selection.count() === 1 && App.text.canLayout(element)
+            ? { anchor: App.text.anchorOf(element), margins: App.text.marginsOf(element) } : null;
+        layoutSection.hidden = !state;
+        if (!state) {
+            return;
+        }
+        const locked = App.elements.isLocked(element);
+        anchorSelect.value = state.anchor;
+        anchorSelect.disabled = locked;
+        marginInputs.forEach((input) => {
+            input.disabled = locked;
+            if (!edited.has(input)) {
+                input.value = String(state.margins[input.getAttribute('data-margin')]);
+            }
+        });
+    }
+
+    /* A typed margin (0-200 px), as one undo step; anything else shows the old value again. */
+    function applyMargin(input) {
+        const value = App.formatPane.parseNumber(input.value);
+        edited.delete(input);
+        const element = App.selection.getElement();
+        const side = input.getAttribute('data-margin');
+        if (element && value !== null && value >= 0 && value <= 200 && value !== App.text.marginsOf(element)[side]) {
+            App.text.applyMargins({ [side]: value });
+        }
+        App.formatPane.refresh();
+    }
+
     function revert(input) {
         edited.delete(input);
         App.formatPane.refresh();
@@ -132,6 +178,10 @@
 
     /* Apply the typed value of one field as one undo step. */
     function apply(input) {
+        if (input.hasAttribute('data-margin')) {
+            applyMargin(input);
+            return;
+        }
         const element = App.selection.getElement();
         const value = App.formatPane.parseNumber(input.value);
         edited.delete(input);

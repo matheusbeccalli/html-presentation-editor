@@ -431,6 +431,46 @@
         return lineSpacingButton;
     }
 
+    // ---- Change Case (Aa ▾) and Align Text (Phase 10) ----
+
+    let caseButton = null;
+    let alignTextButton = null;
+    const CASE_ITEMS = [['sentence', 'Sentence case.'], ['lower', 'lowercase'], ['upper', 'UPPERCASE'],
+        ['title', 'Capitalize Each Word'], ['toggle', 'tOGGLE cASE']];
+    const ANCHOR_ITEMS = [['top', 'Top', 'alignTextTop'], ['middle', 'Middle', 'alignTextMiddle'], ['bottom', 'Bottom', 'alignTextBottom']];
+
+    /* A small ribbon button with an icon and ▾ that opens a list (a menu control). */
+    function menuButton(className, title, label, icon, menuClass, open) {
+        const button = keepEdit(el('button', {
+            type: 'button', class: 'ribbon-button small ' + className, title: title, 'aria-label': label, 'aria-haspopup': 'menu',
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => (menu && menu.classList.contains(menuClass) ? closeMenu() : open()),
+        }));
+        button.innerHTML = App.icons.get(icon);
+        button.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
+        return button;
+    }
+
+    function createChangeCase() {
+        caseButton = menuButton('change-case-button', 'Change Case (Shift+F3: lowercase, UPPERCASE, Capitalize Each Word)',
+            'Change Case', 'changeCase', 'change-case-menu', () => {
+                openMenu(caseButton, 'change-case-menu', CASE_ITEMS.map(([value, label]) => ({ label: label, value: value })),
+                    (value) => App.commands.run('changeCase', value).then(() => App.text.refocus()));
+            });
+        return caseButton;
+    }
+
+    function createAlignText() {
+        alignTextButton = menuButton('align-text-button', 'Align Text: top, middle or bottom of the box', 'Align Text',
+            'alignTextMiddle', 'align-text-menu', () => {
+                const state = App.text.layoutState();
+                openMenu(alignTextButton, 'align-text-menu', ANCHOR_ITEMS.map(([value, label]) => ({
+                    label: label, value: value, checked: !!state && state.anchor === value,
+                })), (value) => App.commands.run(ANCHOR_ITEMS.find((item) => item[0] === value)[2]).then(() => App.text.refocus()));
+            });
+        return alignTextButton;
+    }
+
     // ---- The paste options button (after a paste: at the end of the pasted text, or at a pasted table's corner) ----
 
     let pasteButton = null;
@@ -505,6 +545,12 @@
         if (name === 'lineSpacing') {
             return createLineSpacing();
         }
+        if (name === 'changeCase') {
+            return createChangeCase();
+        }
+        if (name === 'alignText') {
+            return createAlignText();
+        }
         if (name === 'fontColor') {
             return createColorButton('color');
         }
@@ -546,6 +592,12 @@
         }
         if (lineSpacingButton) {
             lineSpacingButton.disabled = !enabled;
+        }
+        if (caseButton) {
+            caseButton.disabled = !App.commands.isEnabled('changeCase');
+        }
+        if (alignTextButton) {
+            alignTextButton.disabled = !App.commands.isEnabled('alignTextMiddle');
         }
     };
 })();

@@ -149,6 +149,19 @@
             </fieldset>
             <p class="panel-hint" id="format-autofit-hint"></p>
         </section>
+        <!-- Text boxes and shapes with text (Phase 10): Align Text and inner margins, as PowerPoint's Format Shape > Text Box. -->
+        <section id="format-layout" hidden>
+            <h3>Text layout</h3>
+            <div class="format-grid">
+                <label for="format-anchor">Vertical alignment</label><select id="format-anchor">
+                    <option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option>
+                </select><span></span>
+                <label for="format-margin-left">Left margin</label><input id="format-margin-left" data-margin="left" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-margin-right">Right margin</label><input id="format-margin-right" data-margin="right" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-margin-top">Top margin</label><input id="format-margin-top" data-margin="top" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-margin-bottom">Bottom margin</label><input id="format-margin-bottom" data-margin="bottom" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+            </div>
+        </section>
     </aside>
 
     <!-- Review comments of the slide shown (commentspane.js): opened by Review > New Comment / Comments, a marker or the status bar. -->

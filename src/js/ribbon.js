@@ -29,7 +29,7 @@
                 {
                     label: 'Font',
                     rows: [[{ control: 'fontFamily' }, { control: 'fontSize' }, ['growFont', 'growFont'],
-                        ['shrinkFont', 'shrinkFont'], ['clearFormatting', 'clearFormatting']],
+                        ['shrinkFont', 'shrinkFont'], { control: 'changeCase' }, ['clearFormatting', 'clearFormatting']],
                         [['bold', 'bold'], ['italic', 'italic'], ['underline', 'underline'],
                             ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript'],
                             { control: 'fontColor' }, { control: 'highlight' }]],
@@ -40,7 +40,7 @@
                         ['increaseIndent', 'indent'], ['restartNumbering', 'restartNumbering'],
                         ['continueNumbering', 'continueNumbering']],
                     [['alignLeft', 'alignLeft'], ['alignCenter', 'alignCenter'], ['alignRight', 'alignRight'],
-                        ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }]],
+                        ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }, { control: 'alignText' }]],
                 },
                 { label: 'Slides', commands: [{ control: 'newSlide' }, ['duplicateSlide', 'duplicateSlide'],
                     ['deleteSlide', 'deleteSlide'], ['previousSlide', 'previous'], ['nextSlide', 'next']] },

@@ -133,7 +133,7 @@
 }
 .shape-gallery-item:hover, .shape-gallery-item:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }
 .table-grid-cell.picked { border-color: var(--accent); background: var(--accent-soft); }
-.line-spacing-button { flex-direction: row; gap: 1px; }
+.line-spacing-button, .change-case-button, .align-text-button { flex-direction: row; gap: 1px; }
 .line-spacing-menu { width: 200px; }
 .line-spacing-menu .menu-item[aria-checked="true"] { font-weight: 600; background: var(--accent-soft); }
 .space-field { display: flex; align-items: center; gap: 6px; padding: 4px 10px; }

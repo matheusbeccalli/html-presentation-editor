@@ -293,7 +293,7 @@ iframe.pdf-print-frame {
 }
 .shape-gallery-item:hover, .shape-gallery-item:focus-visible { border-color: var(--accent); background: var(--accent-soft); outline: none; }
 .table-grid-cell.picked { border-color: var(--accent); background: var(--accent-soft); }
-.line-spacing-button { flex-direction: row; gap: 1px; }
+.line-spacing-button, .change-case-button, .align-text-button { flex-direction: row; gap: 1px; }
 .line-spacing-menu { width: 200px; }
 .line-spacing-menu .menu-item[aria-checked="true"] { font-weight: 600; background: var(--accent-soft); }
 .space-field { display: flex; align-items: center; gap: 6px; padding: 4px 10px; }
@@ -1052,6 +1052,19 @@ iframe.pdf-print-frame {
                 <label><input type="radio" name="autofit" value="resize"> Resize shape to fit text</label>
             </fieldset>
             <p class="panel-hint" id="format-autofit-hint"></p>
+        </section>
+        <!-- Text boxes and shapes with text (Phase 10): Align Text and inner margins, as PowerPoint's Format Shape > Text Box. -->
+        <section id="format-layout" hidden>
+            <h3>Text layout</h3>
+            <div class="format-grid">
+                <label for="format-anchor">Vertical alignment</label><select id="format-anchor">
+                    <option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option>
+                </select><span></span>
+                <label for="format-margin-left">Left margin</label><input id="format-margin-left" data-margin="left" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-margin-right">Right margin</label><input id="format-margin-right" data-margin="right" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-margin-top">Top margin</label><input id="format-margin-top" data-margin="top" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+                <label for="format-margin-bottom">Bottom margin</label><input id="format-margin-bottom" data-margin="bottom" type="text" inputmode="decimal" autocomplete="off"><span>px</span>
+            </div>
         </section>
     </aside>
 
@@ -1905,6 +1918,8 @@ App.createEventBus = function createEventBus() {
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
         ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],
         ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
+        // Change case, as in PowerPoint and Word: lowercase -> UPPERCASE -> Capitalize Each Word (Phase 10).
+        ['Shift+F3', 'cycleCase', { whileTyping: true, blockBrowserDefault: true }],
         // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).
         ['Ctrl+M', 'newSlide', { blockBrowserDefault: true }],
         // Group / ungroup, as in PowerPoint (in the browser: find next / previous).
@@ -6063,6 +6078,282 @@ App.template.newDeckHtml = function newDeckHtml() {
                 return caret;
             },
         };
+    };
+
+    // ---------------------------------------------------------------
+    // Change Case (Phase 10): the letters themselves change, as in PowerPoint
+    // ---------------------------------------------------------------
+    //
+    // One character becomes one character, so every piece of formatting keeps
+    // its place: the text nodes are rewritten where they are (a letter that
+    // would become two, like ß in upper case, stays as it is). Words and
+    // sentences are found in the whole line, so a range that starts mid-line
+    // still knows whether its first letter starts a word.
+
+    const CASE_LOCALE = 'pt-BR';
+    const isLetter = (ch) => !!ch && ch.toLocaleLowerCase(CASE_LOCALE) !== ch.toLocaleUpperCase(CASE_LOCALE);
+    const isWordChar = (ch) => isLetter(ch) || /[0-9'’]/.test(ch || '');
+
+    function oneChar(ch, upper) {
+        const changed = upper ? ch.toLocaleUpperCase(CASE_LOCALE) : ch.toLocaleLowerCase(CASE_LOCALE);
+        return changed.length === 1 ? changed : ch;
+    }
+
+    /* Does a sentence start at `index` of `text`? At the start, or after . ! ? (and spaces). */
+    function startsSentence(text, index) {
+        let i = index - 1;
+        while (i >= 0 && /\s/.test(text[i]) && text[i] !== '\n') {
+            i--;
+        }
+        return i < 0 || text[i] === '\n' || /[.!?]/.test(text[i]);
+    }
+
+    /*
+     * `text` with characters [start, end) in another case: 'upper', 'lower',
+     * 'title' (Capitalize Each Word: first letter up, the rest down), 'sentence'
+     * (Sentence case.) or 'toggle' (tOGGLE cASE). Same length as `text`.
+     */
+    App.text.changeCase = function changeCase(text, start, end, kind) {
+        const chars = Array.from(text);   // whole characters (é is one), as the text nodes count them in UTF-16 below
+        if (chars.length !== text.length) {
+            return text;   // emoji / surrogate pairs: left as they are rather than shifting offsets
+        }
+        let sentenceOpen = startsSentence(text, start);
+        for (let i = start; i < Math.min(end, chars.length); i++) {
+            const ch = chars[i];
+            if (kind === 'upper') {
+                chars[i] = oneChar(ch, true);
+            } else if (kind === 'lower') {
+                chars[i] = oneChar(ch, false);
+            } else if (kind === 'toggle') {
+                chars[i] = oneChar(ch, ch === ch.toLocaleLowerCase(CASE_LOCALE));
+            } else if (kind === 'title') {
+                chars[i] = oneChar(ch, !isWordChar(text[i - 1]));
+            } else if (kind === 'sentence') {
+                if (/[.!?\n]/.test(ch)) {
+                    sentenceOpen = true;
+                    chars[i] = ch;
+                } else if (isLetter(ch)) {
+                    chars[i] = oneChar(ch, sentenceOpen && startsSentence(text, i));
+                    sentenceOpen = false;
+                }
+            }
+        }
+        return chars.join('');
+    };
+
+    /* Shift+F3, as in Office: lowercase -> UPPERCASE -> Capitalize Each Word -> lowercase. */
+    App.text.nextCase = function nextCase(text) {
+        if (text === text.toLocaleLowerCase(CASE_LOCALE)) {
+            return 'upper';
+        }
+        return text === text.toLocaleUpperCase(CASE_LOCALE) ? 'title' : 'lower';
+    };
+
+    const CASE_KINDS = ['sentence', 'lower', 'upper', 'title', 'toggle', 'cycle'];
+
+    /* A line's text as the cursor counts it: a line break is one character. */
+    function caretText(line) {
+        return inlineItems(line).map((item) => (item.nodeType === Node.TEXT_NODE ? item.data : '\n')).join('');
+    }
+
+    /*
+     * The action for Change Case (kind: one of CASE_KINDS; 'cycle' is Shift+F3)
+     * on the selection, the word at the cursor, or every line of the box (caret
+     * null); null when nothing would change.
+     */
+    App.text.caseAction = function caseAction(element, kind, caret) {
+        const segments = CASE_KINDS.indexOf(kind) !== -1 ? formatSegments(element, caret) : null;
+        if (!segments) {
+            return null;
+        }
+        const lines = textLines(element);
+        const texts = segments.map((segment) => caretText(lines[segment.index]));
+        const chosen = kind === 'cycle'
+            ? App.text.nextCase(segments.map((segment, i) => texts[i].slice(segment.start, segment.end)).join(''))
+            : kind;
+        const changed = segments.map((segment, i) => App.text.changeCase(texts[i], segment.start, segment.end, chosen));
+        if (changed.every((text, i) => text === texts[i])) {
+            return null;
+        }
+        return {
+            label: 'Change case',
+            run: () => {
+                segments.forEach((segment, i) => {
+                    let at = 0;
+                    inlineItems(lines[segment.index]).forEach((item) => {
+                        if (item.nodeType !== Node.TEXT_NODE) {
+                            at += 1;
+                            return;
+                        }
+                        const next = changed[i].slice(at, at + item.data.length);
+                        if (next !== item.data) {
+                            item.data = next;
+                        }
+                        at += item.data.length;
+                    });
+                });
+                return caret;
+            },
+        };
+    };
+
+    /* Home > Font > Change Case (Aa) and Shift+F3, on the text being edited or the selected box. */
+    App.text.applyCase = function applyCase(kind) {
+        const target = listTarget();
+        const action = target && App.text.caseAction(target.element, kind, target.caret);
+        if (!action) {
+            return;
+        }
+        pending = null;
+        if (editing) {
+            runInEditor(action);
+        } else {
+            runOnBox(target.element, action);
+        }
+    };
+
+    // ---------------------------------------------------------------
+    // Text layout (Phase 10): Align Text top / middle / bottom, inner margins
+    // ---------------------------------------------------------------
+    //
+    // A text box is aligned to the middle or bottom by its own inline flex
+    // column (display: flex; flex-direction: column; justify-content: center |
+    // flex-end), the form the importer writes for a centred title
+    // (keepVerticalAlignment); top is the plain box, with none of it. A shape's
+    // text area is always such a column (shapes.TEXT_STYLE, middle when new).
+    // Inner margins are the padding of the box, or of the shape's text area.
+
+    const ANCHORS = { top: 'flex-start', middle: 'center', bottom: 'flex-end' };
+
+    /*
+     * Where the text of a text box or shape sits: its own box, or the shape's
+     * text area; null for neither. A shape with no text area yet: made when
+     * `create`, else a stand-in with the new area's style, so reading changes nothing.
+     */
+    function layoutBox(element, create) {
+        if (!element) {
+            return null;
+        }
+        const type = element.getAttribute('data-type');
+        if (type === 'text') {
+            return element;
+        }
+        if (type !== 'shape' || !App.shapes.canHoldText(element)) {
+            return null;
+        }
+        const area = App.shapes.textOf(element, { create: !!create });
+        if (area) {
+            return area;
+        }
+        const standIn = element.ownerDocument.createElement('div');
+        standIn.setAttribute('style', App.shapes.TEXT_STYLE);
+        return standIn;
+    }
+
+    /* A text box or a shape that can hold text: Align Text and margins apply. */
+    App.text.canLayout = function canLayout(element) {
+        return layoutBox(element, false) !== null;
+    };
+
+    /* 'top', 'middle' or 'bottom'. */
+    App.text.anchorOf = function anchorOf(element) {
+        const box = layoutBox(element);
+        if (!box || box.style.display !== 'flex' || !/column/.test(box.style.flexDirection)) {
+            return 'top';
+        }
+        const value = box.style.justifyContent;
+        return value === 'center' ? 'middle' : (value === 'flex-end' || value === 'end') ? 'bottom' : 'top';
+    };
+
+    App.text.setAnchor = function setAnchor(element, anchor) {
+        const box = layoutBox(element, true);
+        if (!box || !ANCHORS[anchor]) {
+            return;
+        }
+        const isShapeText = element.getAttribute('data-type') === 'shape';
+        if (anchor === 'top' && !isShapeText) {
+            ['display', 'flex-direction', 'justify-content', 'align-items'].forEach((name) => box.style.removeProperty(name));
+            return;
+        }
+        box.style.setProperty('display', 'flex');
+        box.style.setProperty('flex-direction', 'column');
+        box.style.setProperty('justify-content', ANCHORS[anchor]);
+        if (!isShapeText) {
+            box.style.setProperty('align-items', 'stretch');   // the lines keep the box's full width
+        }
+    };
+
+    /* The inner margins in slide px: { left, right, top, bottom } (the inline padding; 0 where none is set). */
+    App.text.marginsOf = function marginsOf(element) {
+        const box = layoutBox(element);
+        const side = (name) => (box ? parseFloat(box.style.getPropertyValue('padding-' + name)) || 0 : 0);
+        return { left: side('left'), right: side('right'), top: side('top'), bottom: side('bottom') };
+    };
+
+    App.text.setMargins = function setMargins(element, margins) {
+        const box = layoutBox(element, true);
+        if (!box) {
+            return;
+        }
+        ['left', 'right', 'top', 'bottom'].forEach((name) => {
+            if (typeof margins[name] === 'number' && margins[name] >= 0) {
+                box.style.setProperty('padding-' + name, App.util.round2(margins[name]) + 'px');
+            }
+        });
+    };
+
+    /* The text boxes and shapes Align Text and margins act on: the one being typed in, else the selected ones. */
+    function layoutTargets() {
+        if (editing) {
+            const owner = editing.element.matches('.el') ? editing.element : editing.element.closest('.el[data-type="shape"]');
+            return owner && App.text.canLayout(owner) ? [owner] : [];
+        }
+        return App.selection.getElements().filter(App.text.canLayout);
+    }
+
+    App.text.canApplyLayout = function canApplyLayout() {
+        return layoutTargets().length > 0;
+    };
+
+    /* What the ribbon and the Format pane show: the first target's { anchor, margins }, or null. */
+    App.text.layoutState = function layoutState() {
+        const first = layoutTargets()[0];
+        return first ? { anchor: App.text.anchorOf(first), margins: App.text.marginsOf(first) } : null;
+    };
+
+    /* `change(element)` on every target, as one undo step; the text being typed in keeps its cursor. */
+    function applyLayout(label, change) {
+        const targets = layoutTargets();
+        if (!targets.length) {
+            return;
+        }
+        if (editing) {
+            const element = editing.element;
+            runInEditor({ label: label, run: () => {
+                const caret = App.text.getCaret(element);
+                targets.forEach(change);
+                return caret;
+            } });
+            return;
+        }
+        App.history.change(label, { slideId: App.deck.getCurrentSlide().getAttribute('data-slide-id') }, () => {
+            targets.forEach((target) => {
+                change(target);
+                App.text.fitText(target);   // new margins: an autofit box fits its text again
+            });
+        });
+        App.selection.refresh();
+    }
+
+    /* Home > Paragraph > Align Text: 'top', 'middle' or 'bottom'. */
+    App.text.applyAnchor = function applyAnchor(anchor) {
+        applyLayout('Align text', (element) => App.text.setAnchor(element, anchor));
+    };
+
+    /* The Format pane's inner margins (some or all of { left, right, top, bottom }, slide px). */
+    App.text.applyMargins = function applyMargins(margins) {
+        applyLayout('Text margins', (element) => App.text.setMargins(element, margins));
     };
 
     /*
@@ -11645,6 +11936,9 @@ App.template.newDeckHtml = function newDeckHtml() {
         cellAlignBottom: '<rect x="2.5" y="2.5" width="15" height="15"/><path d="M6 11h8M6 14h8"/>',
         cellMargins: '<rect x="2.5" y="2.5" width="15" height="15"/><rect x="6" y="6" width="8" height="8" stroke-dasharray="1.5 1.5"/>',
         lineSpacing: '<path d="M9 4.5h8.5M9 8.5h8.5M9 12.5h8.5M9 16.5h8.5"/><path d="M2.5 6L4.5 3.5 6.5 6M2.5 14l2 2.5 2-2.5M4.5 3.5v13"/>',
+        // Change Case: "Aa"; Align Text: lines in the middle of a box (Phase 10).
+        changeCase: '<path d="M2.5 15.5l4-11 4 11M4 11.5h5"/><path d="M16.5 10v5.5M16.5 12.25a2.75 2.75 0 1 0 0 1.5"/>',
+        alignTextMiddle: '<rect x="3.5" y="3.5" width="13" height="13"/><path d="M6.5 8.5h7M6.5 11.5h7"/>',
         bullets: '<circle cx="4" cy="5" r="1" fill="currentColor"/><circle cx="4" cy="10" r="1" fill="currentColor"/>' +
             '<circle cx="4" cy="15" r="1" fill="currentColor"/><path d="M8 5h9.5M8 10h9.5M8 15h9.5"/>',
         numbering: '<path d="M3 3.5l1.5-1v5M2.8 7.5h3.4"/><path d="M2.8 12.2a1.6 1.6 0 1 1 2.6 1.2l-2.6 2.6h3.4"/>' +
@@ -16140,6 +16434,9 @@ App.template.newDeckHtml = function newDeckHtml() {
     let textSection = null;
     let autofitHint = null;
     const edited = new Set();   // fields the user is typing in, not applied yet
+    let layoutSection = null;   // Text layout (Phase 10): vertical alignment and inner margins
+    let anchorSelect = null;
+    let marginInputs = [];
 
     App.formatPane.init = function init() {
         hint = document.getElementById('format-hint');
@@ -16152,6 +16449,16 @@ App.template.newDeckHtml = function newDeckHtml() {
         inputs.concat([rotation]).forEach((input) => {
             input.addEventListener('input', () => edited.add(input));
             input.addEventListener('change', () => apply(input));   // fires on Tab / click elsewhere
+            input.addEventListener('keydown', (event) => onFieldKey(event, input));
+        });
+
+        layoutSection = document.getElementById('format-layout');
+        anchorSelect = document.getElementById('format-anchor');
+        marginInputs = Array.from(layoutSection.querySelectorAll('input[data-margin]'));
+        anchorSelect.addEventListener('change', () => App.text.applyAnchor(anchorSelect.value));
+        marginInputs.forEach((input) => {
+            input.addEventListener('input', () => edited.add(input));
+            input.addEventListener('change', () => applyMargin(input));
             input.addEventListener('keydown', (event) => onFieldKey(event, input));
         });
 
@@ -16177,6 +16484,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         section.hidden = !element;
         const isText = !!element && element.getAttribute('data-type') === 'text';
         textSection.hidden = !isText;
+        layoutSection.hidden = true;   // refreshLayout shows it for a text box or shape
         if (!element) {
             edited.clear();
             return;
@@ -16187,6 +16495,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             const scale = parseFloat(element.style.getPropertyValue('--autofit-scale'));
             autofitHint.textContent = mode === 'shrink' && scale < 1 ? 'Text shrunk to ' + Math.round(scale * 100) + '%' : '';
         }
+        refreshLayout(element);
         typeLabel.textContent = TYPE_LABELS[element.getAttribute('data-type')] || 'Object';
         const rect = App.transform.readRect(element);
         const locked = App.elements.isLocked(element);   // Phase 7: a locked element keeps its size and place
@@ -16202,6 +16511,37 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
     };
 
+    /* Text layout: shown for one text box or shape with text; the values of that one. */
+    function refreshLayout(element) {
+        const state = App.selection.count() === 1 && App.text.canLayout(element)
+            ? { anchor: App.text.anchorOf(element), margins: App.text.marginsOf(element) } : null;
+        layoutSection.hidden = !state;
+        if (!state) {
+            return;
+        }
+        const locked = App.elements.isLocked(element);
+        anchorSelect.value = state.anchor;
+        anchorSelect.disabled = locked;
+        marginInputs.forEach((input) => {
+            input.disabled = locked;
+            if (!edited.has(input)) {
+                input.value = String(state.margins[input.getAttribute('data-margin')]);
+            }
+        });
+    }
+
+    /* A typed margin (0-200 px), as one undo step; anything else shows the old value again. */
+    function applyMargin(input) {
+        const value = App.formatPane.parseNumber(input.value);
+        edited.delete(input);
+        const element = App.selection.getElement();
+        const side = input.getAttribute('data-margin');
+        if (element && value !== null && value >= 0 && value <= 200 && value !== App.text.marginsOf(element)[side]) {
+            App.text.applyMargins({ [side]: value });
+        }
+        App.formatPane.refresh();
+    }
+
     function revert(input) {
         edited.delete(input);
         App.formatPane.refresh();
@@ -16209,6 +16549,10 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     /* Apply the typed value of one field as one undo step. */
     function apply(input) {
+        if (input.hasAttribute('data-margin')) {
+            applyMargin(input);
+            return;
+        }
         const element = App.selection.getElement();
         const value = App.formatPane.parseNumber(input.value);
         edited.delete(input);
@@ -19244,6 +19588,23 @@ App.template.newDeckHtml = function newDeckHtml() {
             run: () => App.elements.rotateBy(90) });
         App.commands.define('rotateLeft90', { label: 'Rotate Left 90°', isEnabled: () => App.elements.canRotate(),
             run: () => App.elements.rotateBy(-90) });
+        // Text layout and Change Case (Phase 10).
+        [['alignTextTop', 'Top', 'top'], ['alignTextMiddle', 'Middle', 'middle'], ['alignTextBottom', 'Bottom', 'bottom']]
+            .forEach(([name, label, anchor]) => {
+                App.commands.define(name, {
+                    label: 'Align text: ' + label, keepsEdit: true, isEnabled: () => App.text.canApplyLayout(),
+                    isChecked: () => { const state = App.text.layoutState(); return !!state && state.anchor === anchor; },
+                    run: () => App.text.applyAnchor(anchor),
+                });
+            });
+        App.commands.define('changeCase', {
+            label: 'Change Case', keepsEdit: true, isEnabled: () => App.text.canStyle(),
+            run: (kind) => App.text.applyCase(kind),
+        });
+        App.commands.define('cycleCase', {
+            label: 'Change case (lower, UPPER, Each Word)', keepsEdit: true, isEnabled: () => App.text.canStyle(),
+            run: () => App.text.applyCase('cycle'),
+        });
         App.commands.define('flipHorizontal', { label: 'Flip Horizontal', isEnabled: () => App.elements.canFlip(),
             run: () => App.elements.flip('x') });
         App.commands.define('flipVertical', { label: 'Flip Vertical', isEnabled: () => App.elements.canFlip(),
@@ -19724,6 +20085,46 @@ App.template.newDeckHtml = function newDeckHtml() {
         return lineSpacingButton;
     }
 
+    // ---- Change Case (Aa ▾) and Align Text (Phase 10) ----
+
+    let caseButton = null;
+    let alignTextButton = null;
+    const CASE_ITEMS = [['sentence', 'Sentence case.'], ['lower', 'lowercase'], ['upper', 'UPPERCASE'],
+        ['title', 'Capitalize Each Word'], ['toggle', 'tOGGLE cASE']];
+    const ANCHOR_ITEMS = [['top', 'Top', 'alignTextTop'], ['middle', 'Middle', 'alignTextMiddle'], ['bottom', 'Bottom', 'alignTextBottom']];
+
+    /* A small ribbon button with an icon and ▾ that opens a list (a menu control). */
+    function menuButton(className, title, label, icon, menuClass, open) {
+        const button = keepEdit(el('button', {
+            type: 'button', class: 'ribbon-button small ' + className, title: title, 'aria-label': label, 'aria-haspopup': 'menu',
+            onmousedown: (event) => event.preventDefault(),
+            onclick: () => (menu && menu.classList.contains(menuClass) ? closeMenu() : open()),
+        }));
+        button.innerHTML = App.icons.get(icon);
+        button.appendChild(el('span', { class: 'font-arrow', 'aria-hidden': 'true' }, ['▾']));
+        return button;
+    }
+
+    function createChangeCase() {
+        caseButton = menuButton('change-case-button', 'Change Case (Shift+F3: lowercase, UPPERCASE, Capitalize Each Word)',
+            'Change Case', 'changeCase', 'change-case-menu', () => {
+                openMenu(caseButton, 'change-case-menu', CASE_ITEMS.map(([value, label]) => ({ label: label, value: value })),
+                    (value) => App.commands.run('changeCase', value).then(() => App.text.refocus()));
+            });
+        return caseButton;
+    }
+
+    function createAlignText() {
+        alignTextButton = menuButton('align-text-button', 'Align Text: top, middle or bottom of the box', 'Align Text',
+            'alignTextMiddle', 'align-text-menu', () => {
+                const state = App.text.layoutState();
+                openMenu(alignTextButton, 'align-text-menu', ANCHOR_ITEMS.map(([value, label]) => ({
+                    label: label, value: value, checked: !!state && state.anchor === value,
+                })), (value) => App.commands.run(ANCHOR_ITEMS.find((item) => item[0] === value)[2]).then(() => App.text.refocus()));
+            });
+        return alignTextButton;
+    }
+
     // ---- The paste options button (after a paste: at the end of the pasted text, or at a pasted table's corner) ----
 
     let pasteButton = null;
@@ -19798,6 +20199,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (name === 'lineSpacing') {
             return createLineSpacing();
         }
+        if (name === 'changeCase') {
+            return createChangeCase();
+        }
+        if (name === 'alignText') {
+            return createAlignText();
+        }
         if (name === 'fontColor') {
             return createColorButton('color');
         }
@@ -19839,6 +20246,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         }
         if (lineSpacingButton) {
             lineSpacingButton.disabled = !enabled;
+        }
+        if (caseButton) {
+            caseButton.disabled = !App.commands.isEnabled('changeCase');
+        }
+        if (alignTextButton) {
+            alignTextButton.disabled = !App.commands.isEnabled('alignTextMiddle');
         }
     };
 })();
@@ -23617,7 +24030,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             title: 'Text', commands: {
                 editText: 'Type in the selected box', bold: 'Bold', italic: 'Italic', underline: 'Underline',
                 alignLeft: 'Align left', alignCenter: 'Centre', alignRight: 'Align right', alignJustify: 'Justify',
-                growFont: 'Bigger text', shrinkFont: 'Smaller text',
+                growFont: 'Bigger text', shrinkFont: 'Smaller text', cycleCase: 'Change case (lower, UPPER, Each Word)',
             },
         },
         { title: 'Tables', commands: {} },
@@ -25996,12 +26409,15 @@ App.template.newDeckHtml = function newDeckHtml() {
         return color ? { color: color.hex, transparency: color.transparency } : null;
     }
 
+    // PptxGenJS reads a text box's or shape's margin list as left, right, bottom, top (a table cell's
+    // as top, right, bottom, left, CSS's order).
+    const TEXT_MARGIN_ORDER = ['paddingLeft', 'paddingRight', 'paddingBottom', 'paddingTop'];
+
     function textBoxItem(element, offset, ctx) {
         const style = ctx.view.getComputedStyle(element);
         const options = Object.assign(position(boxOf(element, offset), App.pptx.rotationOf(element.style.transform)), {
-            margin: ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].map((side) =>
-                App.pptx.points(parseFloat(style[side]) || 0)),
-            valign: 'top',
+            margin: TEXT_MARGIN_ORDER.map((side) => App.pptx.points(parseFloat(style[side]) || 0)),
+            valign: App.text.anchorOf(element),   // Align Text (Phase 10); a title the importer centred too
             wrap: true,
             fit: App.text.autofitOf(element) === 'shrink' ? 'shrink' : 'none',
             isTextBox: true,
@@ -26118,8 +26534,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         const valign = { center: 'middle', 'flex-end': 'bottom', end: 'bottom' }[areaStyle.justifyContent] || 'top';
         Object.assign(options, {
             shape: SHAPES[kind], valign: valign, wrap: true,
-            margin: ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].map((side) =>
-                App.pptx.points(parseFloat(areaStyle[side]) || 0)),
+            margin: TEXT_MARGIN_ORDER.map((side) => App.pptx.points(parseFloat(areaStyle[side]) || 0)),
         });
         return { kind: 'text', runs: App.pptx.textRuns(paragraphs, ctx.schemes), options: options };
     }
@@ -26689,7 +27104,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 {
                     label: 'Font',
                     rows: [[{ control: 'fontFamily' }, { control: 'fontSize' }, ['growFont', 'growFont'],
-                        ['shrinkFont', 'shrinkFont'], ['clearFormatting', 'clearFormatting']],
+                        ['shrinkFont', 'shrinkFont'], { control: 'changeCase' }, ['clearFormatting', 'clearFormatting']],
                         [['bold', 'bold'], ['italic', 'italic'], ['underline', 'underline'],
                             ['strikethrough', 'strikethrough'], ['superscript', 'superscript'], ['subscript', 'subscript'],
                             { control: 'fontColor' }, { control: 'highlight' }]],
@@ -26700,7 +27115,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                         ['increaseIndent', 'indent'], ['restartNumbering', 'restartNumbering'],
                         ['continueNumbering', 'continueNumbering']],
                     [['alignLeft', 'alignLeft'], ['alignCenter', 'alignCenter'], ['alignRight', 'alignRight'],
-                        ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }]],
+                        ['alignJustify', 'alignJustify'], { control: 'lineSpacing' }, { control: 'alignText' }]],
                 },
                 { label: 'Slides', commands: [{ control: 'newSlide' }, ['duplicateSlide', 'duplicateSlide'],
                     ['deleteSlide', 'deleteSlide'], ['previousSlide', 'previous'], ['nextSlide', 'next']] },

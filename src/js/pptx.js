@@ -287,12 +287,15 @@
         return color ? { color: color.hex, transparency: color.transparency } : null;
     }
 
+    // PptxGenJS reads a text box's or shape's margin list as left, right, bottom, top (a table cell's
+    // as top, right, bottom, left, CSS's order).
+    const TEXT_MARGIN_ORDER = ['paddingLeft', 'paddingRight', 'paddingBottom', 'paddingTop'];
+
     function textBoxItem(element, offset, ctx) {
         const style = ctx.view.getComputedStyle(element);
         const options = Object.assign(position(boxOf(element, offset), App.pptx.rotationOf(element.style.transform)), {
-            margin: ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].map((side) =>
-                App.pptx.points(parseFloat(style[side]) || 0)),
-            valign: 'top',
+            margin: TEXT_MARGIN_ORDER.map((side) => App.pptx.points(parseFloat(style[side]) || 0)),
+            valign: App.text.anchorOf(element),   // Align Text (Phase 10); a title the importer centred too
             wrap: true,
             fit: App.text.autofitOf(element) === 'shrink' ? 'shrink' : 'none',
             isTextBox: true,
@@ -409,8 +412,7 @@
         const valign = { center: 'middle', 'flex-end': 'bottom', end: 'bottom' }[areaStyle.justifyContent] || 'top';
         Object.assign(options, {
             shape: SHAPES[kind], valign: valign, wrap: true,
-            margin: ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].map((side) =>
-                App.pptx.points(parseFloat(areaStyle[side]) || 0)),
+            margin: TEXT_MARGIN_ORDER.map((side) => App.pptx.points(parseFloat(areaStyle[side]) || 0)),
         });
         return { kind: 'text', runs: App.pptx.textRuns(paragraphs, ctx.schemes), options: options };
     }

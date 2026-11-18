@@ -232,6 +232,8 @@
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
         ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],
         ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
+        // Change case, as in PowerPoint and Word: lowercase -> UPPERCASE -> Capitalize Each Word (Phase 10).
+        ['Shift+F3', 'cycleCase', { whileTyping: true, blockBrowserDefault: true }],
         // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).
         ['Ctrl+M', 'newSlide', { blockBrowserDefault: true }],
         // Group / ungroup, as in PowerPoint (in the browser: find next / previous).

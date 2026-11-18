@@ -7405,6 +7405,106 @@ def test_flip(browser):
     editor.close()
 
 
+def test_text_layout_and_change_case(browser):
+    """Phase 10 step 2: Home > Align Text puts a box's lines at its top, middle or bottom (also a shape's), the
+    Format pane's Text layout sets that and the inner margins; Change Case (Aa menu, Shift+F3 cycling) changes the
+    letters on the selection or the whole box, keeping their formatting; each one undo step; PowerPoint keeps the
+    alignment and margins."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    box_js = "App.deck.getDocument().querySelector('[data-id=\"e4\"]')"
+    line_top = lambda: page.evaluate(f"Math.round({box_js}.querySelector('p').getBoundingClientRect().top)")  # noqa: E731
+    line_left = lambda: page.evaluate(f"Math.round({box_js}.querySelector('p').getBoundingClientRect().left)")  # noqa: E731
+    label = lambda: page.evaluate("App.history.undoLabel()")  # noqa: E731
+
+    # The subtitle (e4, 64,378 1100x70): made 200 px tall, its line is at the top.
+    page.mouse.click(*slide_to_screen(page, 600, 410))
+    check(page.evaluate("App.selection.selectedId()") == "e4", "subtitle selected")
+    page.check("#format-autofit input[value='off']")
+    page.fill("#format-h", "200")
+    page.press("#format-h", "Enter")
+    top_before = line_top()
+    check(page.is_visible("#format-layout") and page.input_value("#format-anchor") == "top", "Text layout: Top")
+
+    # Home > Align Text ▾ > Bottom: the line drops to the bottom of the box.
+    page.click(".ribbon-tab[data-tab='home']")
+    page.click(".align-text-button")
+    page.click(".align-text-menu .menu-item:has-text('Bottom')")
+    check(page.evaluate(f"App.text.anchorOf({box_js})") == "bottom" and label() == "Align text", f"bottom: {label()}")
+    check(line_top() > top_before + 100, f"the line moved down: {top_before} -> {line_top()}")
+    check(page.input_value("#format-anchor") == "bottom", "the pane shows Bottom")
+    page.screenshot(path=str(OUTPUT / "141-align-text-bottom.png"))
+    page.select_option("#format-anchor", "middle")
+    check(page.evaluate(f"App.text.anchorOf({box_js})") == "middle", "middle from the pane")
+    page.mouse.click(*slide_to_screen(page, 600, 470))   # back on the slide (Ctrl+Z in a field is the field's own)
+    page.keyboard.press("Control+z")
+    check(page.evaluate(f"App.text.anchorOf({box_js})") == "bottom", "one Ctrl+Z: bottom again")
+
+    # Left margin 40 px: the text moves right.
+    left_before = line_left()
+    page.fill("#format-margin-left", "40")
+    page.press("#format-margin-left", "Enter")
+    check(page.evaluate(f"{box_js}.style.paddingLeft") == "40px" and label() == "Text margins", f"margin: {label()}")
+    check(line_left() > left_before + 20, f"the text moved right: {left_before} -> {line_left()}")
+
+    # Change Case on the selected box (no typing): Shift+F3 cycles UPPERCASE -> Capitalize Each Word -> lowercase.
+    text = lambda: page.evaluate(f"{box_js}.textContent.trim()")  # noqa: E731
+    original = text()
+    page.keyboard.press("Escape")
+    page.mouse.click(*slide_to_screen(page, 600, 470))
+    check(page.evaluate("App.selection.selectedId()") == "e4", "subtitle selected again")
+    page.keyboard.press("Shift+F3")
+    check(text() == original.lower() and label() == "Change case", f"Shift+F3 on mixed text: lowercase: {text()!r}")
+    page.keyboard.press("Shift+F3")
+    check(text() == original.upper(), f"again: UPPERCASE: {text()!r}")
+    page.keyboard.press("Shift+F3")
+    check(text().startswith("Aquisição Da Alfa Alimentos S.A."), f"again: Capitalize Each Word: {text()!r}")
+    for _ in range(3):
+        page.keyboard.press("Control+z")
+    check(text() == original, "three Ctrl+Z: as it was")
+
+    # Typing in the title: select "Atlas", Aa ▾ > UPPERCASE: only that word, the rest and the cursor stay.
+    title_js = "App.deck.getDocument().querySelector('[data-id=\"e2\"]')"
+    page.mouse.dblclick(*slide_to_screen(page, 600, 290))
+    wait_until(page, "App.text.isEditing()")
+    page.evaluate(f"""() => {{ const el = {title_js}; const p = el.querySelector('p');
+        const walker = el.ownerDocument.createTreeWalker(p, NodeFilter.SHOW_TEXT); const node = walker.nextNode();
+        const at = node.data.indexOf('Atlas'); el.ownerDocument.getSelection().setBaseAndExtent(node, at, node, at + 5); }}""")
+    page.click(".change-case-button")
+    page.click(".change-case-menu .menu-item:has-text('UPPERCASE')")
+    check(page.evaluate(f"{title_js}.textContent.trim()") == "Projeto ATLAS", page.evaluate(f"{title_js}.textContent"))
+    check(page.evaluate("App.text.isEditing()"), "still typing in the title")
+    page.keyboard.type("!")
+    check(page.evaluate(f"{title_js}.textContent.trim()") == "Projeto !", "the selection stayed on the word (typing replaces it)")
+    page.keyboard.press("Control+z")
+    page.keyboard.press("Control+z")
+    check(page.evaluate(f"{title_js}.textContent.trim()") == "Projeto Atlas", "undone")
+    page.keyboard.press("Escape")
+
+    # A shape: Align Text Top puts its text at the top.
+    page.evaluate(FLIP_DECK_JS)
+    page.mouse.click(*slide_to_screen(page, 450, 120))
+    page.click(".ribbon-tab[data-tab='home']")
+    page.click(".align-text-button")
+    page.click(".align-text-menu .menu-item:has-text('Top')")
+    check(page.evaluate("App.text.anchorOf(App.deck.getDocument().querySelector('[data-id=\"f2\"]'))") == "top", "shape: top")
+
+    # PowerPoint: the subtitle anchored at the bottom with its 40 px left margin; the shape's text at the top.
+    page.evaluate("App.deck.goTo(0)")
+    page.mouse.click(*slide_to_screen(page, 600, 470))
+    page.click(".align-text-button")
+    page.click(".align-text-menu .menu-item:has-text('Bottom')")
+    path, report = export_pptx(editor, "contract-deck-layout.pptx")
+    parts = pptx_parts(path)
+    subtitle = next(sp for sp in re.findall(r"<p:sp>(.*?)</p:sp>", parts["ppt/slides/slide1.xml"], flags=re.S) if "Aquisição" in sp)
+    check('anchor="b"' in subtitle and f'lIns="{40 * EMU}"' in subtitle, re.search(r"<a:bodyPr[^>]*>", subtitle).group(0))
+    chevron = next(sp for sp in re.findall(r"<p:sp>(.*?)</p:sp>", parts["ppt/slides/slide6.xml"], flags=re.S) if "Etapa" in sp)
+    check('anchor="t"' in chevron, re.search(r"<a:bodyPr[^>]*>", chevron).group(0))
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7507,6 +7607,7 @@ TESTS = [
     test_status_bar,
     test_phase9_done_when,
     test_flip,
+    test_text_layout_and_change_case,
 ]
 
 

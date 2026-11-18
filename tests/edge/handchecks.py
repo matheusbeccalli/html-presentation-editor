@@ -110,4 +110,8 @@ HAND_CHECKS = [
      "left": "the colours as PowerPoint shows them (the test reads the .pptx XML); Ctrl+M (the test adds the slide through App.slides.add)"},    # ---- Phase 10 ----------------------------------------------------
     {"key": "Flip: open samples/contract-deck.html", "tests": ["test_flip"], "auto": False,
      "left": "the test flips its own picture and chevron, not the logo and a drawn chevron; the turn is typed, the logo itself and PowerPoint's own view are not seen by the test (it reads the .pptx XML)"},
+    {"key": "Align Text and margins: open samples/contract-deck.html", "tests": ["test_text_layout_and_change_case"], "auto": False,
+     "left": "the rectangle is the test's own chevron; PowerPoint's own Format Shape panel is not seen (the test reads the .pptx XML)"},
+    {"key": "Change Case: click the subtitle", "tests": ["test_text_layout_and_change_case"], "auto": False,
+     "left": "the test selects \"Atlas\" directly, not with the mouse"},
 ]

@@ -7759,6 +7759,129 @@ def test_selection_pane(browser):
     editor.close()
 
 
+SELECT_TEXT_JS = """([id, words]) => {   // select `words` inside text box `id` (it must be being edited)
+    const el = App.deck.getDocument().querySelector('[data-id="' + id + '"]');
+    const walker = el.ownerDocument.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const at = node.data.indexOf(words);
+        if (at !== -1) { el.ownerDocument.getSelection().setBaseAndExtent(node, at, node, at + words.length); return true; }
+    }
+    return false; }"""
+
+LINK_BOX_JS = """([id, href]) => {   // the middle of link `href` in element `id`, in slide px
+    const a = App.deck.getDocument().querySelector('[data-id="' + id + '"] a[href="' + href + '"]');
+    const r = a.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; }"""
+
+
+def ctrl_click(page, x, y):
+    page.keyboard.down("Control")
+    page.mouse.click(x, y)
+    page.keyboard.up("Control")
+
+
+def test_hyperlinks(browser):
+    """Phase 10 step 6: Ctrl+K links the selected text to a slide of the deck or a web page / e-mail; on a link it edits
+    or removes it; an address that is not one links nothing; Ctrl+click follows a link (typing or not); in the slide show
+    and the saved deck a click does; PowerPoint keeps both kinds; the PDF finds the slide. Each one undo step."""
+    editor = Editor(browser)
+    editor.open(CONTRACT)
+    page = editor.page
+    page.evaluate("() => { window.__opened = []; window.open = (url) => { window.__opened.push(url); return null; }; }")
+    sub = "App.deck.getDocument().querySelector('[data-id=\"e4\"]')"
+    html = lambda: page.evaluate(f"{sub}.querySelector('p').innerHTML")  # noqa: E731
+
+    # "Comitê de Investimentos" -> slide 3, through the window's slide list.
+    page.mouse.dblclick(*slide_to_screen(page, 600, 395))
+    wait_until(page, "App.text.isEditing()")
+    check(page.evaluate(SELECT_TEXT_JS, ["e4", "Comitê de Investimentos"]), "selected")
+    page.keyboard.press("Control+k")
+    wait_until(page, "!!document.querySelector('dialog[open] #link-address')")
+    check(page.text_content("dialog[open] .dialog-title") == "Insert Link" and not page.is_visible("#link-display"),
+          "Insert Link; no Text to display (the selection is the text)")
+    page.check("#link-kind-slide")
+    page.select_option("#link-slide", "s3")
+    page.screenshot(path=str(OUTPUT / "147-insert-link.png"))
+    editor.click_dialog_button("OK")
+    check('<a href="#slide-s3">Comitê de Investimentos</a>' in html() and page.evaluate("App.history.undoLabel()") == "Link", html())
+    check(page.evaluate("App.text.isEditing()"), "still typing")
+
+    # Ctrl+click on it while typing: slide 3.
+    x, y = page.evaluate(LINK_BOX_JS, ["e4", "#slide-s3"])
+    ctrl_click(page, *slide_to_screen(page, x, y))
+    wait_until(page, "App.deck.getCurrentIndex() === 2")
+
+    # "Alfa Alimentos" -> www.example.com (typed); Enter is OK.
+    page.evaluate("App.deck.goTo(0)")
+    page.mouse.dblclick(*slide_to_screen(page, 600, 395))
+    wait_until(page, "App.text.isEditing()")
+    page.evaluate(SELECT_TEXT_JS, ["e4", "Alfa Alimentos"])
+    page.keyboard.press("Control+k")
+    page.fill("#link-address", "www.example.com")
+    page.press("#link-address", "Enter")
+    check('<a href="https://www.example.com">Alfa Alimentos</a>' in html(), html())
+
+    # Not an address: nothing is linked, the status bar says so.
+    page.evaluate(SELECT_TEXT_JS, ["e4", "Outubro"])
+    page.keyboard.press("Control+k")
+    page.fill("#link-address", "nada aqui")
+    page.press("#link-address", "Enter")
+    check("Outubro</a>" not in html() and "Not a web address" in page.text_content("#status-message"), html())
+
+    # Not typing: Ctrl+click on the web link opens it outside; the selection does not change.
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+    x, y = page.evaluate(LINK_BOX_JS, ["e4", "https://www.example.com"])
+    ctrl_click(page, *slide_to_screen(page, x, y))
+    check(page.evaluate("window.__opened") == ["https://www.example.com"], page.evaluate("window.__opened"))
+    check(page.evaluate("App.selection.selectedIds()") == [], "nothing selected by that click")
+
+    # On the link, Ctrl+K edits it: Remove Link; Ctrl+Z brings it back.
+    page.mouse.dblclick(*slide_to_screen(page, 600, 395))
+    wait_until(page, "App.text.isEditing()")
+    page.evaluate(SELECT_TEXT_JS, ["e4", "Alimentos"])
+    page.evaluate("""() => { const s = App.deck.getDocument().getSelection(); s.collapseToStart(); }""")
+    page.keyboard.press("Control+k")
+    check(page.text_content("dialog[open] .dialog-title") == "Edit Link" and page.input_value("#link-address") == "https://www.example.com",
+          "the window shows where it goes")
+    editor.click_dialog_button("Remove Link")
+    check("example.com" not in html() and page.evaluate("App.history.undoLabel()") == "Remove link", html())
+    page.keyboard.press("Control+z")
+    check('<a href="https://www.example.com">Alfa Alimentos</a>' in html(), "undone")
+    page.keyboard.press("Escape")
+    page.keyboard.press("Escape")
+
+    # The slide show: a click on the slide link goes to slide 3.
+    page.keyboard.press("F5")
+    wait_until(page, "App.present.isActive() && !!document.querySelector('.slideshow-frame').contentDocument.querySelector('a[href=\"#slide-s3\"]')")
+    link = page.frame_locator(".slideshow-frame").locator("a[href='#slide-s3']")
+    link.click()
+    wait_until(page, "App.present.state().index === 2")
+    page.keyboard.press("Escape")
+    wait_until(page, "!App.present.isActive()")
+
+    # The saved deck on its own: the slide link shows slide 3; the web link opens in a new window.
+    saved = editor.save_as_download("contract-deck-links.html")
+    raw = browser.new_page()
+    raw.goto(saved.as_uri())
+    check(raw.get_attribute("a[href='https://www.example.com']", "target") == "_blank", "web: a new window")
+    raw.click("a[href='#slide-s3']")
+    check(raw.evaluate("document.querySelector('.deck-player-current').getAttribute('data-slide-id')") == "s3", "the player went to s3")
+    raw.close()
+
+    # The PDF's print copy names each slide so the link finds its page.
+    check('id="slide-s3"' in page.evaluate("App.pdf.printDocument(App.deck.getDocument(), [0, 1, 2], 'x', '')"), "PDF ids")
+
+    # PowerPoint: a link to a web page and one to slide 3.
+    path, report = export_pptx(editor, "contract-deck-links.pptx")
+    parts = pptx_parts(path)
+    slide1 = parts["ppt/slides/slide1.xml"]
+    rels = parts["ppt/slides/_rels/slide1.xml.rels"]
+    check(slide1.count("<a:hlinkClick") == 2, f"two links: {slide1.count('<a:hlinkClick')}")
+    check('Target="https://www.example.com"' in rels and 'Target="slide3.xml"' in rels, rels)
+    check(editor.errors == [], f"no errors: {editor.errors}")
+    editor.close()
+
+
 TESTS = [
     test_editor_starts_offline_with_csp,
     test_browser_banner_only_outside_chromium,
@@ -7865,6 +7988,7 @@ TESTS = [
     test_eyedropper,
     test_more_shapes_and_arrowheads,
     test_selection_pane,
+    test_hyperlinks,
 ]
 
 

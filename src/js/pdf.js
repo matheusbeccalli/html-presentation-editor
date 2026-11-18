@@ -79,6 +79,8 @@
                 slide.remove();
             } else {
                 slide.removeAttribute('data-hidden');
+                // A slide link (#slide-<id>, Phase 10) finds its page in the PDF by this id.
+                slide.setAttribute('id', 'slide-' + slide.getAttribute('data-slide-id'));
             }
         });
         const head = root.querySelector('head');

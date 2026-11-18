@@ -70,6 +70,26 @@
         event.preventDefault();
     });
 
+    // Links (Deck Editor Phase 10): #slide-<id> shows that slide; a web page or e-mail opens in a new window.
+    Array.prototype.forEach.call(document.querySelectorAll('a[href^="http"], a[href^="mailto:"]'), function (link) {
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener');
+    });
+    document.addEventListener('click', function (event) {
+        var link = event.target && event.target.closest && event.target.closest('a[href^="#slide-"]');
+        if (!link) {
+            return;
+        }
+        event.preventDefault();
+        var id = link.getAttribute('href').slice(7);
+        for (var i = 0; i < slides.length; i++) {
+            if (slides[i].getAttribute('data-slide-id') === id) {
+                show(i);
+                return;
+            }
+        }
+    });
+
     window.addEventListener('resize', fit);
     fit();
     show(0);

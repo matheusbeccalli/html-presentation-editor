@@ -945,6 +945,15 @@ iframe.pdf-print-frame {
 .about-license summary { cursor: pointer; font-size: 12px; margin-top: 4px; }
 .about-license pre { max-height: 220px; overflow: auto; font-size: 11px; white-space: pre-wrap; background: var(--surface-alt); padding: 8px; }
 
+/* Insert / Edit Link (links.js, Phase 10). */
+.dialog-link .link-form { display: flex; flex-direction: column; gap: 6px; min-width: 380px; }
+.dialog-link .link-row { display: flex; flex-direction: column; gap: 3px; margin-left: 22px; }
+.dialog-link .link-row:first-child { margin-left: 0; }
+.dialog-link .link-choice { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.dialog-link input[type="text"], .dialog-link select { padding: 4px 6px; font: inherit; border: 1px solid var(--border); border-radius: 3px; }
+.dialog-link input:disabled, .dialog-link select:disabled { opacity: 0.55; }
+.dialog-link .panel-hint { margin: 6px 0 0; font-size: 12px; }
+
 </style>
 </head>
 <body>
@@ -1222,6 +1231,26 @@ iframe.pdf-print-frame {
             return;
         }
         event.preventDefault();
+    });
+
+    // Links (Deck Editor Phase 10): #slide-<id> shows that slide; a web page or e-mail opens in a new window.
+    Array.prototype.forEach.call(document.querySelectorAll('a[href^="http"], a[href^="mailto:"]'), function (link) {
+        link.setAttribute('target', '_blank');
+        link.setAttribute('rel', 'noopener');
+    });
+    document.addEventListener('click', function (event) {
+        var link = event.target && event.target.closest && event.target.closest('a[href^="#slide-"]');
+        if (!link) {
+            return;
+        }
+        event.preventDefault();
+        var id = link.getAttribute('href').slice(7);
+        for (var i = 0; i < slides.length; i++) {
+            if (slides[i].getAttribute('data-slide-id') === id) {
+                show(i);
+                return;
+            }
+        }
     });
 
     window.addEventListener('resize', fit);
@@ -1533,6 +1562,7 @@ App.start = function start() {
     App.notes.init();           // the speaker notes under the slide
     App.commentsPane.init();    // the review comments pane on the right (Phase 9)
     App.selectionPane.init();   // the Selection Pane on the right (Phase 10)
+    App.links.init();           // Ctrl+click follows a link while typing (Phase 10)
     App.contextMenu.init();
     App.thumbnails.init();
     App.deck.init();
@@ -1984,6 +2014,8 @@ App.createEventBus = function createEventBus() {
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
         ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],
         ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
+        // Insert / edit a link, as in PowerPoint (in the browser: the address bar's search).
+        ['Ctrl+K', 'insertLink', { whileTyping: true, blockBrowserDefault: true }],
         // Change case, as in PowerPoint and Word: lowercase -> UPPERCASE -> Capitalize Each Word (Phase 10).
         ['Shift+F3', 'cycleCase', { whileTyping: true, blockBrowserDefault: true }],
         // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).
@@ -3854,7 +3886,8 @@ App.template.newDeckHtml = function newDeckHtml() {
 
     const THEME_FONT_RE = /^var\(--font-(heading|body)\)$/;
     const THEME_COLOR_RE = /^var\(--color-[a-z0-9-]+\)$/;
-    const SAFE_LINK_RE = /^\s*(https?:|mailto:)/i;
+    // Links kept in text: web and e-mail addresses, and (Phase 10) another slide of the deck, #slide-<its id>.
+    const SAFE_LINK_RE = /^\s*(https?:|mailto:|#slide-[A-Za-z0-9_-]+\s*$)/i;
     const ALIGNMENTS = ['left', 'center', 'right', 'justify'];
     const CSS_KEYWORDS = ['inherit', 'initial', 'unset', 'revert', 'revert-layer', 'currentcolor'];
 
@@ -4673,7 +4706,9 @@ App.template.newDeckHtml = function newDeckHtml() {
                 if (!text) {
                     return;
                 }
-                runs.push({ text: text, breakBefore: breakNext, look: exportLook(item.parentElement, container, view) });
+                const link = item.parentElement.closest('a[href]');   // Phase 10: the link it is in, for PowerPoint
+                runs.push({ text: text, breakBefore: breakNext, look: exportLook(item.parentElement, container, view),
+                    href: link && container.contains(link) ? link.getAttribute('href') : null });
                 breakNext = false;
             });
             if (runs.length > 0) {
@@ -6279,6 +6314,179 @@ App.template.newDeckHtml = function newDeckHtml() {
         } else {
             runOnBox(target.element, action);
         }
+    };
+
+    // ---------------------------------------------------------------
+    // Hyperlinks (Phase 10, Ctrl+K)
+    // ---------------------------------------------------------------
+    //
+    // A link is an <a href> around some text: a web address (http / https), an
+    // e-mail (mailto:) or another slide of this deck (#slide-<its data-slide-id>,
+    // deck-format 5: the id stays right when slides are moved). The runs (see
+    // readRuns) carry it as run.href, so a link is set or taken off like bold.
+
+    const SLIDE_LINK_PREFIX = '#slide-';
+    const SLIDE_LINK_RE = /^#slide-[A-Za-z0-9_-]+$/;
+
+    /* 'web', 'email', 'slide' or null (not a link the editor keeps). */
+    App.text.linkKind = function linkKind(href) {
+        const value = String(href || '').trim();
+        if (/^https?:\/\/\S+$/i.test(value)) {
+            return 'web';
+        }
+        if (/^mailto:[^\s@]+@[^\s@]+$/i.test(value)) {
+            return 'email';
+        }
+        return SLIDE_LINK_RE.test(value) ? 'slide' : null;
+    };
+
+    App.text.slideLink = function slideLink(slideId) {
+        return SLIDE_LINK_PREFIX + slideId;
+    };
+
+    App.text.slideIdOf = function slideIdOf(href) {
+        return SLIDE_LINK_RE.test(href || '') ? href.slice(SLIDE_LINK_PREFIX.length) : null;
+    };
+
+    /* What was typed in the Address box as a link: www.x.com -> https://www.x.com, a@b.com -> mailto:a@b.com; else null. */
+    App.text.linkAddress = function linkAddress(typed) {
+        const value = String(typed || '').trim();
+        if (!value) {
+            return null;
+        }
+        if (/^(https?:|mailto:)/i.test(value)) {
+            return App.text.linkKind(value) ? value : null;
+        }
+        if (/^[^\s@:/]+@[^\s@:/]+\.[^\s@:/]+$/.test(value)) {
+            return 'mailto:' + value;
+        }
+        if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?([/?#]\S*)?$/i.test(value)) {
+            return 'https://' + value;
+        }
+        return null;
+    };
+
+    /* The link around position o of a line's runs: { start, end, href }, or null. */
+    function linkExtent(runs, o) {
+        let position = 0;
+        const spans = runs.map((run) => {
+            const from = position;
+            position += run.br ? 1 : run.text.length;
+            return { from: from, to: position, href: run.br ? null : run.href };
+        });
+        const at = spans.findIndex((span) => span.href && span.from <= o && o <= span.to && span.to > span.from &&
+            (o < span.to || o > span.from));
+        if (at === -1) {
+            return null;
+        }
+        const href = spans[at].href;
+        let first = at;
+        let last = at;
+        while (first > 0 && spans[first - 1].href === href) {
+            first--;
+        }
+        while (last < spans.length - 1 && spans[last + 1].href === href) {
+            last++;
+        }
+        return { start: spans[first].from, end: spans[last].to, href: href };
+    }
+
+    /* The link at the cursor (or the start of the selection; all of a selected box when it is one link): { href, text }. */
+    App.text.linkAt = function linkAt(element, caret) {
+        const lines = textLines(element);
+        if (!caret) {
+            const runs = [].concat(...lines.map(readRuns)).filter((run) => !run.br && run.text);
+            return runs.length && runs.every((run) => run.href && run.href === runs[0].href)
+                ? { href: runs[0].href, text: runs.map((run) => run.text).join('') } : null;
+        }
+        const from = [caret.anchor, caret.focus].sort(comparePositions)[0];
+        const line = lines[from.p];
+        const extent = line ? linkExtent(readRuns(line), from.o) : null;
+        return extent ? { href: extent.href, text: caretText(line).slice(extent.start, extent.end) } : null;
+    };
+
+    /*
+     * The action for Ctrl+K (href) or Remove Link (href null): on the link at the
+     * cursor (all of it), the selection, the word at the cursor, or every line of
+     * a selected box (caret null). With the cursor between words, `display` (the
+     * Text to display) is put in there, linked. null when there is nothing to do.
+     */
+    App.text.linkAction = function linkAction(element, caret, href, display) {
+        const lines = textLines(element);
+        const collapsed = caret && comparePositions(caret.anchor, caret.focus) === 0;
+        let segments = null;
+        if (collapsed && lines[caret.focus.p]) {
+            const extent = linkExtent(readRuns(lines[caret.focus.p]), caret.focus.o);
+            segments = extent ? [{ index: caret.focus.p, start: extent.start, end: extent.end }] : null;
+        }
+        segments = segments || formatSegments(element, caret);
+        const chosenText = (segments || []).map((segment) => caretText(lines[segment.index]).slice(segment.start, segment.end)).join('');
+        const label = href ? 'Link' : 'Remove link';
+        if (!chosenText.trim()) {
+            if (!href || !collapsed || !display || !lines[caret.focus.p]) {
+                return null;
+            }
+            return { label: label, run: () => insertLinked(lines[caret.focus.p], caret.focus, display, href) };
+        }
+        return {
+            label: label,
+            run: () => {
+                segments.forEach((segment) => {
+                    const sliced = sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end);
+                    sliced.selected.forEach((run) => {
+                        run.href = href || null;
+                    });
+                    writeRuns(lines[segment.index], sliced.runs);
+                });
+                return caret;
+            },
+        };
+    };
+
+    /* `text` put in at `at`, linked to `href`, in the look of the text before it; the cursor after it. */
+    function insertLinked(line, at, text, href) {
+        const sliced = sliceRuns(readRuns(line), at.o, at.o);
+        let position = 0;
+        let insertAt = sliced.runs.length;
+        for (let i = 0; i < sliced.runs.length; i++) {
+            if (position >= at.o) {
+                insertAt = i;
+                break;
+            }
+            position += sliced.runs[i].br ? 1 : sliced.runs[i].text.length;
+        }
+        const before = sliced.runs.slice(0, insertAt).reverse().find((run) => !run.br) || sliced.runs.find((run) => !run.br);
+        const run = before ? copyRun(before, text) : { text: text, formats: new Set(), styles: {}, href: null, shown: null };
+        run.href = href;
+        sliced.runs.splice(insertAt, 0, run);
+        writeRuns(line, sliced.runs);
+        const after = { p: at.p, o: at.o + text.length };
+        return { anchor: after, focus: after };
+    }
+
+    /* What Ctrl+K acts on, read before its window takes the focus: { element, caret } (caret null: a whole box); or null. */
+    App.text.linkTarget = function linkTarget() {
+        const target = listTarget();
+        return target ? { element: target.element, caret: editing ? target.caret : null } : null;
+    };
+
+    /* Ctrl+K's OK (href) or Remove Link (null) on `target`, as one undo step; false when there was nothing to link. */
+    App.text.applyLink = function applyLink(target, href, display) {
+        const action = App.text.linkAction(target.element, target.caret, href, display);
+        if (!action) {
+            return false;
+        }
+        pending = null;
+        if (editing && editing.element === target.element) {
+            if (target.caret) {
+                App.text.setCaret(target.element, target.caret);
+            }
+            runInEditor(action);
+            App.text.refocus();
+        } else {
+            runOnBox(target.element, action);
+        }
+        return true;
     };
 
     // ---------------------------------------------------------------
@@ -12151,6 +12359,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         selectionPane: '<rect x="2.5" y="3.5" width="9" height="7"/><rect x="8.5" y="9.5" width="9" height="7"/>',
         eyeOpen: '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><circle cx="10" cy="10" r="2.2"/>',
         eyeClosed: '<path d="M2 10s3-5 8-5 8 5 8 5-3 5-8 5-8-5-8-5z"/><path d="M3.5 16.5l13-13"/>',
+        link: '<path d="M8.5 11.5l3-3M7 9l-2 2a2.8 2.8 0 0 0 4 4l2-2M13 11l2-2a2.8 2.8 0 0 0-4-4L9 7"/>',
         eyedropper: '<path d="M13.5 3.5l3 3-2 2-3-3z"/><path d="M12.5 7.5l-7 7-1 3 3-1 7-7"/>',
         changeCase: '<path d="M2.5 15.5l4-11 4 11M4 11.5h5"/><path d="M16.5 10v5.5M16.5 12.25a2.75 2.75 0 1 0 0 1.5"/>',
         alignTextMiddle: '<rect x="3.5" y="3.5" width="13" height="13"/><path d="M6.5 8.5h7M6.5 11.5h7"/>',
@@ -12254,14 +12463,15 @@ App.template.newDeckHtml = function newDeckHtml() {
     const el = (...args) => App.util.el(...args);
 
     /*
-     * Show a dialog. options = { title, body (Node or text), buttons, wide, side, className (one more class) }
+     * Show a dialog. options = { title, body (Node or text), buttons, wide, side, className (one more class),
+     * keepEdit (pressing in it does not end typing in the text box: Insert Link, Phase 10) }
      * side: beside the slide, without darkening it (a live preview, theme.js).
      * buttons = [{ label, value, primary, danger }]. Esc resolves with null.
      */
     App.dialogs.show = function show(options) {
         return new Promise((resolve) => {
             const dialog = el('dialog', { class: 'dialog' + (options.wide ? ' dialog-wide' : '') + (options.side ? ' dialog-side' : '') +
-                (options.className ? ' ' + options.className : '') });
+                (options.className ? ' ' + options.className : ''), 'data-keep-edit': options.keepEdit ? '' : null });
             const body = options.body instanceof Node ? options.body : el('p', {}, [options.body || '']);
             const buttonRow = el('div', { class: 'dialog-buttons' });
 
@@ -15356,6 +15566,10 @@ App.template.newDeckHtml = function newDeckHtml() {
                 return;
             }
             App.text.stopPainter();
+        }
+        // Ctrl + click on a link follows it, as in PowerPoint (Phase 10).
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.button === 0 && App.links.followAt(point.x, point.y)) {
+            return;
         }
         // Shift / Ctrl + click: add the element or take it out (on empty slide: a rubber band that adds).
         if ((event.shiftKey || event.ctrlKey || event.metaKey) && event.button === 0) {
@@ -19606,6 +19820,10 @@ App.template.newDeckHtml = function newDeckHtml() {
         App.commands.define('commentsPane', {
             label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
+        });
+        // Hyperlinks (Phase 10).
+        App.commands.define('insertLink', {
+            label: 'Link', keepsEdit: true, isEnabled: () => App.links.canLink(), run: () => App.links.openDialog(),
         });
         // The Selection Pane and Tab through the slide (Phase 10).
         App.commands.define('selectionPane', {
@@ -24650,6 +24868,168 @@ App.template.newDeckHtml = function newDeckHtml() {
 
 </script>
 <script>
+// ---- js/links.js ----
+/*
+ * links.js - hyperlinks on text (Phase 10, Ctrl+K), the window and following them.
+ *
+ * Insert > Link or Ctrl+K opens a window: Text to display (only when there is
+ * no text to link at the cursor), and where the link goes: a web page or
+ * e-mail (the Address box: www.x.com and a@b.com are understood) or a slide of
+ * this deck (a list of the slides by number and title). On a link it shows
+ * where it goes and offers Remove Link. The text model is text.js's
+ * (linkAction, an <a href> in the text; #slide-<id> for a slide).
+ *
+ * Following a link: Ctrl+click on it in the editor (while typing too) goes to
+ * the slide, or opens the page or e-mail in a new window; in the slide show a
+ * plain click does (present.js), and in the saved deck (player.js).
+ *
+ * Talks to: text.js, dialogs.js, deck.js, slides.js (titleOf), commands.js.
+ */
+
+(function () {
+    'use strict';
+
+    App.links = {};
+
+    const el = (tag, attrs, children) => App.util.el(tag, attrs, children);
+
+    /* The slide list of the window: "3. Comparáveis de mercado" (hidden slides say so). */
+    function slideOptions(currentId) {
+        return App.deck.getSlides().map((slide, index) => {
+            const title = App.slides.titleOf(slide);
+            const text = title ? title.textContent.replace(/\s+/g, ' ').trim() : '';
+            const id = slide.getAttribute('data-slide-id');
+            return el('option', { value: id, selected: id === currentId }, [
+                (index + 1) + '. ' + (text ? text.slice(0, 50) : 'Slide ' + (index + 1)) + (App.slides.isHidden(slide) ? ' (hidden)' : '')]);
+        });
+    }
+
+    /* Follow `href`: a slide of this deck is shown; a web page or e-mail opens outside the editor. */
+    App.links.follow = function follow(href) {
+        const kind = App.text.linkKind(href);
+        if (kind === 'slide') {
+            const index = App.deck.getSlides().findIndex((slide) => slide.getAttribute('data-slide-id') === App.text.slideIdOf(href));
+            if (index === -1) {
+                App.ui.setStatus('That slide is no longer in the deck');
+                return false;
+            }
+            App.deck.goTo(index);
+            return true;
+        }
+        if (kind === 'web' || kind === 'email') {
+            window.open(href, '_blank', 'noopener');
+            return true;
+        }
+        return false;
+    };
+
+    /* Ctrl+click on the slide (not typing): a link under slide point (x, y) is followed; true if there was one. */
+    App.links.followAt = function followAt(x, y) {
+        const doc = App.deck.getDocument();
+        const node = doc && doc.elementFromPoint(x, y);
+        const link = node && node.closest && node.closest('.el a[href]');
+        return !!link && App.links.follow(link.getAttribute('href'));
+    };
+
+    /* Insert > Link, Ctrl+K: the window, then the change as one undo step. */
+    App.links.openDialog = async function openDialog() {
+        const target = App.text.linkTarget();
+        if (!target) {
+            return;
+        }
+        const existing = App.text.linkAt(target.element, target.caret);
+        const withText = !!existing || !!App.text.linkAction(target.element, target.caret, 'https://x', null);
+        const kind = existing ? App.text.linkKind(existing.href) : 'web';
+        const display = el('input', { id: 'link-display', type: 'text', autocomplete: 'off', spellcheck: 'false' });
+        const address = el('input', { id: 'link-address', type: 'text', autocomplete: 'off', spellcheck: 'false',
+            placeholder: 'www.example.com or name@example.com',
+            value: existing && kind !== 'slide' ? existing.href.replace(/^mailto:/i, '') : '' });
+        const slides = el('select', { id: 'link-slide' }, slideOptions(existing && kind === 'slide' ? App.text.slideIdOf(existing.href) : null));
+        const webChoice = el('input', { type: 'radio', name: 'link-kind', id: 'link-kind-web', value: 'web', checked: kind !== 'slide' });
+        const slideChoice = el('input', { type: 'radio', name: 'link-kind', id: 'link-kind-slide', value: 'slide', checked: kind === 'slide' });
+        const sync = () => {
+            address.disabled = !webChoice.checked;
+            slides.disabled = !slideChoice.checked;
+        };
+        webChoice.addEventListener('change', sync);
+        slideChoice.addEventListener('change', sync);
+        address.addEventListener('focus', () => { webChoice.checked = true; sync(); });
+        slides.addEventListener('focus', () => { slideChoice.checked = true; sync(); });
+        sync();
+        const body = el('div', { class: 'link-form' }, [
+            withText ? null : el('label', { class: 'link-row' }, [el('span', {}, ['Text to display']), display]),
+            el('label', { class: 'link-choice' }, [webChoice, ' Web page or e-mail']),
+            el('div', { class: 'link-row' }, [address]),
+            el('label', { class: 'link-choice' }, [slideChoice, ' A slide in this deck']),
+            el('div', { class: 'link-row' }, [slides]),
+            el('p', { class: 'panel-hint' }, ['Ctrl+click a link to follow it here; in the slide show and the saved deck a click does.']),
+        ].filter(Boolean));
+        const buttons = [{ label: 'Cancel', value: null }];
+        if (existing) {
+            buttons.push({ label: 'Remove Link', value: 'remove' });
+        }
+        buttons.push({ label: 'OK', value: 'ok', primary: true });
+        const shown = App.dialogs.show({ title: existing ? 'Edit Link' : 'Insert Link', body: body, buttons: buttons, className: 'dialog-link',
+            keepEdit: true });
+        // Enter in a box presses OK; the first box gets the focus.
+        [display, address].forEach((input) => input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                const ok = input.closest('dialog').querySelector('.btn-primary');
+                if (ok) {
+                    ok.click();
+                }
+            }
+        }));
+        (withText ? (kind === 'slide' ? slides : address) : display).focus();
+        const choice = await shown;
+        if (choice === 'remove') {
+            App.text.applyLink(target, null);
+            return;
+        }
+        if (choice !== 'ok') {
+            App.text.refocus();
+            return;
+        }
+        const href = slideChoice.checked ? App.text.slideLink(slides.value) : App.text.linkAddress(address.value);
+        if (!href) {
+            App.ui.setStatus('Not a web address or e-mail: nothing was linked');
+            App.text.refocus();
+            return;
+        }
+        const shownText = display.value.trim() || (slideChoice.checked
+            ? slides.options[slides.selectedIndex].textContent.replace(/ \(hidden\)$/, '') : address.value.trim());
+        if (!App.text.applyLink(target, href, shownText)) {
+            App.ui.setStatus('Select some text, or type in a box, to add a link');
+        }
+    };
+
+    App.links.canLink = function canLink() {
+        return !!App.text.linkTarget();
+    };
+
+    /* While typing, Ctrl+click on a link follows it (a plain click just places the cursor, as in PowerPoint). */
+    App.links.init = function init() {
+        const wired = new WeakSet();
+        App.events.on('deck-loaded', () => {
+            const doc = App.deck.getDocument();
+            if (!doc || wired.has(doc)) {
+                return;
+            }
+            wired.add(doc);
+            doc.addEventListener('click', (event) => {
+                const link = (event.ctrlKey || event.metaKey) && event.target.closest && event.target.closest('.el a[href]');
+                if (link) {
+                    event.preventDefault();
+                    App.links.follow(link.getAttribute('href'));
+                }
+            }, true);
+        });
+    };
+})();
+
+</script>
+<script>
 // ---- js/help.js ----
 /*
  * help.js - the Help tab: the keyboard shortcut cheat sheet (press ?) and the
@@ -24704,6 +25084,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 editText: 'Type in the selected box', bold: 'Bold', italic: 'Italic', underline: 'Underline',
                 alignLeft: 'Align left', alignCenter: 'Centre', alignRight: 'Align right', alignJustify: 'Justify',
                 growFont: 'Bigger text', shrinkFont: 'Smaller text', cycleCase: 'Change case (lower, UPPER, Each Word)',
+                insertLink: 'Insert or edit a link',
             },
         },
         { title: 'Tables', commands: {} },
@@ -25819,6 +26200,13 @@ App.template.newDeckHtml = function newDeckHtml() {
      */
     App.present.reduce = function reduce(state, input) {
         const next = Object.assign({}, state, { handled: true, exit: false });
+        // A slide link clicked (Phase 10): that slide, if it is there and not hidden.
+        if (input.slide !== undefined) {
+            if (input.slide >= 0 && input.slide < state.hidden.length && !state.hidden[input.slide]) {
+                Object.assign(next, { index: input.slide, end: false, black: false, typed: '' });
+            }
+            return next;
+        }
         const key = input.click ? 'click' : input.key;
 
         if (key === 'Escape') {
@@ -25989,9 +26377,24 @@ App.template.newDeckHtml = function newDeckHtml() {
     }
 
     function onClick(event) {
-        if (event.button === 0) {
-            apply({ click: true }, event);
+        if (event.button !== 0) {
+            return;
         }
+        // A link (Phase 10): a slide link jumps there; a web page or e-mail opens outside the show.
+        const link = event.target && event.target.closest && event.target.closest('a[href]');
+        if (link) {
+            event.preventDefault();
+            const href = link.getAttribute('href');
+            const kind = App.text.linkKind(href);
+            if (kind === 'slide') {
+                const index = App.deck.getSlides().findIndex((slide) => slide.getAttribute('data-slide-id') === App.text.slideIdOf(href));
+                apply({ slide: index }, event);
+            } else if (kind) {
+                window.open(href, '_blank', 'noopener');
+            }
+            return;
+        }
+        apply({ click: true }, event);
     }
 
     // The browser itself ends full screen on Esc (the page never sees that key): end the show too.
@@ -26453,6 +26856,8 @@ App.template.newDeckHtml = function newDeckHtml() {
                 slide.remove();
             } else {
                 slide.removeAttribute('data-hidden');
+                // A slide link (#slide-<id>, Phase 10) finds its page in the PDF by this id.
+                slide.setAttribute('id', 'slide-' + slide.getAttribute('data-slide-id'));
             }
         });
         const head = root.querySelector('head');
@@ -26982,7 +27387,17 @@ App.template.newDeckHtml = function newDeckHtml() {
      * paragraph but the last ends it (breakLine); a <br> is a soft break.
      * schemes: { level: PowerPoint numbering scheme } as the deck sets them.
      */
-    App.pptx.textRuns = function textRuns(paragraphs, schemes) {
+    /* A link as PptxGenJS writes it (Phase 10): { url } for web and e-mail, { slide: n } for a slide of the deck. */
+    function linkOf(href, slideNumbers) {
+        const kind = href ? App.text.linkKind(href) : null;
+        if (kind === 'web' || kind === 'email') {
+            return { url: href };
+        }
+        const number = kind === 'slide' ? slideNumbers[App.text.slideIdOf(href)] : null;
+        return number ? { slide: number } : null;
+    }
+
+    App.pptx.textRuns = function textRuns(paragraphs, schemes, slideNumbers) {
         const runs = [];
         paragraphs.forEach((paragraph, index) => {
             const shared = paragraphOptions(paragraph, schemes || {});
@@ -26992,6 +27407,10 @@ App.template.newDeckHtml = function newDeckHtml() {
                 const options = Object.assign(runOptions(piece.look), shared);
                 if (piece.breakBefore) {
                     options.softBreakBefore = true;
+                }
+                const link = linkOf(piece.href, slideNumbers || {});
+                if (link) {
+                    options.hyperlink = link;
                 }
                 if (i === pieces.length - 1 && index < paragraphs.length - 1) {
                     options.breakLine = true;
@@ -27107,7 +27526,7 @@ App.template.newDeckHtml = function newDeckHtml() {
         if (border) {
             options.line = { color: border.hex, width: App.pptx.points(borderWidth) };
         }
-        return { kind: 'text', runs: App.pptx.textRuns(App.text.exportParagraphs(element), ctx.schemes), options: options };
+        return { kind: 'text', runs: App.pptx.textRuns(App.text.exportParagraphs(element), ctx.schemes, ctx.slideNumbers), options: options };
     }
 
     // A picture: native when PowerPoint reads its format (PNG, JPEG, GIF); else a picture of how it shows.
@@ -27219,7 +27638,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             shape: SHAPES[kind], valign: valign, wrap: true,
             margin: TEXT_MARGIN_ORDER.map((side) => App.pptx.points(parseFloat(areaStyle[side]) || 0)),
         });
-        return { kind: 'text', runs: App.pptx.textRuns(paragraphs, ctx.schemes), options: options };
+        return { kind: 'text', runs: App.pptx.textRuns(paragraphs, ctx.schemes, ctx.slideNumbers), options: options };
     }
 
     // A cell border side as PptxGenJS wants it ({ type, pt, color }); 'none' when nothing shows.
@@ -27268,7 +27687,7 @@ App.template.newDeckHtml = function newDeckHtml() {
             if (rowspan > 1) {
                 options.rowspan = rowspan;
             }
-            return { text: App.pptx.textRuns(App.text.exportParagraphs(cell), ctx.schemes), options: options };
+            return { text: App.pptx.textRuns(App.text.exportParagraphs(cell), ctx.schemes, ctx.slideNumbers), options: options };
         }));
         const options = Object.assign(position(box, 0), {
             rowH: rows.map((row) => App.pptx.inches(row.offsetHeight)),   // as laid out (zoom never changes it)
@@ -27546,9 +27965,9 @@ App.template.newDeckHtml = function newDeckHtml() {
      * Everything PowerPoint needs from slide `slide` (shown at the moment):
      * { hidden, notes, background, withMaster, items: [back to front], report: [texts] }.
      */
-    function readSlide(slide, view, schemes, master) {
+    function readSlide(slide, view, schemes, master, slideNumbers) {
         const style = view.getComputedStyle(slide);
-        const ctx = { view: view, schemes: schemes, report: [], masterNative: !!master, numberAsText: !!(master && master.numberAsText),
+        const ctx = { view: view, schemes: schemes, slideNumbers: slideNumbers, report: [], masterNative: !!master, numberAsText: !!(master && master.numberAsText),
             bodyFont: App.pptx.fontFace(view.getComputedStyle(slide.ownerDocument.documentElement).getPropertyValue('--font-body') || 'Calibri'),
             extra: [] };
         const items = [];
@@ -27638,7 +28057,12 @@ App.template.newDeckHtml = function newDeckHtml() {
         const slides = App.deck.getSlides();
         const schemes = schemesOf(view, doc);
         const master = readMaster(doc, view, slides);
-        const plans = slides.map((slide) => App.deck.withSlideShown(slide, () => readSlide(slide, view, schemes, master)));
+        // Slide links (Phase 10) point at slide numbers in PowerPoint: every slide is exported, hidden ones too.
+        const slideNumbers = {};
+        slides.forEach((slide, index) => {
+            slideNumbers[slide.getAttribute('data-slide-id')] = index + 1;
+        });
+        const plans = slides.map((slide) => App.deck.withSlideShown(slide, () => readSlide(slide, view, schemes, master, slideNumbers)));
 
         const pptx = new PptxGenJS();
         pptx.defineLayout({ name: 'DECK', width: App.pptx.inches(SLIDE_WIDTH), height: App.pptx.inches(SLIDE_HEIGHT) });
@@ -27817,6 +28241,7 @@ App.template.newDeckHtml = function newDeckHtml() {
                 { label: 'Tables', commands: [{ control: 'insertTable' }] },
                 { label: 'Images', commands: [['insertPicture', 'picture']] },
                 { label: 'Illustrations', commands: [{ control: 'insertShape' }, { control: 'insertChart' }] },
+                { label: 'Links', commands: [['insertLink', 'link']] },
                 { label: 'Text', commands: [['insertTextBox', 'textBox'], ['headerFooter', 'headerFooter']] },
             ],
             note: 'Table: move over the grid to pick a size, click to insert. Pictures: from a file, made smaller on the way ' +

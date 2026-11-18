@@ -119,6 +119,8 @@ HAND_CHECKS = [
     {"key": "Selection Pane: open samples/contract-deck.html", "tests": ["test_selection_pane"], "auto": False,
      "left": "the thumbnail and opening the saved file by double-clicking it (the test opens it in a plain page)"},
     {"key": "Tab: click an empty part of a slide", "tests": ["test_selection_pane"], "auto": True},
+    {"key": "Links: open samples/contract-deck.html", "tests": ["test_hyperlinks"], "auto": False,
+     "left": "the test selects words directly, stands in for window.open, and checks the PDF's page ids and the .pptx XML rather than a real PDF reader and PowerPoint"},
     {"key": "Change Case: click the subtitle", "tests": ["test_text_layout_and_change_case"], "auto": False,
      "left": "the test selects \"Atlas\" directly, not with the mouse"},
 ]

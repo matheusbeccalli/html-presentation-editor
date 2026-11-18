@@ -68,6 +68,13 @@
      */
     App.present.reduce = function reduce(state, input) {
         const next = Object.assign({}, state, { handled: true, exit: false });
+        // A slide link clicked (Phase 10): that slide, if it is there and not hidden.
+        if (input.slide !== undefined) {
+            if (input.slide >= 0 && input.slide < state.hidden.length && !state.hidden[input.slide]) {
+                Object.assign(next, { index: input.slide, end: false, black: false, typed: '' });
+            }
+            return next;
+        }
         const key = input.click ? 'click' : input.key;
 
         if (key === 'Escape') {
@@ -238,9 +245,24 @@
     }
 
     function onClick(event) {
-        if (event.button === 0) {
-            apply({ click: true }, event);
+        if (event.button !== 0) {
+            return;
         }
+        // A link (Phase 10): a slide link jumps there; a web page or e-mail opens outside the show.
+        const link = event.target && event.target.closest && event.target.closest('a[href]');
+        if (link) {
+            event.preventDefault();
+            const href = link.getAttribute('href');
+            const kind = App.text.linkKind(href);
+            if (kind === 'slide') {
+                const index = App.deck.getSlides().findIndex((slide) => slide.getAttribute('data-slide-id') === App.text.slideIdOf(href));
+                apply({ slide: index }, event);
+            } else if (kind) {
+                window.open(href, '_blank', 'noopener');
+            }
+            return;
+        }
+        apply({ click: true }, event);
     }
 
     // The browser itself ends full screen on Esc (the page never sees that key): end the show too.

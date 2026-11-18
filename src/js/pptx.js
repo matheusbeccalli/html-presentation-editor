@@ -187,7 +187,17 @@
      * paragraph but the last ends it (breakLine); a <br> is a soft break.
      * schemes: { level: PowerPoint numbering scheme } as the deck sets them.
      */
-    App.pptx.textRuns = function textRuns(paragraphs, schemes) {
+    /* A link as PptxGenJS writes it (Phase 10): { url } for web and e-mail, { slide: n } for a slide of the deck. */
+    function linkOf(href, slideNumbers) {
+        const kind = href ? App.text.linkKind(href) : null;
+        if (kind === 'web' || kind === 'email') {
+            return { url: href };
+        }
+        const number = kind === 'slide' ? slideNumbers[App.text.slideIdOf(href)] : null;
+        return number ? { slide: number } : null;
+    }
+
+    App.pptx.textRuns = function textRuns(paragraphs, schemes, slideNumbers) {
         const runs = [];
         paragraphs.forEach((paragraph, index) => {
             const shared = paragraphOptions(paragraph, schemes || {});
@@ -197,6 +207,10 @@
                 const options = Object.assign(runOptions(piece.look), shared);
                 if (piece.breakBefore) {
                     options.softBreakBefore = true;
+                }
+                const link = linkOf(piece.href, slideNumbers || {});
+                if (link) {
+                    options.hyperlink = link;
                 }
                 if (i === pieces.length - 1 && index < paragraphs.length - 1) {
                     options.breakLine = true;
@@ -312,7 +326,7 @@
         if (border) {
             options.line = { color: border.hex, width: App.pptx.points(borderWidth) };
         }
-        return { kind: 'text', runs: App.pptx.textRuns(App.text.exportParagraphs(element), ctx.schemes), options: options };
+        return { kind: 'text', runs: App.pptx.textRuns(App.text.exportParagraphs(element), ctx.schemes, ctx.slideNumbers), options: options };
     }
 
     // A picture: native when PowerPoint reads its format (PNG, JPEG, GIF); else a picture of how it shows.
@@ -424,7 +438,7 @@
             shape: SHAPES[kind], valign: valign, wrap: true,
             margin: TEXT_MARGIN_ORDER.map((side) => App.pptx.points(parseFloat(areaStyle[side]) || 0)),
         });
-        return { kind: 'text', runs: App.pptx.textRuns(paragraphs, ctx.schemes), options: options };
+        return { kind: 'text', runs: App.pptx.textRuns(paragraphs, ctx.schemes, ctx.slideNumbers), options: options };
     }
 
     // A cell border side as PptxGenJS wants it ({ type, pt, color }); 'none' when nothing shows.
@@ -473,7 +487,7 @@
             if (rowspan > 1) {
                 options.rowspan = rowspan;
             }
-            return { text: App.pptx.textRuns(App.text.exportParagraphs(cell), ctx.schemes), options: options };
+            return { text: App.pptx.textRuns(App.text.exportParagraphs(cell), ctx.schemes, ctx.slideNumbers), options: options };
         }));
         const options = Object.assign(position(box, 0), {
             rowH: rows.map((row) => App.pptx.inches(row.offsetHeight)),   // as laid out (zoom never changes it)
@@ -751,9 +765,9 @@
      * Everything PowerPoint needs from slide `slide` (shown at the moment):
      * { hidden, notes, background, withMaster, items: [back to front], report: [texts] }.
      */
-    function readSlide(slide, view, schemes, master) {
+    function readSlide(slide, view, schemes, master, slideNumbers) {
         const style = view.getComputedStyle(slide);
-        const ctx = { view: view, schemes: schemes, report: [], masterNative: !!master, numberAsText: !!(master && master.numberAsText),
+        const ctx = { view: view, schemes: schemes, slideNumbers: slideNumbers, report: [], masterNative: !!master, numberAsText: !!(master && master.numberAsText),
             bodyFont: App.pptx.fontFace(view.getComputedStyle(slide.ownerDocument.documentElement).getPropertyValue('--font-body') || 'Calibri'),
             extra: [] };
         const items = [];
@@ -843,7 +857,12 @@
         const slides = App.deck.getSlides();
         const schemes = schemesOf(view, doc);
         const master = readMaster(doc, view, slides);
-        const plans = slides.map((slide) => App.deck.withSlideShown(slide, () => readSlide(slide, view, schemes, master)));
+        // Slide links (Phase 10) point at slide numbers in PowerPoint: every slide is exported, hidden ones too.
+        const slideNumbers = {};
+        slides.forEach((slide, index) => {
+            slideNumbers[slide.getAttribute('data-slide-id')] = index + 1;
+        });
+        const plans = slides.map((slide) => App.deck.withSlideShown(slide, () => readSlide(slide, view, schemes, master, slideNumbers)));
 
         const pptx = new PptxGenJS();
         pptx.defineLayout({ name: 'DECK', width: App.pptx.inches(SLIDE_WIDTH), height: App.pptx.inches(SLIDE_HEIGHT) });

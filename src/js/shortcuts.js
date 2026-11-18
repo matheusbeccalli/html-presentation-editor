@@ -253,6 +253,8 @@
         ['Ctrl+[', 'shrinkFont', { whileTyping: true }],
         ['Ctrl+Shift+>', 'growFont', { whileTyping: true }],
         ['Ctrl+Shift+<', 'shrinkFont', { whileTyping: true }],
+        // Insert / edit a link, as in PowerPoint (in the browser: the address bar's search).
+        ['Ctrl+K', 'insertLink', { whileTyping: true, blockBrowserDefault: true }],
         // Change case, as in PowerPoint and Word: lowercase -> UPPERCASE -> Capitalize Each Word (Phase 10).
         ['Shift+F3', 'cycleCase', { whileTyping: true, blockBrowserDefault: true }],
         // New slide, as in PowerPoint (Ctrl+M would otherwise do nothing useful in the browser).

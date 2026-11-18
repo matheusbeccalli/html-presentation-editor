@@ -51,6 +51,7 @@
                 editText: 'Type in the selected box', bold: 'Bold', italic: 'Italic', underline: 'Underline',
                 alignLeft: 'Align left', alignCenter: 'Centre', alignRight: 'Align right', alignJustify: 'Justify',
                 growFont: 'Bigger text', shrinkFont: 'Smaller text', cycleCase: 'Change case (lower, UPPER, Each Word)',
+                insertLink: 'Insert or edit a link',
             },
         },
         { title: 'Tables', commands: {} },

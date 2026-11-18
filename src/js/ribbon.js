@@ -56,6 +56,7 @@
                 { label: 'Tables', commands: [{ control: 'insertTable' }] },
                 { label: 'Images', commands: [['insertPicture', 'picture']] },
                 { label: 'Illustrations', commands: [{ control: 'insertShape' }, { control: 'insertChart' }] },
+                { label: 'Links', commands: [['insertLink', 'link']] },
                 { label: 'Text', commands: [['insertTextBox', 'textBox'], ['headerFooter', 'headerFooter']] },
             ],
             note: 'Table: move over the grid to pick a size, click to insert. Pictures: from a file, made smaller on the way ' +

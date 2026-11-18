@@ -166,7 +166,8 @@
 
     const THEME_FONT_RE = /^var\(--font-(heading|body)\)$/;
     const THEME_COLOR_RE = /^var\(--color-[a-z0-9-]+\)$/;
-    const SAFE_LINK_RE = /^\s*(https?:|mailto:)/i;
+    // Links kept in text: web and e-mail addresses, and (Phase 10) another slide of the deck, #slide-<its id>.
+    const SAFE_LINK_RE = /^\s*(https?:|mailto:|#slide-[A-Za-z0-9_-]+\s*$)/i;
     const ALIGNMENTS = ['left', 'center', 'right', 'justify'];
     const CSS_KEYWORDS = ['inherit', 'initial', 'unset', 'revert', 'revert-layer', 'currentcolor'];
 
@@ -985,7 +986,9 @@
                 if (!text) {
                     return;
                 }
-                runs.push({ text: text, breakBefore: breakNext, look: exportLook(item.parentElement, container, view) });
+                const link = item.parentElement.closest('a[href]');   // Phase 10: the link it is in, for PowerPoint
+                runs.push({ text: text, breakBefore: breakNext, look: exportLook(item.parentElement, container, view),
+                    href: link && container.contains(link) ? link.getAttribute('href') : null });
                 breakNext = false;
             });
             if (runs.length > 0) {
@@ -2591,6 +2594,179 @@
         } else {
             runOnBox(target.element, action);
         }
+    };
+
+    // ---------------------------------------------------------------
+    // Hyperlinks (Phase 10, Ctrl+K)
+    // ---------------------------------------------------------------
+    //
+    // A link is an <a href> around some text: a web address (http / https), an
+    // e-mail (mailto:) or another slide of this deck (#slide-<its data-slide-id>,
+    // deck-format 5: the id stays right when slides are moved). The runs (see
+    // readRuns) carry it as run.href, so a link is set or taken off like bold.
+
+    const SLIDE_LINK_PREFIX = '#slide-';
+    const SLIDE_LINK_RE = /^#slide-[A-Za-z0-9_-]+$/;
+
+    /* 'web', 'email', 'slide' or null (not a link the editor keeps). */
+    App.text.linkKind = function linkKind(href) {
+        const value = String(href || '').trim();
+        if (/^https?:\/\/\S+$/i.test(value)) {
+            return 'web';
+        }
+        if (/^mailto:[^\s@]+@[^\s@]+$/i.test(value)) {
+            return 'email';
+        }
+        return SLIDE_LINK_RE.test(value) ? 'slide' : null;
+    };
+
+    App.text.slideLink = function slideLink(slideId) {
+        return SLIDE_LINK_PREFIX + slideId;
+    };
+
+    App.text.slideIdOf = function slideIdOf(href) {
+        return SLIDE_LINK_RE.test(href || '') ? href.slice(SLIDE_LINK_PREFIX.length) : null;
+    };
+
+    /* What was typed in the Address box as a link: www.x.com -> https://www.x.com, a@b.com -> mailto:a@b.com; else null. */
+    App.text.linkAddress = function linkAddress(typed) {
+        const value = String(typed || '').trim();
+        if (!value) {
+            return null;
+        }
+        if (/^(https?:|mailto:)/i.test(value)) {
+            return App.text.linkKind(value) ? value : null;
+        }
+        if (/^[^\s@:/]+@[^\s@:/]+\.[^\s@:/]+$/.test(value)) {
+            return 'mailto:' + value;
+        }
+        if (/^[a-z0-9-]+(\.[a-z0-9-]+)+(:\d+)?([/?#]\S*)?$/i.test(value)) {
+            return 'https://' + value;
+        }
+        return null;
+    };
+
+    /* The link around position o of a line's runs: { start, end, href }, or null. */
+    function linkExtent(runs, o) {
+        let position = 0;
+        const spans = runs.map((run) => {
+            const from = position;
+            position += run.br ? 1 : run.text.length;
+            return { from: from, to: position, href: run.br ? null : run.href };
+        });
+        const at = spans.findIndex((span) => span.href && span.from <= o && o <= span.to && span.to > span.from &&
+            (o < span.to || o > span.from));
+        if (at === -1) {
+            return null;
+        }
+        const href = spans[at].href;
+        let first = at;
+        let last = at;
+        while (first > 0 && spans[first - 1].href === href) {
+            first--;
+        }
+        while (last < spans.length - 1 && spans[last + 1].href === href) {
+            last++;
+        }
+        return { start: spans[first].from, end: spans[last].to, href: href };
+    }
+
+    /* The link at the cursor (or the start of the selection; all of a selected box when it is one link): { href, text }. */
+    App.text.linkAt = function linkAt(element, caret) {
+        const lines = textLines(element);
+        if (!caret) {
+            const runs = [].concat(...lines.map(readRuns)).filter((run) => !run.br && run.text);
+            return runs.length && runs.every((run) => run.href && run.href === runs[0].href)
+                ? { href: runs[0].href, text: runs.map((run) => run.text).join('') } : null;
+        }
+        const from = [caret.anchor, caret.focus].sort(comparePositions)[0];
+        const line = lines[from.p];
+        const extent = line ? linkExtent(readRuns(line), from.o) : null;
+        return extent ? { href: extent.href, text: caretText(line).slice(extent.start, extent.end) } : null;
+    };
+
+    /*
+     * The action for Ctrl+K (href) or Remove Link (href null): on the link at the
+     * cursor (all of it), the selection, the word at the cursor, or every line of
+     * a selected box (caret null). With the cursor between words, `display` (the
+     * Text to display) is put in there, linked. null when there is nothing to do.
+     */
+    App.text.linkAction = function linkAction(element, caret, href, display) {
+        const lines = textLines(element);
+        const collapsed = caret && comparePositions(caret.anchor, caret.focus) === 0;
+        let segments = null;
+        if (collapsed && lines[caret.focus.p]) {
+            const extent = linkExtent(readRuns(lines[caret.focus.p]), caret.focus.o);
+            segments = extent ? [{ index: caret.focus.p, start: extent.start, end: extent.end }] : null;
+        }
+        segments = segments || formatSegments(element, caret);
+        const chosenText = (segments || []).map((segment) => caretText(lines[segment.index]).slice(segment.start, segment.end)).join('');
+        const label = href ? 'Link' : 'Remove link';
+        if (!chosenText.trim()) {
+            if (!href || !collapsed || !display || !lines[caret.focus.p]) {
+                return null;
+            }
+            return { label: label, run: () => insertLinked(lines[caret.focus.p], caret.focus, display, href) };
+        }
+        return {
+            label: label,
+            run: () => {
+                segments.forEach((segment) => {
+                    const sliced = sliceRuns(readRuns(lines[segment.index]), segment.start, segment.end);
+                    sliced.selected.forEach((run) => {
+                        run.href = href || null;
+                    });
+                    writeRuns(lines[segment.index], sliced.runs);
+                });
+                return caret;
+            },
+        };
+    };
+
+    /* `text` put in at `at`, linked to `href`, in the look of the text before it; the cursor after it. */
+    function insertLinked(line, at, text, href) {
+        const sliced = sliceRuns(readRuns(line), at.o, at.o);
+        let position = 0;
+        let insertAt = sliced.runs.length;
+        for (let i = 0; i < sliced.runs.length; i++) {
+            if (position >= at.o) {
+                insertAt = i;
+                break;
+            }
+            position += sliced.runs[i].br ? 1 : sliced.runs[i].text.length;
+        }
+        const before = sliced.runs.slice(0, insertAt).reverse().find((run) => !run.br) || sliced.runs.find((run) => !run.br);
+        const run = before ? copyRun(before, text) : { text: text, formats: new Set(), styles: {}, href: null, shown: null };
+        run.href = href;
+        sliced.runs.splice(insertAt, 0, run);
+        writeRuns(line, sliced.runs);
+        const after = { p: at.p, o: at.o + text.length };
+        return { anchor: after, focus: after };
+    }
+
+    /* What Ctrl+K acts on, read before its window takes the focus: { element, caret } (caret null: a whole box); or null. */
+    App.text.linkTarget = function linkTarget() {
+        const target = listTarget();
+        return target ? { element: target.element, caret: editing ? target.caret : null } : null;
+    };
+
+    /* Ctrl+K's OK (href) or Remove Link (null) on `target`, as one undo step; false when there was nothing to link. */
+    App.text.applyLink = function applyLink(target, href, display) {
+        const action = App.text.linkAction(target.element, target.caret, href, display);
+        if (!action) {
+            return false;
+        }
+        pending = null;
+        if (editing && editing.element === target.element) {
+            if (target.caret) {
+                App.text.setCaret(target.element, target.caret);
+            }
+            runInEditor(action);
+            App.text.refocus();
+        } else {
+            runOnBox(target.element, action);
+        }
+        return true;
     };
 
     // ---------------------------------------------------------------

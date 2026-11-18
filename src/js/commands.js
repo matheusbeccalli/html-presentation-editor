@@ -153,6 +153,10 @@
             label: 'Comments Pane', run: () => App.commentsPane.toggle(), isEnabled: hasDeck,
             isChecked: () => App.commentsPane.isOpen(),
         });
+        // Hyperlinks (Phase 10).
+        App.commands.define('insertLink', {
+            label: 'Link', keepsEdit: true, isEnabled: () => App.links.canLink(), run: () => App.links.openDialog(),
+        });
         // The Selection Pane and Tab through the slide (Phase 10).
         App.commands.define('selectionPane', {
             label: 'Selection Pane', run: () => App.selectionPane.toggle(), isEnabled: hasDeck,

@@ -19,14 +19,15 @@
     const el = (...args) => App.util.el(...args);
 
     /*
-     * Show a dialog. options = { title, body (Node or text), buttons, wide, side, className (one more class) }
+     * Show a dialog. options = { title, body (Node or text), buttons, wide, side, className (one more class),
+     * keepEdit (pressing in it does not end typing in the text box: Insert Link, Phase 10) }
      * side: beside the slide, without darkening it (a live preview, theme.js).
      * buttons = [{ label, value, primary, danger }]. Esc resolves with null.
      */
     App.dialogs.show = function show(options) {
         return new Promise((resolve) => {
             const dialog = el('dialog', { class: 'dialog' + (options.wide ? ' dialog-wide' : '') + (options.side ? ' dialog-side' : '') +
-                (options.className ? ' ' + options.className : '') });
+                (options.className ? ' ' + options.className : ''), 'data-keep-edit': options.keepEdit ? '' : null });
             const body = options.body instanceof Node ? options.body : el('p', {}, [options.body || '']);
             const buttonRow = el('div', { class: 'dialog-buttons' });
 

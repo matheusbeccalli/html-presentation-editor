@@ -126,3 +126,12 @@
 .about-url, .about-library code { overflow-wrap: anywhere; font-family: Consolas, monospace; font-size: 11px; }
 .about-license summary { cursor: pointer; font-size: 12px; margin-top: 4px; }
 .about-license pre { max-height: 220px; overflow: auto; font-size: 11px; white-space: pre-wrap; background: var(--surface-alt); padding: 8px; }
+
+/* Insert / Edit Link (links.js, Phase 10). */
+.dialog-link .link-form { display: flex; flex-direction: column; gap: 6px; min-width: 380px; }
+.dialog-link .link-row { display: flex; flex-direction: column; gap: 3px; margin-left: 22px; }
+.dialog-link .link-row:first-child { margin-left: 0; }
+.dialog-link .link-choice { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
+.dialog-link input[type="text"], .dialog-link select { padding: 4px 6px; font: inherit; border: 1px solid var(--border); border-radius: 3px; }
+.dialog-link input:disabled, .dialog-link select:disabled { opacity: 0.55; }
+.dialog-link .panel-hint { margin: 6px 0 0; font-size: 12px; }

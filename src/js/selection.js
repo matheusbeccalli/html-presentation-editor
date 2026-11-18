@@ -389,6 +389,10 @@
             }
             App.text.stopPainter();
         }
+        // Ctrl + click on a link follows it, as in PowerPoint (Phase 10).
+        if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.button === 0 && App.links.followAt(point.x, point.y)) {
+            return;
+        }
         // Shift / Ctrl + click: add the element or take it out (on empty slide: a rubber band that adds).
         if ((event.shiftKey || event.ctrlKey || event.metaKey) && event.button === 0) {
             if (element) {

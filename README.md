@@ -19,7 +19,7 @@ This project fills that gap, for people who work on a locked-down company comput
 
 1. Download [`dist/editor.html`](dist/editor.html) (or clone the repository).
 2. Double-click it. It opens in Edge or Chrome.
-3. Choose **New** for a blank deck, or **Open** an `.html` deck. To try it out, open [`samples/contract-deck.html`](samples/contract-deck.html).
+3. Choose **New blank deck**, or **Open a deck…** to pick an `.html` deck. To try it out, open [`samples/contract-deck.html`](samples/contract-deck.html).
 4. Edit as you would in PowerPoint. Ctrl+S saves back into the same file; press `?` for the list of shortcuts.
 
 To have an AI assistant write decks the editor opens cleanly, give it the prompt in Appendix A, at the end of [SPEC.md](SPEC.md). Decks that do not follow that format are converted when opened (see [Deck format](#deck-format)).
@@ -70,7 +70,7 @@ The ribbon layout, the Format pane, bullets and indent levels (Tab / Shift+Tab),
 | Animations and slide transitions | Animations in an imported deck are switched off. |
 | Video and audio | |
 | SmartArt, WordArt, equations, 3D | A process diagram is built from chevrons and other shapes. |
-| Gradient and picture fills | Imported ones are kept, but they cannot be edited and export to PowerPoint as a picture. |
+| Gradient and picture fills | The editor offers solid colours only. A shape imported with a gradient or picture fill exports to PowerPoint as a picture. |
 | Connectors glued to shapes | Lines and elbow lines stay where you put them. |
 | Custom slide layouts, several masters | Four built-in layouts and one slide master per deck. |
 | Other slide sizes | Slides are always 16:9 (1280 × 720 px); other sizes are scaled on import. |

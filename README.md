@@ -17,12 +17,32 @@ This project fills that gap, for people who work on a locked-down company comput
 
 ## Quick start
 
-1. Download [`dist/editor.html`](dist/editor.html) (or clone the repository).
+1. Download `editor.html` from the [latest release](https://github.com/matheusbeccalli/html-presentation-editor/releases/latest) (or clone the repository and use [`dist/editor.html`](dist/editor.html)).
 2. Double-click it. It opens in Edge or Chrome.
 3. Choose **New blank deck**, or **Open a deck…** to pick an `.html` deck. To try it out, open [`samples/contract-deck.html`](samples/contract-deck.html).
 4. Edit as you would in PowerPoint. Ctrl+S saves back into the same file; press `?` for the list of shortcuts.
 
-To have an AI assistant write decks the editor opens cleanly, give it the prompt in Appendix A, at the end of [SPEC.md](SPEC.md). Decks that do not follow that format are converted when opened (see [Deck format](#deck-format)).
+To have an AI assistant write a deck the editor opens cleanly, see [Asking an AI to write a deck](#asking-an-ai-to-write-a-deck).
+
+**Just want a look?** Try the [live demo](https://matheusbeccalli.github.io/html-presentation-editor/dist/editor.html). It is the very same file served from GitHub Pages, and it still uploads nothing: your decks stay in your browser. For confidential work, download the file and run it from your own disk anyway, so you do not depend on a website.
+
+## Browser support
+
+The editor is built and tested for **desktop Microsoft Edge and Google Chrome**. Other Chromium browsers should behave the same.
+
+**Firefox** opens the editor, and editing works, but it is not tested there and some things are missing because Firefox lacks the browser features behind them:
+
+| In Firefox | What happens instead |
+| --- | --- |
+| Save (Ctrl+S) cannot write back into the file you opened | Save and Save As download a new copy to your Downloads folder each time. A banner under the ribbon says so. |
+| AutoSave to the file | Not available (the switch is hidden). |
+| Recent files | Not available, because the browser cannot keep a link to a file. |
+| Eyedropper in the colour menus | Not available. |
+| Everything else | Expected to work, but only Edge and Chrome are checked by the tests, so small differences in text layout or the clipboard are possible. |
+
+Safari has the same limits as Firefox. Phones and tablets are not supported: the editor needs a mouse and a keyboard.
+
+Decks *saved* by the editor are plain HTML and present correctly in any modern browser.
 
 ## Main features
 
@@ -130,6 +150,46 @@ The rules in short:
 
 Decks that do not follow these rules still open. The importer looks for the slides, measures every visible block and rewrites it into this format, then tells you what it converted, removed or blocked. The complete definition is in [SPEC.md, section 3.3](SPEC.md#3-architecture).
 
+## Asking an AI to write a deck
+
+Any assistant that can write HTML (Microsoft Copilot, Claude, ChatGPT, Gemini …) can produce a deck in this format. Paste the instructions below into the chat, followed by what the presentation should say.
+
+```text
+Create the presentation as ONE self-contained HTML file following these rules exactly:
+- Each slide is <section class="slide" data-slide-id="sN"> of exactly 1280x720 px.
+- Every text box, image, table, shape and chart inside a slide is a direct child with class "el",
+  a data-type attribute (text, image, table, shape, chart), a unique data-id,
+  and position:absolute with left, top, width and height in px.
+- Put colors and fonts in CSS variables in :root: --font-heading, --font-body, --color-primary,
+  --color-accent, --color-text, --color-bg. Use only Windows fonts (Calibri, Arial, Segoe UI)
+  with a sans-serif fallback.
+- No external resources: no CDN, no Google Fonts, no remote images, no <script> tags for logic.
+  Use a placeholder box with the text "[image]" where an image should go.
+- Text: every line of text is a <p>. Bullets and numbering are attributes, not lists:
+  <p data-list="bullet" data-level="1">, data-list="number" for numbered lines,
+  data-list="none" for plain text, data-level 1 to 5 for the indent level.
+  Do not use <ul>, <ol>, <li> or <h1>-<h6>; make titles larger and bold with style on the text box.
+- Tables are real <table> elements, with numbers right-aligned.
+- Charts: <figure class="el" data-type="chart"> containing only
+  <script type="application/json" class="chart-data"> with this structure:
+  {"version":1,"type":"column|stacked-column|bar|line|combo|waterfall|donut",
+   "categories":[...],"series":[{"name":"...","values":[...]}],"options":{"title":"..."}}
+  Do not draw the chart; the editor renders it.
+- Speaker notes go in <aside class="notes"> inside each slide.
+```
+
+Then add your own request, for example: *"8 slides for an investment committee about Project Atlas: an executive summary, a comparable-companies table, a revenue and margin chart, next steps. Brand colours: #CC092F and #1F2A44."*
+
+Tips that help:
+
+- **Save the answer as a `.html` file** (copy the code into a text editor, or use the assistant's download button) and open it in the editor.
+- **Give the numbers for charts and tables in the request.** The assistant only writes the chart's data; the editor draws the chart when it opens the deck, and you can edit the data afterwards.
+- **Say which language the deck is in**, and name your colours and fonts if you have a house style.
+- **Do not worry about small mistakes.** If the assistant ignores a rule (uses `<ul>` lists, adds a script, links a web font), the editor converts or removes it on open and lists what it did in the import report.
+- **Attach a deck you already like** (for example [`samples/contract-deck.html`](samples/contract-deck.html)) and ask for "the same structure", if the assistant accepts files.
+
+The same prompt is kept as Appendix A at the end of [SPEC.md](SPEC.md).
+
 ## Privacy
 
 - The editor makes no network requests: no analytics, no fonts or scripts from a CDN, no update check. Its Content-Security-Policy (`default-src 'none'`, `connect-src 'none'`) makes the browser enforce this, and the build fails if a remote reference slips in.
@@ -153,6 +213,12 @@ The source is plain JavaScript, HTML and CSS with no framework and no npm packag
 | [SPEC.md](SPEC.md) | The requirements the editor was built from, phase by phase |
 | [FEATURES.md](FEATURES.md) | The checklist of every feature and its manual test |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | A map of the modules and how a user action flows through them |
+
+### Project status
+
+Every feature in `SPEC.md` is built and covered by the automated tests (about 680 unit tests and 110 end-to-end tests, all passing).
+
+In `FEATURES.md` you will still find nine unticked **"Done when"** boxes, one per phase from Phase 3 on. They are not missing features. Each is the phase's final acceptance test, done by hand by the author in real Microsoft Edge on real work (for example "a comps table copied from Excel becomes an editable, formatted table in under a minute"). An automated version of each one already passes; the box is ticked only after the hands-on check. The other unticked lines (about 30) are single manual checks of the same kind.
 
 The editor was written with [Claude Code](https://claude.com/claude-code), working through `SPEC.md` one phase at a time.
 

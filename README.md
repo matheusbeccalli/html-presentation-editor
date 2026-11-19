@@ -101,6 +101,27 @@ The ribbon layout, the Format pane, bullets and indent levels (Tab / Shift+Tab),
 
 The PowerPoint export is not pixel-perfect. Text, tables, shapes and most charts become native, editable PowerPoint objects; anything PowerPoint cannot express is inserted as a picture, and a report after the export lists those items.
 
+## Similar projects
+
+This is not the only tool of its kind. If it does not fit what you need, one of these may:
+
+| Project | What it is | How this editor differs |
+| --- | --- | --- |
+| [Bento](https://github.com/nyblnet/bento) | A complete presentation editor in a single HTML file, with charts, animations, presenter mode and optional live collaboration. The best known project in this space. | Bento stores a deck in its own format inside the file and has optional network features (update checks, collaboration) with an offline switch. This editor has no network code at all, works on plain HTML decks written by other tools, and exports editable PowerPoint files. |
+| [NextPPT](https://github.com/Trade-Offf/NextPPT) | A browser editor for AI-written HTML decks: click to edit text, drag and resize, export to PDF and PowerPoint. | NextPPT needs Node.js and a local server, and its PowerPoint export is made of pictures. This editor is one file with nothing to install, and its export keeps text, tables and charts editable. |
+| [PPTist](https://github.com/pipipi-pikachu/PPTist) | A mature PowerPoint-like web application with animations and PowerPoint export. | PPTist is a web application with its own deck format. This editor is a single offline file whose decks are ordinary HTML. |
+| [reveal.js](https://revealjs.com/), [Marp](https://marp.app/), [Slidev](https://sli.dev/) | Popular frameworks for writing slides as HTML or Markdown. | They are written as code or Markdown. This editor is for people who want to point, click and drag. |
+
+The descriptions come from each project's own documentation in November 2026 and may be out of date; check the projects themselves.
+
+What this editor concentrates on:
+
+- **Offline by construction.** There is nothing to switch on: the file contains no network code, and its Content-Security-Policy makes the browser refuse any connection.
+- **Other people's HTML.** It opens decks written by an AI assistant or by hand and converts them, instead of expecting its own format.
+- **A real PowerPoint export.** Text, tables, shapes and charts arrive in PowerPoint as editable objects.
+- **Business slides.** Paste from Excel into tables and charts, waterfall charts, number formats, a slide master and theme colours.
+- **Locked-down computers.** One file, no installation, no account, no server.
+
 ## Deck format
 
 A deck is one self-contained HTML file: each slide is a `<section>` of 1280 × 720 px, and each object on it is an absolutely positioned element.

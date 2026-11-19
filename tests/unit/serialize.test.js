@@ -89,3 +89,26 @@ test('serialize: a clean copy for sending leaves out hidden slides (when asked) 
     assertIncludes(App.serialize.toHtml(deck(), PLAYER), 'name="deck-id"');
     assertEqual(doc.querySelectorAll('section.slide').length, 3, 'the deck itself keeps every slide');
 });
+
+test('serialize: a clean copy leaves out elements hidden in the Selection Pane (when asked); hiddenElementCount counts them', () => {
+    const deck = () => parseDoc(
+        '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Deck</title></head><body>' +
+        '<section class="slide" data-slide-id="s1">' +
+        '<div class="el" data-type="text" data-id="e1"><p>Fica</p></div>' +
+        '<div class="el" data-type="text" data-id="e2" data-hidden="true"><p>SEGREDO-A</p></div>' +
+        '<div class="el" data-type="group" data-id="g1">' +
+        '<div class="el" data-type="text" data-id="e3"><p>Fica no grupo</p></div>' +
+        '<div class="el" data-type="text" data-id="e4" data-hidden="true"><p>SEGREDO-B</p></div></div>' +
+        '<div class="el" data-type="group" data-id="g2" data-hidden="true">' +
+        '<div class="el" data-type="text" data-id="e5" data-hidden="true"><p>SEGREDO-C</p></div></div>' +
+        '</section></body></html>');
+    const doc = deck();
+    assertEqual(App.serialize.hiddenElementCount(doc), 3, 'e2, e4 and g2 (e5 goes with its group)');
+    const clean = App.serialize.toHtml(doc, PLAYER, { cleanCopy: true, removeHiddenElements: true });
+    ['SEGREDO-A', 'SEGREDO-B', 'SEGREDO-C'].forEach((word) => assertNotIncludes(clean, word));
+    assertIncludes(clean, 'Fica no grupo');
+    assertNotIncludes(clean, 'data-hidden');
+    assertIncludes(App.serialize.toHtml(deck(), PLAYER, { cleanCopy: true, removeHiddenElements: false }), 'SEGREDO-A');
+    assertIncludes(App.serialize.toHtml(deck(), PLAYER, { removeHiddenElements: true }), 'SEGREDO-A', 'only a clean copy removes them');
+    assertEqual(doc.querySelectorAll('.el[data-hidden="true"]').length, 4, 'the deck itself keeps them');
+});

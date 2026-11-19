@@ -118,6 +118,8 @@ HAND_CHECKS = [
      "left": "dragging the elbow's end handles; PowerPoint's own view (the test reads the .pptx XML)"},
     {"key": "Selection Pane: open samples/contract-deck.html", "tests": ["test_selection_pane"], "auto": False,
      "left": "the thumbnail and opening the saved file by double-clicking it (the test opens it in a plain page)"},
+    {"key": "Hidden elements in a clean copy: open samples/contract-deck.html", "tests": ["test_selection_pane"], "auto": False,
+     "left": "opening the copy in Notepad (the test reads the downloaded file)"},
     {"key": "Tab: click an empty part of a slide", "tests": ["test_selection_pane"], "auto": False,
      "left": "that Tab on a ribbon button moves the focus to the next button (the test checks the selection stays)"},
     {"key": "Links: open samples/contract-deck.html", "tests": ["test_hyperlinks"], "auto": False,

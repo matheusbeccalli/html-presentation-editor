@@ -531,7 +531,9 @@
     /*
      * File > Save a Clean Copy (SPEC 7.5): a copy to send, saved beside the deck under
      * another name. Hidden slides go when "Remove hidden slides" is ticked (ticked by
-     * default, as decided in the Phase 8 Q&A); review comments will go too (Phase 9).
+     * default, as decided in the Phase 8 Q&A), and elements hidden in the Selection Pane
+     * when "Remove hidden elements" is (ticked by default too, Phase 10); review comments
+     * always go (Phase 9).
      * The editor stays on the original: its file, its unsaved changes and its recovery
      * drafts are left as they were.
      */
@@ -542,10 +544,13 @@
         const el = App.util.el;
         const hiddenCount = App.deck.getSlides().filter((slide) => App.slides.isHidden(slide)).length;
         const removeBox = el('input', { type: 'checkbox', id: 'clean-copy-remove-hidden', checked: true });
+        const hiddenElements = App.serialize.hiddenElementCount(App.deck.getDocument());
+        const removeElementsBox = el('input', { type: 'checkbox', id: 'clean-copy-remove-hidden-elements', checked: true });
         const commentCount = App.comments.countIn(App.deck.getDocument());
         const body = el('div', { class: 'clean-copy-dialog' }, [
             el('p', {}, ['A copy to send: saved under another name; the deck you are editing stays as it is.']),
             el('label', {}, [removeBox, ' Remove hidden slides (' + hiddenCount + ')']),
+            el('label', {}, [removeElementsBox, ' Remove hidden elements (' + hiddenElements + ')']),
             el('p', { class: 'clean-copy-note' }, [commentCount
                 ? 'Its ' + App.ui.commentsText(commentCount).replace('comment', 'review comment') + ' ' +
                   (commentCount === 1 ? 'is' : 'are') + ' left out.'
@@ -560,7 +565,7 @@
         }
         App.text.commitTyping();
         const html = App.serialize.toHtml(App.deck.getDocument(), App.fileio.playerSource(),
-            { cleanCopy: true, removeHidden: removeBox.checked });
+            { cleanCopy: true, removeHidden: removeBox.checked, removeHiddenElements: removeElementsBox.checked });
         const suggestedName = App.fileio.cleanCopyName(App.state.fileName);
         if (!window.showSaveFilePicker) {
             download(suggestedName, html);

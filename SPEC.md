@@ -501,7 +501,7 @@ PDF export comes first because it is how IC materials usually circulate; PPTX ex
 
 **7.5 Clean copy for sending**
 
-- "Save a clean copy": Save As with review comments removed, hidden slides optionally removed, and drafts left untouched.
+- "Save a clean copy": Save As with review comments removed, hidden slides and (Phase 10) elements hidden in the Selection Pane optionally removed, and drafts left untouched.
 
 **Done when:** a 10-slide deck with text, a table, an image, a combo chart and a waterfall exports to a PDF that matches the screen, and to a PPTX where text, tables and the combo chart are editable in PowerPoint.
 

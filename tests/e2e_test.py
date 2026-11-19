@@ -7766,6 +7766,27 @@ def test_selection_pane(browser):
     check(reopened.page.evaluate("App.elements.isHidden(App.deck.getDocument().querySelector('[data-id=\"e1\"]'))"), "reopened: hidden")
     reopened.close()
 
+    # Save a Clean Copy: "Remove hidden elements (1)" is ticked by default and the logo is not in the file;
+    # unticked, it stays (hidden).
+    def clean_copy(untick, name):
+        page.evaluate("window.showSaveFilePicker = undefined")
+        page.click(".ribbon-file-button")
+        page.click(".file-menu button[data-command='saveCleanCopy']")
+        wait_until(page, "!!document.querySelector('dialog[open] .clean-copy-dialog')")
+        check("Remove hidden elements (1)" in page.inner_text("dialog[open] .clean-copy-dialog") and
+              page.is_checked("#clean-copy-remove-hidden-elements"), "ticked by default, with the count")
+        if untick:
+            page.uncheck("#clean-copy-remove-hidden-elements")
+        with page.expect_download() as download_info:
+            page.click("dialog[open] button:has-text('Save')")
+        target = OUTPUT / name
+        download_info.value.save_as(target)
+        return target.read_text(encoding="utf-8")
+    clean = clean_copy(False, "contract-deck-selection-clean.html")
+    check('data-id="e1"' not in clean and 'data-id="e2"' in clean, "the clean copy leaves the hidden logo out")
+    kept = re.search(r'<[^>]*data-id="e1"[^>]*>', clean_copy(True, "contract-deck-selection-clean2.html"))
+    check(kept and 'data-hidden="true"' in kept.group(0), "unticked, it stays (hidden)")
+
     # PowerPoint: the logo is left out, and the report says so.
     path, report = export_pptx(editor, "contract-deck-selection.pptx")
     check("<p:pic>" not in pptx_parts(path)["ppt/slides/slide1.xml"], "no picture on slide 1")

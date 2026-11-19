@@ -93,6 +93,11 @@
             if (options.removeHidden) {
                 root.querySelectorAll('section.slide[data-hidden="true"]').forEach((slide) => slide.remove());
             }
+            // Elements hidden with the Selection Pane's eye (Phase 10) are still in the file; a copy to send
+            // drops them when asked, so nobody can show them again from it.
+            if (options.removeHiddenElements) {
+                hiddenElementsIn(root).forEach((element) => element.remove());
+            }
         }
         App.master.sync(root);   // the slide master's copies, numbered as the slides stand now
         // Text is saved in the text model, even if the user is still typing (SPEC: normalize before save).
@@ -102,10 +107,21 @@
         return root;
     };
 
+    /* Elements hidden in the Selection Pane, outermost only (a hidden group's hidden parts go with it). */
+    function hiddenElementsIn(root) {
+        return Array.from(root.querySelectorAll('.el[data-hidden="true"]'))
+            .filter((element) => !element.parentElement.closest('.el[data-hidden="true"]'));
+    }
+
+    /* How many elements of `root` are hidden in the Selection Pane (Save a Clean Copy's tick). */
+    App.serialize.hiddenElementCount = function hiddenElementCount(root) {
+        return hiddenElementsIn(root).length;
+    };
+
     /*
      * The complete file text to save.
      * player = { playerJs, playerCss } - the contents of src/player/*.
-     * options = { cleanCopy, removeHidden } for File > Save a Clean Copy (cleanCopy above).
+     * options = { cleanCopy, removeHidden, removeHiddenElements } for File > Save a Clean Copy (cleanCopy above).
      */
     App.serialize.toHtml = function toHtml(doc, player, options) {
         const root = App.serialize.cleanCopy(doc, options);
